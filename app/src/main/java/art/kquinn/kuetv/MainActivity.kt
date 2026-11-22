@@ -2702,6 +2702,21 @@ private fun MainScreen(
                                     }
                                 }, look = Look.OTHER, below = "Pause and rewind copies, downloaded updates, saved pictures and other short-term files. Recordings and your settings stay")
                             } ?: Note("Working out what KueTV keeps…")
+                            // The TV's apps, biggest first: each opens the TV's own page for it, to clear its cache or uninstall it.
+                            sub("Apps on this TV, biggest first")
+                            val apps by produceState<List<Storage.App>?>(null, Resumes.count) {
+                                value = withContext(Dispatchers.IO) { runCatching { Storage.apps(context.applicationContext) }.getOrDefault(emptyList()) }
+                            }
+                            val appList = apps
+                            if (appList == null) Note("Measuring the apps on this TV…")
+                            else {
+                                if (appList.isNotEmpty() && !appList.first().withData) Note("Sizes are each app's own files; its saved data and cache are shown on its page.")
+                                appList.forEach { a ->
+                                    FocusRow(a.name + " · " + Storage.mb(a.bytes), {
+                                        if (!Storage.openAppPage(context, a.packageName)) kueToast(context, "That app's page wouldn't open.")
+                                    }, look = Look.OTHER, below = if (a.amazon) "Amazon's own: its cache can be cleared, it may not uninstall" else "OK: clear its cache, or uninstall it")
+                                }
+                            }
                             // The free channels' own player apps, by country: add a country's missing ones in one go, or
                             // add or remove one at a time. Looked at again each time KueTV comes back to the front.
                             sub("Channel player apps")

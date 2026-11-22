@@ -170,7 +170,30 @@ object Updates {
         }
         kept.delete()
         if (!target.renameTo(kept)) throw java.io.IOException("the downloaded app couldn't be kept")
+        dropOthers(context, kept)
         return kept
+    }
+
+    /**
+     * Only the newest download is kept: older ones are deleted (seen on Kevin's TV, 22 November 2026: two kept,
+     * 158 MB, on a TV short of storage).
+     */
+    private fun dropOthers(context: Context, keep: File) {
+        folder(context).listFiles()?.filter { it.name != keep.name && it.name.endsWith(".apk") }?.forEach { it.delete() }
+    }
+
+    /**
+     * The installer refused for lack of storage. Trying again at once only loops (seen on Kevin's TV, 22 November
+     * 2026: five refusals in two minutes), so this version isn't offered again until KueTV is next started or
+     * Check for updates is used, and the downloaded copy is deleted to give the room back.
+     */
+    fun noRoom(context: Context) {
+        putOff = handedOver
+        offer = null
+        ready = null
+        tidy(context)
+        Report.note("Updates", "not enough storage for build $handedOver: not offered again until asked; downloaded copy deleted, free now " + Storage.mb(Storage.free(context)))
+        kueToast(context, "Not enough storage on the TV for the update. Free some space in Settings › This TV, then use Settings › About › Check for updates.")
     }
 
     /**
@@ -280,6 +303,10 @@ class UpdateReceiver : android.content.BroadcastReceiver() {
                     .onFailure { Report.note("Updates", "the installer's question wouldn't open: " + it.message) }
             }
             android.content.pm.PackageInstaller.STATUS_SUCCESS -> Report.note("Updates", "the installer put the update on")
+            android.content.pm.PackageInstaller.STATUS_FAILURE_STORAGE -> {
+                Report.note("Updates", "the installer refused, status $status: $message")
+                Updates.noRoom(context)
+            }
             else -> Report.note("Updates", "the installer refused, status $status: $message")
         }
     }

@@ -24,6 +24,8 @@
 
     <!-- The VPN engine asks for these for features KueTV doesn't use: listing every app, and reading files. -->
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:node="remove" />
+    <!-- Only to measure each app's data and cache in Settings › This TV, when the TV has been told to allow it. -->
+    <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
