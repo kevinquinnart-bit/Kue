@@ -509,6 +509,41 @@ object Provider {
         }
     }
 
+    /** What the provider says about the subscription: when it ends, and how many screens it allows and has in use. */
+    class Subscription(val endsMs: Long?, val screens: Int?, val inUse: Int?) {
+        /** "ends 3 Mar 2027 · 2 screens, 1 in use", or "ends in 9 days (3 Mar)" when it is close. */
+        fun words(nowMs: Long): String {
+            val parts = ArrayList<String>()
+            if (endsMs == null) parts += "no end date given"
+            else {
+                val days = ((endsMs - nowMs) / 86_400_000L).toInt()
+                val date = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.UK).format(java.util.Date(endsMs))
+                parts += when {
+                    endsMs < nowMs -> "ended $date"
+                    days <= 14 -> "ends in " + (if (days <= 1) "a day" else "$days days") + " ($date)"
+                    else -> "ends $date"
+                }
+            }
+            if (screens != null && screens > 0) parts += "$screens screen" + (if (screens == 1) "" else "s") + (inUse?.let { ", $it in use" } ?: "")
+            return parts.joinToString(" · ")
+        }
+    }
+
+    /** Asks the provider about the subscription. Null for a playlist link, or when it doesn't say. */
+    fun subscription(account: Account): Subscription? {
+        if (!account.isLogin) return null
+        val text = open(api(account, null)).use { it.body.string() }
+        val info = runCatching { JsonParser.parseString(text).asJsonObject.getAsJsonObject("user_info") }.getOrNull() ?: return null
+        val field: (String) -> String? = { name ->
+            info.get(name)?.takeIf { it.isJsonPrimitive }?.asString?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
+        }
+        return Subscription(
+            field("exp_date")?.toLongOrNull()?.takeIf { it > 0 }?.let { it * 1000 },
+            field("max_connections")?.toIntOrNull(),
+            field("active_cons")?.toIntOrNull(),
+        )
+    }
+
     /** Checks the login; returns how far the provider's clock is ahead of world time, in seconds. */
     private fun checkLogin(account: Account): Int {
         val text = open(api(account, null)).use { it.body.string() }

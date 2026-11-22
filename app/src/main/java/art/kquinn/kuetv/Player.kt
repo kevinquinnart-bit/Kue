@@ -325,6 +325,10 @@ fun PlayerScreen(
     var sounds by remember { mutableStateOf<List<SoundChoice>>(emptyList()) }
     var shape by remember { mutableIntStateOf(PictureShape.saved(context)) }
     var syncMs by remember { mutableIntStateOf(0) }
+    // Volume boost, as last chosen; the picture's details as the stream gives them; a film's speed.
+    var boost by remember { VolumeBoost.load(context); mutableIntStateOf(VolumeBoost.get(context)) }
+    var pictureNow by remember { mutableStateOf("not known yet") }
+    var speed by remember { androidx.compose.runtime.mutableFloatStateOf(1f) }
     // Live: the list of channels over the picture (◀ opens it), and the row the remote is on in it.
     var channelList by remember { mutableStateOf(false) }
     var listPick by remember { mutableIntStateOf(0) }
@@ -427,6 +431,8 @@ fun PlayerScreen(
         upNext = -1
         channelList = false
         if (live && next != index) previous = index
+        // A speed picked for one film or episode doesn't carry on to the next.
+        if (speed != 1f) { speed = 1f; player.setPlaybackSpeed(1f) }
         // A sound picked for the last one doesn't carry over: the next starts on its own first choice.
         player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().clearOverridesOfType(androidx.media3.common.C.TRACK_TYPE_AUDIO).build()
         index = next
@@ -466,11 +472,17 @@ fun PlayerScreen(
     }
 
     // The TV switched to the picture's own frame rate, when that is chosen; back to its usual one after.
+    // The picture's details for Options are kept up to date at the same time.
     DisposableEffect(player) {
         val rate = object : Player.Listener {
             override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                pictureNow = PictureDetails.words(player.videoFormat)
                 val fps = player.videoFormat?.frameRate ?: return
                 if (fps > 0f) FrameRate.match(context, fps)
+            }
+
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                pictureNow = PictureDetails.words(player.videoFormat)
             }
         }
         player.addListener(rate)
@@ -959,7 +971,9 @@ fun PlayerScreen(
         "Sleep timer: " + SleepTimer.words(),
         "Picture: " + if (soundOnly) "off, sound only" else "on",
         "Play with VLC, inside KueTV",
-    )
+        "Picture details: " + pictureNow,
+        "Volume boost: " + VolumeBoost.names[boost],
+    ) + if (live) emptyList() else listOf("Speed: " + PlaySpeed.words(speed))
     val optionHints = listOf(
         if (phone) "Tap for the next sound" else "OK for the next sound",
         if (phone) "Tap for the next shape: Fit, Stretch, Zoom" else "OK for the next shape: Fit, Stretch, Zoom",
@@ -968,7 +982,9 @@ fun PlayerScreen(
         if (phone) "Tap for 15 min, 30 min … 2 hours, then off" else "OK for 15 min, 30 min … 2 hours, then off",
         "Off keeps the sound only, for a commentary or the news",
         "For a stream that won't play here",
-    )
+        "What your provider is sending now",
+        if (phone) "Tap for louder: 125%, 150%, 200%, then off" else "OK for louder: 125%, 150%, 200%, then off",
+    ) + if (live) emptyList() else listOf(if (phone) "Tap for 1.25×, 1.5×, 2×, 0.5×, 0.75×, then normal" else "OK for 1.25×, 1.5×, 2×, 0.5×, 0.75×, then normal")
     val nextSound: () -> Unit = {
         if (sounds.size > 1) {
             val n = sounds[(soundNow.coerceAtLeast(0) + 1) % sounds.size]
@@ -997,6 +1013,15 @@ fun PlayerScreen(
             4 -> SleepTimer.next()
             5 -> soundOnly = !soundOnly
             6 -> if (onVlc != null) { keepPlace(); onVlc(items.toList(), index) } else say("VLC isn't available here.")
+            7 -> pictureNow = PictureDetails.words(player.videoFormat)
+            8 -> {
+                boost = (boost + 1) % VolumeBoost.names.size
+                VolumeBoost.set(context, boost)
+            }
+            9 -> {
+                speed = PlaySpeed.next(speed)
+                player.setPlaybackSpeed(speed)
+            }
         }
     }
     // OK on a row of the list over the picture: a list's row shows that list; a channel's row watches it.
@@ -1620,13 +1645,19 @@ fun PlayerScreen(
                     Modifier
                         .align(if (phone) Alignment.BottomCenter else Alignment.CenterEnd)
                         .padding(if (phone) 16.dp else 36.dp)
-                        .then(if (phone) Modifier.fillMaxWidth() else Modifier.width(480.dp))
+                        .then(if (phone) Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(androidx.compose.foundation.rememberScrollState()) else Modifier.width(480.dp))
                         .background(Color(0xF00E1626), RoundedCornerShape(14.dp))
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text("Options", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp, bottom = 4.dp))
-                    optionRows.forEachIndexed { i, words ->
+                    // On a TV, seven rows at a time, moving with the remote; on a phone, all of them, scrolling.
+                    val window = 7
+                    val first = if (phone) 0 else (optionRow - window / 2).coerceIn(0, (optionRows.size - window).coerceAtLeast(0))
+                    val shownRows = if (phone) optionRows.indices else first until minOf(optionRows.size, first + window)
+                    if (!phone && first > 0) Text("▲ more", color = Color(0xFFB9C2D3), fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp))
+                    for (i in shownRows) {
+                        val words = optionRows[i]
                         val on = !phone && i == optionRow
                         Column(
                             Modifier
@@ -1647,6 +1678,7 @@ fun PlayerScreen(
                             Text(optionHints[i], color = if (on) Color.Black else Color(0xFFB9C2D3), fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
+                    if (!phone && first + window < optionRows.size) Text("▼ more", color = Color(0xFFB9C2D3), fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp))
                     if (!phone) Text("BACK close", color = Color(0xFFB9C2D3), fontSize = 14.sp, modifier = Modifier.padding(start = 6.dp, top = 2.dp))
                     else PlayerChip("Close") { options = false }
                 }

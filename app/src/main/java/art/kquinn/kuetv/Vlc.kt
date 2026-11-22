@@ -79,7 +79,7 @@ fun VlcScreen(items: List<Playable>, startIndex: Int, live: Boolean, onClose: ()
     // VLC's own parts are loaded here; a device it won't run on says so instead.
     val vlc = remember {
         try {
-            LibVLC(context.applicationContext, arrayListOf("--network-caching=2000", "--http-reconnect"))
+            LibVLC(context.applicationContext, ArrayList(listOf("--network-caching=2000", "--http-reconnect") + Smoothing.vlcOptions(context)))
         } catch (e: Throwable) {
             Report.note("VLC", "couldn't start: " + e.javaClass.simpleName)
             null

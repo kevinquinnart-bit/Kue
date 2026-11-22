@@ -2340,6 +2340,16 @@ private fun MainScreen(
                             FocusRow("Change provider details", onEdit, first(), look = Look.OTHER)
                             FocusRow("Add another provider", extras.addProvider, look = Look.OTHER, below = "The one in use is kept, to switch back to")
                             FocusRow("Reload channels and films", onReload, look = Look.OTHER, below = "Fetches everything afresh from your provider")
+                            if (inUse?.isLogin == true) {
+                                var askAgain by remember { mutableIntStateOf(0) }
+                                val plan by produceState<Provider.Subscription?>(null, inUse, askAgain) {
+                                    value = withContext(Dispatchers.IO) { runCatching { Provider.subscription(inUse) }.getOrNull() }
+                                }
+                                FocusRow(
+                                    "Subscription: " + (plan?.words(System.currentTimeMillis()) ?: "asking your provider…"), { askAgain++ }, look = Look.OTHER,
+                                    below = "What your provider says about this account · OK to ask again",
+                                )
+                            }
                             val dns = remember(Choices.changes) { KueDns.chosen }
                             FocusRow(
                                 "DNS server: " + KueDns.names[dns], { KueDns.set(context, (dns + 1) % KueDns.names.size) }, look = Look.OTHER,
@@ -2421,6 +2431,11 @@ private fun MainScreen(
                             )
                             val night = engineNow >= 0 && Sound.night(context)
                             FocusRow("Night mode: " + if (night) "on" else "off", { Sound.night(context, !night) }, look = Look.OTHER, below = "Loud bangs quieter, speech louder · from the next thing you play")
+                            val boostNow = if (engineNow >= 0) VolumeBoost.get(context) else 0
+                            FocusRow(
+                                "Volume boost: " + VolumeBoost.names[boostNow], { VolumeBoost.set(context, (boostNow + 1) % VolumeBoost.names.size) }, look = Look.OTHER,
+                                below = "Louder than full, for quiet channels · also in Options while watching",
+                            )
                             val quality = if (engineNow >= 0) PictureQuality.get(context) else 0
                             FocusRow(
                                 "Picture quality: " + PictureQuality.names[quality], { PictureQuality.set(context, (quality + 1) % PictureQuality.names.size) }, look = Look.OTHER,
@@ -2430,6 +2445,11 @@ private fun MainScreen(
                             FocusRow(
                                 "Player: " + PlayerEngine.names[engine], { PlayerEngine.set(context, (engine + 1) % PlayerEngine.names.size) }, look = Look.OTHER,
                                 below = "VLC plays some streams the standard one can't, but without pause and rewind, recording or add-ons",
+                            )
+                            val smooth = engineNow >= 0 && Smoothing.always(context)
+                            FocusRow(
+                                "VLC smooths combed lines: " + if (smooth) "always" else "when the channel says so", { Smoothing.always(context, !smooth) }, look = Look.OTHER,
+                                below = "For broadcast channels whose movement shows fine lines · VLC only",
                             )
                             if (!phone) {
                                 val matchRate = engineNow >= 0 && FrameRate.on(context)

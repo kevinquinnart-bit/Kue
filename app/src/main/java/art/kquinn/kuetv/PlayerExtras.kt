@@ -57,11 +57,11 @@ object SoundSync {
 class SyncedRenderers(context: Context) : DefaultRenderersFactory(context) {
     override fun buildAudioSink(context: Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): AudioSink? {
         // Stereo only, or night mode (which needs the sound here to work on): Dolby and DTS are decoded here, not passed on.
-        val decodeHere = Sound.stereoOnly(context) || Sound.night(context)
+        val decodeHere = Sound.stereoOnly(context) || Sound.night(context) || VolumeBoost.get(context) > 0
         val sink = DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-            .setAudioProcessors(arrayOf(NightProcessor { Sound.night(context) }))
+            .setAudioProcessors(arrayOf(NightProcessor { Sound.night(context) }, BoostProcessor()))
             .apply { if (decodeHere) setAudioCapabilities(androidx.media3.exoplayer.audio.AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES) }
             .build()
         return object : ForwardingAudioSink(sink) {
@@ -185,5 +185,39 @@ object SoundLanguage {
     fun set(context: Context, language: String?) {
         if (language.isNullOrBlank() || language == "und") return
         prefs(context).edit().putString("soundLang", language).apply()
+    }
+}
+
+/** What the picture being played is: its size, frames a second and how much data it takes, as far as the stream says. */
+object PictureDetails {
+    fun words(f: androidx.media3.common.Format?): String {
+        if (f == null || f.width <= 0 || f.height <= 0) return "not known yet"
+        val kind = when {
+            f.height >= 2000 || f.width >= 3800 -> "4K"
+            f.height >= 1000 || f.width >= 1900 -> "Full HD"
+            f.height >= 700 || f.width >= 1270 -> "HD"
+            else -> "SD"
+        }
+        val parts = mutableListOf(kind + " " + f.width + "×" + f.height)
+        if (f.frameRate > 0f) {
+            val r = f.frameRate
+            parts += (if (kotlin.math.abs(r - Math.round(r)) < 0.05f) Math.round(r).toString() else String.format(java.util.Locale.UK, "%.2f", r)) + " a second"
+        }
+        listOf(f.bitrate, f.averageBitrate, f.peakBitrate).firstOrNull { it > 0 }?.let {
+            parts += String.format(java.util.Locale.UK, "%.1f Mbit/s", it / 1_000_000.0)
+        }
+        return parts.joinToString(" · ")
+    }
+}
+
+/** The speeds a film or episode can play at. Not kept: each one starts at normal speed. */
+object PlaySpeed {
+    val speeds = floatArrayOf(1f, 1.25f, 1.5f, 2f, 0.5f, 0.75f)
+
+    fun words(speed: Float): String = if (speed == 1f) "normal" else (if (speed % 1f == 0f) speed.toInt().toString() else speed.toString()) + "×"
+
+    fun next(speed: Float): Float {
+        val i = speeds.indexOfFirst { kotlin.math.abs(it - speed) < 0.01f }
+        return speeds[(i + 1) % speeds.size]
     }
 }

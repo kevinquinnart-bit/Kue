@@ -123,6 +123,88 @@ class NightProcessor(private val wanted: () -> Boolean) : BaseAudioProcessor() {
     }
 }
 
+/**
+ * Volume boost: the sound made louder than the player's own full volume, for a quiet channel or film.
+ * Kept as a choice; [gain] is read by the sound as it plays, so a change is heard straight away.
+ */
+object VolumeBoost {
+    val names = listOf("off", "125%", "150%", "200%")
+    private val gains = floatArrayOf(1f, 1.25f, 1.5f, 2f)
+
+    @Volatile var gain: Float = 1f
+        private set
+
+    private fun prefs(context: Context) = context.getSharedPreferences("player", Context.MODE_PRIVATE)
+
+    fun get(context: Context): Int = prefs(context).getInt("boost", 0).coerceIn(0, names.size - 1)
+
+    fun set(context: Context, level: Int) {
+        val l = level.coerceIn(0, names.size - 1)
+        prefs(context).edit().putInt("boost", l).apply()
+        gain = gains[l]
+        Choices.touch()
+    }
+
+    /** Reads the saved choice, ready for the next thing played. */
+    fun load(context: Context) {
+        gain = gains[get(context)]
+    }
+}
+
+/**
+ * Volume boost's sound: every sample lifted by [VolumeBoost.gain]. Near full, it is rounded off softly
+ * instead of cut, so loud moments don't crackle. Works on ordinary sound (16-bit) and passes it on
+ * untouched while the boost is off.
+ */
+@OptIn(UnstableApi::class)
+class BoostProcessor : BaseAudioProcessor() {
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat =
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) AudioProcessor.AudioFormat.NOT_SET else inputAudioFormat
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val want = VolumeBoost.gain
+        val out = replaceOutputBuffer(inputBuffer.remaining())
+        if (want <= 1.001f) {
+            out.put(inputBuffer)
+            out.flip()
+            return
+        }
+        val input = inputBuffer.order(ByteOrder.nativeOrder())
+        while (input.remaining() >= 2) {
+            out.putShort((softLimit(input.short / 32768f * want) * 32767f).toInt().toShort())
+        }
+        while (input.hasRemaining()) out.put(input.get())
+        out.flip()
+    }
+
+    companion object {
+        private const val KNEE = 0.8f
+
+        /** A sample (1 is full) kept under full: as it is up to [KNEE], then bent smoothly towards 1. */
+        fun softLimit(x: Float): Float {
+            val a = abs(x)
+            if (a <= KNEE) return x
+            val bent = KNEE + (1f - KNEE) * Math.tanh(((a - KNEE) / (1f - KNEE)).toDouble()).toFloat()
+            return if (x < 0) -bent else bent
+        }
+    }
+}
+
+/** VLC's smoothing of combed lines on interlaced broadcast channels: VLC's own choice (only when marked), or always. */
+object Smoothing {
+    private fun prefs(context: Context) = context.getSharedPreferences("player", Context.MODE_PRIVATE)
+
+    fun always(context: Context): Boolean = prefs(context).getBoolean("deinterlaceAlways", false)
+    fun always(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("deinterlaceAlways", on).apply()
+        Choices.touch()
+    }
+
+    /** What VLC is started with: always smooth, two pictures for each pair of lines, so movement stays fluid. */
+    fun vlcOptions(context: Context): List<String> =
+        if (always(context)) listOf("--deinterlace=1", "--deinterlace-mode=yadif2x") else emptyList()
+}
+
 // ---------------------------------------------------------------------------------------- picture
 
 /** The most detail the player picks from streams that come in several sizes. Less saves the connection. */
