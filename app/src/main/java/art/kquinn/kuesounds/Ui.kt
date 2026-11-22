@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -106,10 +107,11 @@ sealed class Screen {
     data object PodcastFind : Screen()
     data class ShowPage(val feed: String) : Screen()
     data class EpisodePage(val id: String) : Screen()
+    data class PlaylistPage(val id: String) : Screen()
 }
 
 enum class Tab(val label: String) {
-    ALBUMS("Albums"), PODCASTS("Podcasts"), ARTISTS("Artists"), SONGS("Songs"), SINGLES("Singles"), FOLDERS("Folders"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
+    ALBUMS("Albums"), PLAYLISTS("Playlists"), PODCASTS("Podcasts"), ARTISTS("Artists"), SONGS("Songs"), SINGLES("Singles"), FOLDERS("Folders"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
 }
 
 object Ui {
@@ -248,6 +250,7 @@ object Ui {
                     Screen.PodcastFind -> PodUi.Find(back, go)
                     is Screen.ShowPage -> PodUi.ShowPage(s.feed, back, go)
                     is Screen.EpisodePage -> PodUi.EpisodePage(s.id, back, go)
+                    is Screen.PlaylistPage -> ListUi.Page(s.id, back)
                 }
             }
             if (stack.last() != Screen.NowPlaying && Playing.active) MiniPlayer { go(Screen.NowPlaying) }
@@ -294,6 +297,7 @@ object Ui {
                 when {
                     // Podcasts don't need any music in the Drive.
                     tab == Tab.PODCASTS && query.isBlank() -> PodUi.Home(go)
+                    tab == Tab.PLAYLISTS && query.isBlank() && Scanner.data.tracks.isNotEmpty() -> ListUi.Home(go)
                     Scanner.data.tracks.isEmpty() -> Empty()
                     query.isNotBlank() -> {
                         val results = remember(query, albums) { Library.search(query, Scanner.data.tracks, albums, artists) }
@@ -467,10 +471,13 @@ object Ui {
     }
 
     @Composable
-    private fun Row2(top: String, below: String, glyph: Glyph?, highlight: Boolean = false, lead: String = "", onClick: () -> Unit) {
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    private fun Row2(top: String, below: String, glyph: Glyph?, highlight: Boolean = false, lead: String = "", onHold: (() -> Unit)? = null, onClick: () -> Unit) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(RoundedCornerShape(12.dp))
-                .background(if (highlight) K.Panel else Color.Transparent).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 6.dp),
+                .background(if (highlight) K.Panel else Color.Transparent)
+                .then(if (onHold != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onHold) else Modifier.clickable(onClick = onClick))
+                .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (lead.isNotEmpty()) {
@@ -500,11 +507,14 @@ object Ui {
 
     @Composable
     private fun SongList(songs: List<Track>) {
+        // Hold a song: add it to a playlist.
+        var adding by remember { mutableStateOf<Track?>(null) }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
             itemsIndexed(songs, key = { _, t -> t.id }) { i, t ->
-                Row2(t.title, t.artist, Glyph.NOTE, highlight = t.id == Playing.currentId) { Playing.play(songs, i) }
+                Row2(t.title, t.artist, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { adding = t }) { Playing.play(songs, i) }
             }
         }
+        adding?.let { t -> ListUi.AddBox("\"" + t.title + "\"", listOf(t.id)) { adding = null } }
     }
 
     /** Songs that came out as singles, each with its single's cover and name. */
@@ -584,6 +594,10 @@ object Ui {
                         Button("Play", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(al.tracks, 0) }
                         Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(al.tracks, 0, shuffled = true) }
                     }
+                    Spacer(Modifier.height(12.dp))
+                    var adding by remember { mutableStateOf(false) }
+                    Button("Add to a playlist", main = false, modifier = Modifier.fillMaxWidth()) { adding = true }
+                    if (adding) ListUi.AddBox("the album", al.tracks.map { it.id }) { adding = false }
                     Spacer(Modifier.height(12.dp))
                     SaveToPhone(al)
                     if (Fixer.canFix(al)) {
@@ -760,6 +774,13 @@ object Ui {
                     if (Playing.problem.isNotEmpty()) Words(Playing.problem, 15, K.Accent, lines = 2)
                 }
                 val fav = Sync.isFavourite(Playing.currentId)
+                var adding by remember { mutableStateOf(false) }
+                if (!Playing.isPodcast) Box(
+                    Modifier.size(52.dp).clip(CircleShape).background(K.Panel).clickable(onClickLabel = "Add to a playlist") { adding = true },
+                    contentAlignment = Alignment.Center,
+                ) { Words("+", 26, K.Soft, bold = true) }
+                if (adding) ListUi.AddBox("this song", listOf(Playing.currentId)) { adding = false }
+                if (!Playing.isPodcast) Spacer(Modifier.width(10.dp))
                 if (!Playing.isPodcast) Box(
                     Modifier.size(52.dp).clip(CircleShape).background(K.Panel)
                         .clickable(onClickLabel = if (fav) "Take out of favourites" else "Add to favourites") { Sync.flipFavourite(Playing.currentId) },

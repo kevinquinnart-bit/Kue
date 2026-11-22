@@ -19,3 +19,12 @@ class PodcastsTest {
         assertEquals("2 hr ", Podcasts.minutes(120 * 60_000L))
     }
 }
+
+class PlaylistsMatchTest {
+    @Test
+    fun namesAreMadePlainForMatching() {
+        assertEquals("wonderwall", Playlists.plain("Wonderwall - Remastered 2014"))
+        assertEquals("song 2", Playlists.plain("Song 2 (feat. Someone)"))
+        assertEquals("beatles", Playlists.plain("The Beatles"))
+    }
+}
