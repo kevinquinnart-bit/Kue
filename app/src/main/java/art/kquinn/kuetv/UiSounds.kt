@@ -53,10 +53,11 @@ object UiSounds {
     }
 
     fun ok(context: Context) = play(context, ok, 0.16f)
-    fun back(context: Context) = play(context, back, 0.12f)
+    /** [always]: over a programme too (still not with sounds turned off in Settings). */
+    fun back(context: Context, always: Boolean = false) = play(context, back, 0.12f, always)
 
-    private fun play(context: Context, id: Int, volume: Float) {
-        if (muted || id == 0 || !on(context)) return
+    private fun play(context: Context, id: Int, volume: Float, always: Boolean = false) {
+        if ((muted && !always) || id == 0 || !on(context)) return
         pool?.play(id, volume, volume, 1, 0, 1f)
     }
 

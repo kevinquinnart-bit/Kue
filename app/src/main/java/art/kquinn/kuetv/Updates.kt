@@ -244,6 +244,8 @@ object Updates {
         // The Home watcher stands aside while the installer opens, so it can't pull KueTV back over it.
         HomeGuard.pauseFor(HANDED_WAIT)
         Report.note("Updates", "build " + handedOver + " handed to the installer (" + file.length() + " bytes)")
+        // So KueTV opens again by itself once the installer has put the update on.
+        context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE).edit().putLong("at", System.currentTimeMillis()).apply()
         // KueTV writes the app into the installer itself, as KueSounds does, and the installer answers with how it
         // went, so a refusal ("App not installed") is in the Report with its reason. The old way, the installer
         // reading the file from KueTV and saying nothing back, is kept for when this one can't start.
@@ -309,5 +311,24 @@ class UpdateReceiver : android.content.BroadcastReceiver() {
             }
             else -> Report.note("Updates", "the installer refused, status $status: $message")
         }
+    }
+}
+
+/**
+ * After an update KueTV handed the installer, KueTV opens again by itself, in place of leaving Fire TV's home
+ * screen up (Kevin, 22 November 2026). Only within 20 minutes of handing it over, and only on a TV.
+ */
+object Reopen {
+    private const val WITHIN_MS = 20 * 60_000L
+
+    fun afterUpdate(context: Context) {
+        val prefs = context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE)
+        val at = prefs.getLong("at", 0L)
+        prefs.edit().remove("at").apply()
+        if (at == 0L || System.currentTimeMillis() - at > WITHIN_MS || !isTv(context)) return
+        Report.note("Updates", "update on: opening KueTV again")
+        runCatching {
+            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.onFailure { Report.note("Updates", "couldn't open KueTV again: " + it.message) }
     }
 }

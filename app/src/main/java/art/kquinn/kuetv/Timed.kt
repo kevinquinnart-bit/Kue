@@ -120,6 +120,7 @@ class TimedReceiver : BroadcastReceiver() {
         else {
             TimedStore.arm(context)
             Reminders.arm(context)
+            if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) Reopen.afterUpdate(context.applicationContext)
         }
     }
 

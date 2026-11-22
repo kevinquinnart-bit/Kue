@@ -631,7 +631,15 @@ fun PlayerScreen(
         onDispose {
             keepPlace()
             player.removeListener(listener)
-            player.release()
+            // A live channel goes on in the small TV as it is, picture and sound, with no restart (Kevin, 22 November
+            // 2026). Not while pause and rewind, a recording or a torrent is using this player: those close with it.
+            val playingUrl = streamsAt(index).getOrNull(stream)?.url
+            val handOver = live && shiftHolder[0] == null && !recording && !usedTorrent[0] && player.playerError == null &&
+                playingUrl != null && AddOns.showable(playingUrl) && Screen.visible
+            if (handOver) {
+                if (speed != 1f) player.setPlaybackSpeed(1f)
+                SharedMini.adopt(player, resolvedAddress(playingUrl!!) ?: playingUrl)
+            } else player.release()
             shiftHolder[0]?.close()
             shiftHolder[0] = null
             finishRecording()
@@ -1742,6 +1750,16 @@ object SharedMini {
         if (now != null && address == url) return now
         now?.release()
         return lightPlayer(context.applicationContext, url).also { player = it; address = url }
+    }
+
+    /** Takes over the full-screen player as it plays [url], so the small TV carries on with it. */
+    fun adopt(full: ExoPlayer, url: String) {
+        main.removeCallbacks(idle)
+        if (player !== full) player?.release()
+        player = full
+        address = url
+        // Nothing showing it until the small TV appears: stopped if none does in a moment.
+        if (users == 0) main.postDelayed(idle, 3_000)
     }
 
     fun give() {

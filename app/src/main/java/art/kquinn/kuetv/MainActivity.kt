@@ -262,9 +262,11 @@ class MainActivity : ComponentActivity() {
             if (event.action == android.view.KeyEvent.ACTION_DOWN) when (k) {
                 android.view.KeyEvent.KEYCODE_DPAD_UP, android.view.KeyEvent.KEYCODE_DPAD_DOWN,
                 android.view.KeyEvent.KEYCODE_DPAD_LEFT, android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> UiSounds.move(this)
+                // Back sounds the moment it is pressed, over a programme too, so it is plain it was heard
+                // (Kevin, 22 November 2026: it felt missed, and got pressed twice).
+                android.view.KeyEvent.KEYCODE_BACK -> if (event.repeatCount == 0) UiSounds.back(this, always = true)
             } else if (event.action == android.view.KeyEvent.ACTION_UP && !event.isCanceled) when (k) {
                 android.view.KeyEvent.KEYCODE_DPAD_CENTER, android.view.KeyEvent.KEYCODE_ENTER -> UiSounds.ok(this)
-                android.view.KeyEvent.KEYCODE_BACK -> UiSounds.back(this)
             }
         }
         return super.dispatchKeyEvent(event)
