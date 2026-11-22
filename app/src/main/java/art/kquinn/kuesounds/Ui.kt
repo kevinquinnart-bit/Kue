@@ -108,13 +108,17 @@ sealed class Screen {
     data class ShowPage(val feed: String) : Screen()
     data class EpisodePage(val id: String) : Screen()
     data class PlaylistPage(val id: String) : Screen()
+    data class YouTubePlayer(val url: String) : Screen()
 }
 
 enum class Tab(val label: String) {
-    ALBUMS("Albums"), PLAYLISTS("Playlists"), PODCASTS("Podcasts"), ARTISTS("Artists"), SONGS("Songs"), SINGLES("Singles"), FOLDERS("Folders"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
+    ALBUMS("Albums"), PLAYLISTS("Playlists"), PODCASTS("Podcasts"), RADIO("Radio"), SPOTIFY("Spotify"), YOUTUBE("YouTube"), ARTISTS("Artists"), SONGS("Songs"), SINGLES("Singles"), FOLDERS("Folders"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
 }
 
 object Ui {
+    /** A link shared to KueSounds from another app, to open. */
+    var sharedLink by mutableStateOf<String?>(null)
+
     @Composable
     fun App(signedIn: Boolean, signingIn: Boolean, signInProblem: String, onSignIn: () -> Unit) {
         Box(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
@@ -230,6 +234,14 @@ object Ui {
         var stack by remember { mutableStateOf(listOf<Screen>(Screen.Home)) }
         val go: (Screen) -> Unit = { stack = stack + it }
         val back: () -> Unit = { if (stack.size > 1) stack = stack.dropLast(1) }
+        // A link shared to KueSounds from YouTube, YouTube Music or Spotify.
+        val shared = sharedLink
+        LaunchedEffect(shared) {
+            if (shared == null) return@LaunchedEffect
+            sharedLink = null
+            if (YouTube.read(shared) != null) go(Screen.YouTubePlayer(shared))
+            else if (!SpotifyLink.playLink(shared)) Unit
+        }
         BackHandler(enabled = stack.size > 1, onBack = back)
 
         val data = Scanner.data
@@ -251,6 +263,7 @@ object Ui {
                     is Screen.ShowPage -> PodUi.ShowPage(s.feed, back, go)
                     is Screen.EpisodePage -> PodUi.EpisodePage(s.id, back, go)
                     is Screen.PlaylistPage -> ListUi.Page(s.id, back)
+                    is Screen.YouTubePlayer -> OnlineUi.YouTubePlayer(s.url, back)
                 }
             }
             if (stack.last() != Screen.NowPlaying && Playing.active) MiniPlayer { go(Screen.NowPlaying) }
@@ -297,6 +310,9 @@ object Ui {
                 when {
                     // Podcasts don't need any music in the Drive.
                     tab == Tab.PODCASTS && query.isBlank() -> PodUi.Home(go)
+                    tab == Tab.RADIO && query.isBlank() -> OnlineUi.RadioTab()
+                    tab == Tab.SPOTIFY && query.isBlank() -> OnlineUi.SpotifyTab()
+                    tab == Tab.YOUTUBE && query.isBlank() -> OnlineUi.YouTubeTab(go)
                     tab == Tab.PLAYLISTS && query.isBlank() && Scanner.data.tracks.isNotEmpty() -> ListUi.Home(go)
                     Scanner.data.tracks.isEmpty() -> Empty()
                     query.isNotBlank() -> {
@@ -775,13 +791,14 @@ object Ui {
                 }
                 val fav = Sync.isFavourite(Playing.currentId)
                 var adding by remember { mutableStateOf(false) }
-                if (!Playing.isPodcast) Box(
+                val songNow = !Playing.isPodcast && !Playing.isRadio
+                if (songNow) Box(
                     Modifier.size(52.dp).clip(CircleShape).background(K.Panel).clickable(onClickLabel = "Add to a playlist") { adding = true },
                     contentAlignment = Alignment.Center,
                 ) { Words("+", 26, K.Soft, bold = true) }
                 if (adding) ListUi.AddBox("this song", listOf(Playing.currentId)) { adding = false }
-                if (!Playing.isPodcast) Spacer(Modifier.width(10.dp))
-                if (!Playing.isPodcast) Box(
+                if (songNow) Spacer(Modifier.width(10.dp))
+                if (songNow) Box(
                     Modifier.size(52.dp).clip(CircleShape).background(K.Panel)
                         .clickable(onClickLabel = if (fav) "Take out of favourites" else "Add to favourites") { Sync.flipFavourite(Playing.currentId) },
                     contentAlignment = Alignment.Center,
@@ -803,6 +820,7 @@ object Ui {
                     Words(Library.clock(duration), 14, K.Soft)
                 }
             }
+            if (Playing.isRadio) OnlineUi.RadioControls() else
             if (Playing.isPodcast) PodUi.Controls() else
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Control(Glyph.SHUFFLE, "Shuffle", 48.dp, if (Playing.shuffle) K.Accent else K.Soft) { Playing.flipShuffle() }

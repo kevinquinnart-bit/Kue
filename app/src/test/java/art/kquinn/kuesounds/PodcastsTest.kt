@@ -28,3 +28,12 @@ class PlaylistsMatchTest {
         assertEquals("beatles", Playlists.plain("The Beatles"))
     }
 }
+
+class OnlineLinksTest {
+    @Test
+    fun spotifyLinksAreKnown() {
+        // Without a connection nothing plays, but a Spotify link is still recognised.
+        assertEquals(true, SpotifyLink.playLink("Listen: https://open.spotify.com/intl-de/playlist/37i9dQZF1DXcBWIGoYBM5M?si=1"))
+        assertEquals(false, SpotifyLink.playLink("https://example.com/playlist/1"))
+    }
+}

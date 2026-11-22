@@ -70,6 +70,32 @@ object Playing {
     /** A podcast episode is playing (rather than a song). */
     val isPodcast: Boolean get() = currentId.startsWith("pod:")
 
+    /** A radio station is playing. */
+    val isRadio: Boolean get() = currentId.startsWith("radio:")
+
+    /** Plays a radio station, live. */
+    fun playRadio(s: Radio.Station) {
+        val c = controller ?: return
+        if (!Net.online(appContext)) { problem = "No internet, so the radio can't play."; return }
+        if (SpotifyLink.connected && !SpotifyLink.paused) SpotifyLink.toggle()
+        c.shuffleModeEnabled = false
+        c.repeatMode = Player.REPEAT_MODE_OFF
+        c.setPlaybackSpeed(1f)
+        c.setMediaItem(
+            MediaItem.Builder().setMediaId("radio:" + s.id).setUri(s.url)
+                .setMediaMetadata(
+                    MediaMetadata.Builder().setTitle(s.name).setArtist(s.tags.ifBlank { "Radio" }).setStation(s.name)
+                        .setArtworkUri(s.logo.takeIf { it.startsWith("http") }?.let { Uri.parse(it) }).setIsPlayable(true).setIsBrowsable(false).build(),
+                ).build(),
+        )
+        c.prepare()
+        c.play()
+        Radio.counted(s)
+    }
+
+    /** Stops whatever KueSounds is playing (YouTube's player is about to start). */
+    fun pause() { controller?.pause() }
+
     /** Whether anything is loaded to play. */
     val active: Boolean get() = currentId.isNotEmpty()
 

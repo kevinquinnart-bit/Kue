@@ -71,6 +71,8 @@ dependencies {
     implementation("androidx.core:core:1.19.0")
     // Writing the right cover and album details into the music files themselves.
     implementation("net.jthink:jaudiotagger:3.0.1")
+    // Spotify's own kit for driving the Spotify app (https://github.com/spotify/android-sdk, Apache 2.0).
+    implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
     testImplementation("junit:junit:4.13.2")
 }
 

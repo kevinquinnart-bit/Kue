@@ -68,6 +68,8 @@ class MainActivity : ComponentActivity() {
         Sync.init(this)
         Podcasts.init(this)
         Backup.init(this)
+        SpotifyLink.init(this)
+        takeShared(intent)
         Playing.connect(this)
         Fixer.askPermission = ::askEdit
         // Settings › Notifications › Turn on: Android's question the first time; after that (Android won't
@@ -109,6 +111,21 @@ class MainActivity : ComponentActivity() {
                 onSignIn = ::signIn,
             )
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        takeShared(intent)
+    }
+
+    /** A link shared to KueSounds (YouTube, YouTube Music or Spotify's Share button). */
+    private fun takeShared(intent: android.content.Intent?) {
+        val text = when (intent?.action) {
+            android.content.Intent.ACTION_SEND -> intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
+            android.content.Intent.ACTION_VIEW -> intent.dataString
+            else -> null
+        } ?: return
+        Ui.sharedLink = text
     }
 
     override fun onResume() {
