@@ -1470,7 +1470,8 @@ private class BrowseState(saved: Map<String, String> = emptyMap()) {
 
     /** In Search, the film or series the remote is on, for its poster and details at the side. */
     var searchInfo by mutableStateOf<InfoCard?>(null)
-    val filmAbout = HashMap<String, About>()
+    // Watched by the screen, so the panel under the small TV fills in when a film's details arrive.
+    val filmAbout = androidx.compose.runtime.mutableStateMapOf<String, About>()
     val episodeList = LazyListState()
     var showJustClosed by mutableStateOf(false)
     val loadedEpisodes = HashMap<String, List<Episode>>()
@@ -2844,7 +2845,12 @@ private fun MainScreen(
             val guideGrid = section == Section.GUIDE && state.guide.open == null
             // A series open: what it is about goes under the small TV, in place of the channel's programme details.
             // In Search, the same for the film or series the remote is on.
+            // In Films and Series, the film or series the remote is on (Kevin, 22 November 2026), in place of the channel's programme.
             val seriesOpen = if (section == Section.SERIES) state.openShow?.let { InfoCard(it.name, "", it.about, if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null) }
+                ?: state.onShow?.let { InfoCard(it.name, it.poster, it.about, if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null) }
+                else if (section == Section.FILMS) state.onFilm?.let { f ->
+                    InfoCard(f.name, f.poster, state.filmAbout[f.id] ?: About(), if (f.id.startsWith(Catalogue.PREFIX)) "movie" to f.id.removePrefix(Catalogue.PREFIX) else null)
+                }
                 else if (section == Section.SEARCH) state.searchInfo else null
             if ((small != null && wanted && section != Section.LIVE && !guideGrid) || seriesOpen != null) {
                 val group = remember(small?.url, library) { small?.let { s -> library.groups.firstOrNull { g -> g.versions.any { it.channel.url == s.url } } } }
