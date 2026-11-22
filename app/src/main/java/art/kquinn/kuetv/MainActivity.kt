@@ -156,6 +156,8 @@ class MainActivity : ComponentActivity() {
         // computer can read it, to find out how Freely's way of opening channels can be brought into KueTV.
         if (isTv(this)) Thread { TvChannels.writeProbe(applicationContext) }.start()
         if (isTv(this)) Thread { runCatching { UiSounds.load(applicationContext) } }.start()
+        // The report's page for the phone, open the whole time KueTV is on.
+        if (isTv(this)) Thread { runCatching { ReportPage.open(applicationContext) } }.start()
         // A TV is always sideways. A phone turns with the way it is held.
         val tv = isTv(this)
         if (tv) requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
@@ -313,7 +315,17 @@ private fun App() {
     var freeOpen by remember { mutableStateOf(false) }
     // Other providers chosen in Settings › Your provider to be in the lists too.
     var others by remember { mutableStateOf<List<Pair<Account, Library>>>(emptyList()) }
-    val library = remember(loaded, free, others) { loaded?.let { Combined.merge(it, others) }?.withFree(free) }
+    // The lists the screens use, made away from the screen: with tens of thousands of channels, making them (and the
+    // channels' rows and Live TV's lists) on the screen held the remote up for up to 7 seconds (Kevin's TV, 22 November 2026).
+    var built by remember { mutableStateOf<Library?>(null) }
+    LaunchedEffect(loaded, free, others) {
+        val base = loaded
+        if (base == null) { built = null; return@LaunchedEffect }
+        built = withContext(Dispatchers.Default) {
+            Combined.merge(base, others).withFree(free).also { it.groups; it.liveIndex }
+        }
+    }
+    val library = built
     var problem by remember { mutableStateOf<String?>(null) }
     var reload by remember { mutableIntStateOf(0) }
     var playing by remember { mutableStateOf<Playing?>(null) }
@@ -1571,6 +1583,14 @@ private class BarReach {
 @Composable
 private fun BarItem(section: Section, chosen: Boolean, picture: Boolean, modifier: Modifier, bar: BarReach, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    // Moving along the bar shows each section below as the remote rests on it, so ▼ goes straight into it
+    // (Kevin, 22 November 2026). Not Home (it fills the screen, with no bar), Search or Settings: those open with OK.
+    LaunchedEffect(focused) {
+        if (focused && !chosen && !picture && section != Section.HOME && bar.inside) {
+            delay(350)
+            if (focused) onClick()
+        }
+    }
     val shape = RoundedCornerShape(50)
     val ink = when {
         focused -> Color.Black
@@ -1873,14 +1893,15 @@ private fun MainScreen(
                 val mine = remember(MyCategories.changes, profileNow) { MyCategories.all(context) }
                 // Grouped (the usual): a handful of topics, free channels in with the rest. Otherwise the provider's own list.
                 val grouped = remember(Choices.changes) { Choices.groupedLive(context) }
-                val categoryTopic = remember(library) { Topics.byCategory(library.liveCategories, library.channels) }
-                val topicCats = remember(library, categoryTopic) { Topics.categories(categoryTopic, library.channels.mapTo(HashSet()) { it.categoryId }) }
+                val index = library.liveIndex
+                val categoryTopic = index.categoryTopic
+                val topicCats = index.topicCats
                 // A topic opened with OK shows the provider's (and free lists') own sections filed under it, each with
                 // how many channels it has: "UK | Premier League Hub" under Sport. Hold OK on a section hides it.
                 var openTopic by remember(grouped) {
                     mutableStateOf(if (!grouped) null else if (liveCategory.startsWith(Topics.PREFIX)) null else categoryTopic[liveCategory])
                 }
-                val sectionCounts = remember(library) { library.channels.groupingBy { it.categoryId }.eachCount() }
+                val sectionCounts = index.sectionCounts
                 val sections = remember(library, categoryTopic, openTopic) {
                     val topic = openTopic ?: return@remember emptyList()
                     library.liveCategories.filter { categoryTopic[it.id] == topic && (sectionCounts[it.id] ?: 0) > 0 }
@@ -1944,25 +1965,21 @@ private fun MainScreen(
                 // One row for each channel: its 4K, FHD, HD and SD versions are kept together behind it.
                 val recentNow = if (liveCategory == RECENT) Recent.changes else -1
                 val shown = remember(library, liveCategory, favs, favourites.order, recentNow, mine, categoryTopic) {
-                    val isFav: (ChannelGroup) -> Boolean = { g -> g.versions.any { Favourites.key(it.channel, login) in favs } }
+                    val favSet = index.favourites(favs)
+                    val isFav: (ChannelGroup) -> Boolean = { g -> g in favSet }
                     val favRank: (ChannelGroup) -> Int = { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
                     when {
                         // One of the user's own categories: its channels in the order they were added.
-                        liveCategory.startsWith(MyCategories.PREFIX) -> mine.firstOrNull { it.id == liveCategory }?.channels.orEmpty().mapNotNull { id -> library.groups.firstOrNull { it.id == id } }
+                        liveCategory.startsWith(MyCategories.PREFIX) -> mine.firstOrNull { it.id == liveCategory }?.channels.orEmpty().mapNotNull { id -> index.byId[id] }
                         // A topic: every channel filed under a category of that topic, the provider's first, then free ones.
-                        liveCategory.startsWith(Topics.PREFIX) -> {
-                            val topic = liveCategory.removePrefix(Topics.PREFIX)
-                            library.groups.filter { g -> g.versions.any { categoryTopic[it.channel.categoryId] == topic } }
-                                .sortedBy { g -> if (g.versions.all { it.free }) 1 else 0 }
-                        }
+                        liveCategory.startsWith(Topics.PREFIX) -> index.byTopic[liveCategory.removePrefix(Topics.PREFIX)].orEmpty()
                         else -> when (liveCategory) {
                         ALL -> library.groups
                         RECENT -> Recent.pick(library.groups, Recent.all(context)) { g -> g.versions.map { it.channel.url } }
                         // Favourites in the user's own order.
-                        FAVOURITES -> library.groups.filter { g -> g.versions.any { Favourites.key(it.channel, login) in favs } }
-                            .sortedBy { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
-                        Library.FREE_ALL -> library.groups.filter { g -> g.versions.any { it.free } }
-                        else -> library.groups.filter { g -> g.versions.any { it.channel.categoryId == liveCategory } }
+                        FAVOURITES -> library.groups.filter(isFav).sortedBy(favRank)
+                        Library.FREE_ALL -> index.free
+                        else -> index.byCategory[liveCategory].orEmpty()
                         }
                     }.let { list ->
                         // Every other category: its favourite channels first, in the order set in Favourites, then the rest.
@@ -2833,7 +2850,8 @@ private fun MainScreen(
                 val group = remember(small?.url, library) { small?.let { s -> library.groups.firstOrNull { g -> g.versions.any { it.channel.url == s.url } } } }
                 val narrow = section == Section.FILMS || section == Section.SERIES
                 Column(Modifier.width(if (narrow) 220.dp else SIDE_WIDTH).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    if (small != null && wanted) MiniTv(small, Modifier.fillMaxWidth())
+                    // ▼ from the bar along the top goes into the section, never onto the small TV (Kevin, 22 November 2026).
+                    if (small != null && wanted) MiniTv(small, Modifier.fillMaxWidth().focusProperties { canFocus = !bar.inside })
                     if (seriesOpen != null) InfoBox(seriesOpen, Modifier.fillMaxWidth().weight(1f))
                     else if (group != null) ProgrammeDetails(group, library.account, Modifier.fillMaxWidth().weight(1f))
                 }
@@ -4893,32 +4911,22 @@ private fun reportText(context: android.content.Context, phone: Boolean): String
 }
 
 /**
- * The report's page for the phone. It stays open for 15 minutes after the Report screen was last opened, whatever
- * the TV shows meanwhile: tied to the screen, it shut whenever the screen went (seen on Kevin's TV, 22 November
- * 2026: shut 4 seconds after opening, before the phone had asked). Each visit gets the report as it is then.
+ * The report's page for the phone, on a TV. It is open whenever KueTV is running, so the address works at any time:
+ * tied to the Report screen, it shut whenever the screen went, and only worked after opening that screen (Kevin,
+ * 22 November 2026). Each visit gets the report as it is then. If it ever stops, opening the Report screen opens it again.
  */
 private object ReportPage {
-    private const val OPEN_MS = 15 * 60_000L
     private var server: PageServer? = null
-    @Volatile private var until = 0L
-    private val main = android.os.Handler(android.os.Looper.getMainLooper())
-    private val check = object : Runnable {
-        override fun run() {
-            if (android.os.SystemClock.uptimeMillis() >= until) { server?.stop(); server = null } else main.postDelayed(this, 30_000)
-        }
-    }
 
-    /** Opens the page (or keeps it open) and gives its address, or null when it can't be opened. */
+    /** Opens the page (if it isn't already) and gives its address, or null when it can't be opened. */
+    @Synchronized
     fun open(context: android.content.Context): String? {
         val ip = PhoneSetup.localAddress() ?: return null
-        until = android.os.SystemClock.uptimeMillis() + OPEN_MS
         if (server == null) {
             val app = context.applicationContext
             val fresh = PageServer { PageServer.copyPage("KueTV report", reportText(app, false)) }
             if (fresh.start() == null) return null
             server = fresh
-            main.removeCallbacks(check)
-            main.postDelayed(check, 30_000)
         }
         return "http://$ip:" + PageServer.PORT
     }
@@ -4935,7 +4943,7 @@ private fun ReportScreen(onDone: () -> Unit) {
     BackHandler { onDone() }
     LaunchedEffect(Unit) {
         if (phone) return@LaunchedEffect
-        address = ReportPage.open(context)
+        address = withContext(Dispatchers.IO) { ReportPage.open(context) }
         pageFailed = address == null && PhoneSetup.localAddress() != null
     }
     val first = remember { FocusRequester() }
@@ -4957,7 +4965,7 @@ private fun ReportScreen(onDone: () -> Unit) {
         } else if (address != null) {
             Note("To send it: on your phone, on the same Wi-Fi, open")
             Text(address.orEmpty(), color = AccentInk, fontSize = Sizes.CODE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
-            Note("and tap Copy there. The page stays open for 15 minutes, even if you leave this screen.")
+            Note("and tap Copy there. This address works whenever KueTV is on.")
         } else if (pageFailed) {
             Note("The page for your phone couldn't open this time. Press Done and open this screen again.")
         } else {

@@ -89,6 +89,9 @@ class Library(
         for (c in channels) Drm.Lock.of(c.drm)?.let { Drm.note(c.url, it) }
     }
 
+    /** Live TV's lists, worked out once for these lists (see [LiveIndex]). */
+    val liveIndex: LiveIndex by lazy { LiveIndex(this) }
+
     /** The channels with the versions of the same channel (4K, FHD, HD, SD) kept together as one. */
     val groups: List<ChannelGroup> by lazy {
         // A TV channel from an add-on is always a row of its own: it plays only through the add-ons, so it can't be
@@ -827,5 +830,57 @@ object Provider {
         }
         if (channels.isEmpty() && films.isEmpty()) throw ProviderProblem("That link didn't hold a playlist the app could read.")
         return Library(liveNames.map { Category(it, it) }, channels, filmNames.map { Category(it, it) }, films)
+    }
+}
+
+/**
+ * Live TV's lists, worked out once for a set of lists, away from the screen: each category's and topic's channels,
+ * the free ones, the topics, and which channel each favourite is. Worked out on the screen each time Live TV opened
+ * or a category changed, they held the remote up for 2 to 7 seconds at a time (seen on Kevin's TV, 22 November 2026).
+ */
+class LiveIndex(lib: Library) {
+    val categoryTopic: Map<String, String> = Topics.byCategory(lib.liveCategories, lib.channels)
+    val topicCats: List<Category> = Topics.categories(categoryTopic, lib.channels.mapTo(HashSet()) { it.categoryId })
+    val sectionCounts: Map<String, Int> = lib.channels.groupingBy { it.categoryId }.eachCount()
+    val byCategory: Map<String, List<ChannelGroup>>
+    val byTopic: Map<String, List<ChannelGroup>>
+    val free: List<ChannelGroup>
+    val byId: Map<String, ChannelGroup>
+    private val byKey: Map<String, List<ChannelGroup>>
+
+    init {
+        val login = lib.account != null
+        val cat = HashMap<String, MutableList<ChannelGroup>>()
+        val top = HashMap<String, MutableList<ChannelGroup>>()
+        val freeList = ArrayList<ChannelGroup>()
+        val ids = HashMap<String, ChannelGroup>()
+        val keys = HashMap<String, MutableList<ChannelGroup>>()
+        for (g in lib.groups) {
+            ids.putIfAbsent(g.id, g)
+            if (g.versions.any { it.free }) freeList.add(g)
+            val cats = HashSet<String>()
+            val topics = HashSet<String>()
+            for (v in g.versions) {
+                cats.add(v.channel.categoryId)
+                categoryTopic[v.channel.categoryId]?.let { topics.add(it) }
+                val list = keys.getOrPut(Favourites.key(v.channel, login)) { ArrayList(1) }
+                if (list.lastOrNull() !== g) list.add(g)
+            }
+            for (c in cats) cat.getOrPut(c) { ArrayList() }.add(g)
+            for (t in topics) top.getOrPut(t) { ArrayList() }.add(g)
+        }
+        byCategory = cat
+        // A topic: the provider's channels first, then the free ones, each in the lists' order.
+        byTopic = top.mapValues { (_, list) -> list.sortedBy { g -> if (g.versions.all { it.free }) 1 else 0 } }
+        free = freeList
+        byId = ids
+        byKey = keys
+    }
+
+    /** The channels that are favourites, from the favourites' keys. */
+    fun favourites(keys: Set<String>): Set<ChannelGroup> {
+        val out = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<ChannelGroup, Boolean>())
+        for (k in keys) byKey[k]?.let { out.addAll(it) }
+        return out
     }
 }
