@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The folders KueVault shares with other apps: a newer KueVault for the installer, and a file being opened. -->
+<paths>
+    <cache-path name="update" path="update/" />
+    <cache-path name="open" path="open/" />
+</paths>
