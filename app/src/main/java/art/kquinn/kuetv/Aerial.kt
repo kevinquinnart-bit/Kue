@@ -97,6 +97,61 @@ object Aerial {
         }
     }
 
+    /**
+     * The aerial's channels on Kevin's TV, by their number in Freely's guide (Freely's "backup channels", which come
+     * from the aerial and start at 233). Read from his photos of Freely's guide, 22 November 2026; Freely's own lower
+     * numbers come over the internet. BBC One, BBC Two and Channel 5 aren't on his aerial list. A rescan in Freely may
+     * renumber them.
+     */
+    private val numbers: Map<String, Int> = mapOf(
+        "itv" to 233, "itv1" to 233, "itv1hd" to 233, "itvhd" to 233, "utv" to 233,
+        "itv2" to 238, "itv3" to 239, "itv4" to 240, "itvquiz" to 241, "itvbe" to 241,
+        "channel4" to 242, "c4" to 242, "ch4" to 242, "film4" to 243, "more4" to 244, "4seven" to 245,
+        "5star" to 246, "channel5star" to 246, "5action" to 247, "5usa" to 248, "5drama" to 249,
+        "itv1+1" to 251, "itv+1" to 251, "channel4+1" to 252, "c4+1" to 252, "4+1" to 252,
+        "5+1" to 253, "channel5+1" to 253, "itv2+1" to 254, "itv3+1" to 255, "film4+1" to 256, "more4+1" to 257,
+        "quest+1" to 258, "udavejavu" to 259, "davejavu" to 259, "udrama+1" to 260, "drama+1" to 260,
+        "itv4+1" to 261, "tlc+1" to 262, "greattv+1" to 263, "blaze+1" to 264, "greatplayer" to 265,
+        "togethertv+1" to 266,
+        "bbcnews" to 301, "bbcparliament" to 302, "skynews" to 303, "gbnews" to 304, "cnn" to 305,
+        "cnninternational" to 305, "cnnheadlines" to 305, "france24" to 306, "france24english" to 306,
+        "cbbc" to 351, "cbeebies" to 352, "pop" to 353, "popmax" to 354, "popup" to 355,
+        "ketchuptv" to 356, "ketchuptoo" to 357, "shaked" to 360,
+    )
+
+    /** A channel's name as the provider writes it, made comparable: "UK: ITV 2 +1 HD" is "itv2+1". */
+    internal fun key(name: String): String =
+        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase()
+            .replace(Regex("^[a-z]{2,3}\\s*[:|]\\s*"), "")
+            .replace(Regex("\\(.*?\\)|\\[.*?]"), " ")
+            .replace(Regex("\\b(hd|fhd|uhd|4k|sd|uk|london|england|raw)\\b"), " ")
+            .replace(Regex("\\bplus\\s*1\\b"), "+1")
+            .replace(Regex("[^a-z0-9+]"), "")
+
+    /** The aerial channel number in Freely for this channel, or null when the aerial doesn't carry it. */
+    fun numberFor(name: String): Int? = numbers[key(name)]
+
+    /**
+     * Opens Freely on the aerial channel [number], through Fire TV's own TV player (tried on Kevin's TV,
+     * 22 November 2026: 233 played ITV1 HD from the aerial with a full signal). False when it wouldn't open.
+     */
+    fun openChannel(context: Context, number: Int): Boolean {
+        val uri = android.net.Uri.parse("content://android.media.tv/displayNumber/$number")
+        val fire = Intent(Intent.ACTION_VIEW, uri).setClassName("com.amazon.tv.livetv", "com.amazon.tv.livetv.TvChannelsPlayerActivityAlias")
+        for (intent in listOf(fire, Intent(Intent.ACTION_VIEW, uri))) {
+            val ok = runCatching {
+                HomeGuard.pause()
+                context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+            if (ok) {
+                Report.note("Aerial", "opened aerial channel $number")
+                return true
+            }
+        }
+        Report.note("Aerial", "aerial channel $number wouldn't open")
+        return false
+    }
+
     /** Whether to offer the aerial when the home internet goes down. On unless switched off. */
     fun offerWhenOffline(context: Context): Boolean = prefs(context).getBoolean("offer", true)
     fun offerWhenOffline(context: Context, on: Boolean) {

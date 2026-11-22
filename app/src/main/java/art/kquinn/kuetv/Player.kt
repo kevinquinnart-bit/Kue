@@ -479,15 +479,29 @@ fun PlayerScreen(
 
     // Channels already handed to their own app in this sitting: once each, so coming Back doesn't send it off again.
     val sentToApp = remember { HashSet<String>() }
+    // Whether this TV has an aerial tuner to hand a channel to.
+    val aerialHere = remember { !phone && Aerial.available(context) }
     /**
      * The last version of a live channel won't do: the channel's own app plays it instead when it is on the TV
      * (4 Seven in Channel 4's app; Kevin, 22 November 2026). True when it was handed over.
      */
     val toOwnApp: (String) -> Boolean = handOff@{ why ->
         val name = items.getOrNull(index)?.name ?: return@handOff false
+        if (name in sentToApp) return@handOff false
+        // First the TV's aerial, free and with no internet needed (Kevin, 22 November 2026), then the channel's own app.
+        val aerial = Aerial.numberFor(name)?.takeIf { !phone && Aerial.available(context) }
+        if (aerial != null) {
+            sentToApp += name
+            Report.note("Player", "$name: $why Opening it on the aerial ($aerial).")
+            player.pause()
+            moved = "$why Opening it on the aerial."
+            note = "Playing on the aerial. Pick another channel, or press Play to try here again."
+            if (Aerial.openChannel(context, aerial)) return@handOff true
+        }
         val ch = LiveInApps.forChannel(name) ?: return@handOff false
         val onTv = runCatching { context.packageManager.getPackageInfo(ch.pkg, 0) }.isSuccess
-        if (!onTv || !sentToApp.add(name)) return@handOff false
+        if (!onTv) return@handOff false
+        sentToApp += name
         Report.note("Player", "$name: $why Opening it in ${ch.app}.")
         player.pause()
         moved = "$why Opening it in ${ch.app}."
@@ -1178,6 +1192,13 @@ fun PlayerScreen(
             // This channel in its own app's live player (ITVX for ITV1, Channel 4's app for Channel 4…), as Freely does.
             items.getOrNull(index)?.let { LiveInApps.forChannel(it.name) }?.let { ch ->
                 add(Control("In " + ch.app, Icon.PLAY) { LiveInApps.open(context, ch) })
+            }
+            // The same channel from the TV's aerial, through Freely: free, and no internet needed.
+            if (live && !phone) items.getOrNull(index)?.let { Aerial.numberFor(it.name) }?.takeIf { aerialHere }?.let { n ->
+                add(Control("On aerial", Icon.LIVE) {
+                    player.pause()
+                    if (!Aerial.openChannel(context, n)) say("The aerial wouldn't open.")
+                })
             }
             if (previous in items.indices) add(Control("Last channel", Icon.PREVIOUS) { go(previous) })
             if (items.size > 1 && onMultiview != null) add(Control("Multiview", Icon.MULTI) { onMultiview(items.toList(), index) })
