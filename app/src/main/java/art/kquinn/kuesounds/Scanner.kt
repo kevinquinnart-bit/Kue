@@ -192,38 +192,61 @@ object Scanner {
         running = true
         job = scope.launch {
             problem = ""
+            // A dropped connection (the phone waking up, or the Wi-Fi changing as KueSounds opens) is tried
+            // again by itself after 5, 15 then 30 seconds; the work already done is kept, so it carries on.
+            val waits = longArrayOf(5_000, 15_000, 30_000)
+            var attempt = 0
             try {
-                stage = 1
-                progress = -1f
-                status = "Finding your music"
-                val files = Drive.listAll(Drive.MUSIC_QUERY) { n -> status = "Finding your music · " + String.format("%,d", n) + " files" }
-                val found = String.format("%,d", files.count { Library.isMusic(it.name, it.mime) }) + " songs found"
-                status = "Finding your folders · $found"
-                val folderFiles = Drive.listAll(Drive.FOLDER_QUERY)
-                val folders = folderFiles.map { Folder(it.id, it.name, it.parent) }
-                status = "Finding album covers · $found"
-                val covers = runCatching { Drive.listAll(Drive.COVER_QUERY) }.getOrDefault(emptyList())
-                    .filter { Drive.isCoverName(it.name) && it.parent != null && it.size in 1..8_000_000 }
-                    .groupBy { it.parent!! }
-                    .mapValues { (_, list) -> list.sortedBy { coverRank(it.name) }.first().id }
-                data = Library.merge(data, files, folders, covers, System.currentTimeMillis())
-                save()
-                note("found " + data.tracks.size + " songs in " + folders.size + " folders, " + covers.size + " folder cover pictures")
-                if (Google.email.isBlank()) runCatching { Google.keepEmail(Drive.whoAmI()) }
-                stage = 2
-                readDetails()
-                stage = 3
-                matchAlbums()
-                status = ""
-                note("scan finished")
-            } catch (e: Drive.SignedOut) {
-                note("signed out by Google")
-                signedOut = true
-                status = ""
-            } catch (e: Exception) {
-                note("scan stopped: " + e.javaClass.simpleName + " " + e.message)
-                problem = "Couldn't finish looking through your music. " + (e.message ?: "")
-                status = ""
+                while (true) {
+                    try {
+                        stage = 1
+                        progress = -1f
+                        status = "Finding your music"
+                        val files = Drive.listAll(Drive.MUSIC_QUERY) { n -> status = "Finding your music · " + String.format("%,d", n) + " files" }
+                        val found = String.format("%,d", files.count { Library.isMusic(it.name, it.mime) }) + " songs found"
+                        status = "Finding your folders · $found"
+                        val folderFiles = Drive.listAll(Drive.FOLDER_QUERY)
+                        val folders = folderFiles.map { Folder(it.id, it.name, it.parent) }
+                        status = "Finding album covers · $found"
+                        val covers = runCatching { Drive.listAll(Drive.COVER_QUERY) }.getOrDefault(emptyList())
+                            .filter { Drive.isCoverName(it.name) && it.parent != null && it.size in 1..8_000_000 }
+                            .groupBy { it.parent!! }
+                            .mapValues { (_, list) -> list.sortedBy { coverRank(it.name) }.first().id }
+                        data = Library.merge(data, files, folders, covers, System.currentTimeMillis())
+                        save()
+                        note("found " + data.tracks.size + " songs in " + folders.size + " folders, " + covers.size + " folder cover pictures")
+                        if (Google.email.isBlank()) runCatching { Google.keepEmail(Drive.whoAmI()) }
+                        stage = 2
+                        readDetails()
+                        stage = 3
+                        matchAlbums()
+                        status = ""
+                        note("scan finished")
+                        break
+                    } catch (e: Drive.SignedOut) {
+                        note("signed out by Google")
+                        signedOut = true
+                        status = ""
+                        break
+                    } catch (e: java.io.IOException) {
+                        if (attempt >= waits.size) {
+                            note("scan stopped: " + e.javaClass.simpleName + " " + e.message)
+                            problem = "Couldn't finish looking through your music. " + (e.message ?: "")
+                            status = ""
+                            break
+                        }
+                        val seconds = waits[attempt] / 1000
+                        note("connection lost (" + e.javaClass.simpleName + " " + e.message + "): trying again in $seconds seconds")
+                        status = "Lost the connection · trying again in $seconds seconds"
+                        kotlinx.coroutines.delay(waits[attempt])
+                        attempt++
+                    } catch (e: Exception) {
+                        note("scan stopped: " + e.javaClass.simpleName + " " + e.message)
+                        problem = "Couldn't finish looking through your music. " + (e.message ?: "")
+                        status = ""
+                        break
+                    }
+                }
             } finally {
                 stage = 0
                 running = false
