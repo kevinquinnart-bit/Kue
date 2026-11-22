@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Granted from a computer only, for the Home button: lets KueTV switch its Home watcher back on after an update. -->
+    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" tools:ignore="ProtectedPermissions" />
+    <!-- Copying recordings to Google Drive carries on after the screens are closed. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Programmes set to record start on time, with the screens closed, and are set again after a restart. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Putting a newer KueTV on. The device asks first, and asks once to allow KueTV to do it at all. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Settings › This TV › Channel player apps: asking the TV to remove a player app. The TV asks first. -->
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
+
+    <!-- Asking the TV which aerial channels it has, for the report. Many TVs refuse this to apps they didn't come with. -->
+    <uses-permission android:name="com.android.providers.tv.permission.READ_EPG_DATA" />
+
+    <!-- The VPN engine asks for these for features KueTV doesn't use: listing every app, and reading files. -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+
+    <uses-feature android:name="android.software.leanback" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <!-- TV apps: lets KueTV see which of the free UK and Irish players are on the TV, and open them. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- Aerial TV: lets KueTV find the TV's own aerial tuner, and the TV's app that shows its channels. -->
+        <intent>
+            <action android:name="android.media.tv.TvInputService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="content" android:host="android.media.tv" />
+        </intent>
+    </queries>
+
+    <!--
+      The VPN engine (OpenVPN for Android) starts up with the app: it sets up its notices and its link from
+      the VPN, which runs on its own, to KueTV's screens. KueTV's own name, picture and look are kept.
+    -->
+    <application
+        android:name=".KueApp"
+        android:allowBackup="true"
+        android:banner="@drawable/kuetv_banner"
+        android:icon="@drawable/kuetv_mark"
+        android:roundIcon="@drawable/kuetv_mark"
+        android:label="@string/app_name"
+        android:theme="@style/KueTheme"
+        android:usesCleartextTraffic="true"
+        tools:replace="android:name,android:allowBackup,android:icon,android:roundIcon,android:label,android:theme">
+
+        <!-- The VPN engine's ways for other apps to control it, and to start it with the device: not wanted here. -->
+        <service android:name="de.blinkt.openvpn.api.ExternalOpenVPNService" tools:node="remove" />
+        <activity android:name="de.blinkt.openvpn.api.GrantPermissionsActivity" tools:node="remove" />
+        <activity android:name="de.blinkt.openvpn.api.ConfirmDialog" tools:node="remove" />
+        <activity android:name="de.blinkt.openvpn.api.RemoteAction" tools:node="remove" />
+        <activity-alias android:name="de.blinkt.openvpn.api.ConnectVPN" tools:node="remove" />
+        <activity-alias android:name="de.blinkt.openvpn.api.DisconnectVPN" tools:node="remove" />
+        <activity-alias android:name="de.blinkt.openvpn.api.PauseVPN" tools:node="remove" />
+        <activity-alias android:name="de.blinkt.openvpn.api.ResumeVPN" tools:node="remove" />
+        <activity-alias android:name="de.blinkt.openvpn.api.SetDefaultVPN" tools:node="remove" />
+        <receiver android:name="de.blinkt.openvpn.OnBootReceiver" tools:node="remove" />
+
+        <activity
+            android:name=".MainActivity"
+            android:launchMode="singleTask"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|screenLayout"
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Hands a downloaded newer KueTV to the device's installer. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
+        </provider>
+        <!-- KueTV as the Home button: Amazon's home screen can't be switched off, so KueTV opens over it. -->
+        <service
+            android:name=".HomeGuard"
+            android:label="@string/home_guard_name"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/home_guard" />
+        </service>
+        <service android:name=".CopyService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <service android:name=".TimedService" android:exported="false" android:foregroundServiceType="dataSync" />
+        <receiver android:name=".ReminderReceiver" android:exported="false" />
+        <!-- Android's installer answering about an update KueTV handed it. -->
+        <receiver android:name=".UpdateReceiver" android:exported="false" />
+        <receiver android:name=".TimedReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+    </application>
+</manifest>

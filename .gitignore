@@ -1,0 +1,8 @@
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+
+# Signing keys are kept locked (*.jks.enc); the unlocked key is never saved in the project.
+app/signing/*.jks

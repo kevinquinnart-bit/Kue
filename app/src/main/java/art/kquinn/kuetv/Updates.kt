@@ -1,0 +1,286 @@
+package art.kquinn.kuetv
+
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import okhttp3.CacheControl
+import okhttp3.Request
+import java.io.File
+import java.util.concurrent.TimeUnit
+
+/**
+ * Checking for a newer KueTV and putting it on.
+ *
+ * Every build publishes a small file, version.txt, beside the app on the same download. It holds the
+ * build's number and its version, such as "code=33" and "name=0.1.33". The app reads it each time it
+ * comes to the front. A higher number than its own means a newer app is waiting. Updating downloads
+ * the app into KueTV's own space and hands it to the device's installer, which asks before it installs.
+ */
+object Updates {
+    private const val BASE = "https://github.com/kevinquinnart-bit/Kue/releases/download/kuetv/"
+    const val VERSION_URL = BASE + "version.txt"
+    const val APP_URL = BASE + "KueTV.apk"
+
+    /** A version on the download: its build number (always going up) and the name people see. */
+    data class Latest(val code: Int, val name: String)
+
+    /** Reads version.txt. Null when it doesn't hold a build number. */
+    fun parse(text: String): Latest? {
+        val pairs = text.lines().mapNotNull { line ->
+            val at = line.indexOf('=')
+            if (at <= 0) null else line.substring(0, at).trim() to line.substring(at + 1).trim()
+        }.toMap()
+        val code = pairs["code"]?.toIntOrNull() ?: return null
+        return Latest(code, pairs["name"].orEmpty().ifBlank { code.toString() })
+    }
+
+    /** Whether [latest] is newer than the build [mine] that is running. */
+    fun isNewer(latest: Latest, mine: Int): Boolean = latest.code > mine
+
+    /** A newer version found on opening, still waiting to be put on or put off. */
+    var offer by mutableStateOf<Latest?>(null)
+
+    /** The version put off with "Not now"; it isn't offered again until the app is next started from cold. */
+    var putOff: Int = 0
+
+    private val http by lazy { Provider.http.newBuilder().callTimeout(15, TimeUnit.SECONDS).build() }
+
+    /** What is on the download now. Call off the main thread; throws when it can't be reached. */
+    fun check(): Latest {
+        val request = Request.Builder().url(VERSION_URL).cacheControl(CacheControl.FORCE_NETWORK).header("User-Agent", Provider.USER_AGENT).build()
+        http.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw java.io.IOException("the download answered " + response.code)
+            return parse(response.body.string()) ?: throw java.io.IOException("the version file had no build number")
+        }
+    }
+
+    /** On opening: offer a newer version, unless that one was put off. Quiet when nothing can be reached. */
+    fun checkOnOpen() {
+        val latest = runCatching { check() }.getOrElse {
+            Report.note("Updates", "check on opening failed: " + it.message)
+            return
+        }
+        if (isNewer(latest, BuildConfig.VERSION_CODE) && latest.code != putOff) {
+            Report.note("Updates", "version " + latest.name + " is ready, this is " + BuildConfig.VERSION_NAME)
+            offer = latest
+        }
+    }
+
+    /** A newer version already downloaded and checked in the background, ready for the installer. */
+    var ready by mutableStateOf<File?>(null)
+
+    /** The build number of [ready]. */
+    var readyCode = 0
+        private set
+
+    @Volatile private var fetching = false
+
+    /** The build last handed to the installer, and when. */
+    @Volatile private var handedOver = 0
+    @Volatile private var handedAt = 0L
+
+    /** How long after handing over the same version isn't offered again: time to choose Install. */
+    private const val HANDED_WAIT = 2 * 60_000L
+
+    /**
+     * Checks for a newer version and, when there is one, downloads it straight away in the background. The
+     * offer pops up once it is downloaded, so it is one press to install, with no wait for a download (and any
+     * second try at the download happens out of sight). If the background download fails, the offer still pops
+     * up and downloads as before. Call off the main thread.
+     */
+    fun checkAndFetch(context: Context) {
+        val latest = runCatching { check() }.getOrElse {
+            Report.note("Updates", "check failed: " + it.message)
+            return
+        }
+        if (!isNewer(latest, BuildConfig.VERSION_CODE)) {
+            if (!fetching) tidy(context)
+            return
+        }
+        if (latest.code == putOff) return
+        // Just handed to the installer: KueTV coming back to the front then must not offer it again over the
+        // installer (seen on Kevin's TV with every update up to 0.1.142: the offer came back 1 second later).
+        if (latest.code <= handedOver && android.os.SystemClock.uptimeMillis() - handedAt < HANDED_WAIT) {
+            Report.note("Updates", "back on screen while the installer has version " + latest.name + "; not offered again")
+            return
+        }
+        if (ready?.exists() == true && readyCode >= latest.code) {
+            offer = latest
+            return
+        }
+        if (fetching) return
+        fetching = true
+        try {
+            Report.note("Updates", "version " + latest.name + " found, downloading it in the background")
+            val file = downloadChecked(context) {}
+            readyCode = buildInside(context, file)?.toInt() ?: latest.code
+            ready = file
+            Report.note("Updates", "version " + latest.name + " downloaded and checked, ready to install")
+        } catch (e: Exception) {
+            Report.note("Updates", "background download failed: " + e.javaClass.simpleName + " · " + e.message)
+        } finally {
+            fetching = false
+        }
+        offer = latest
+    }
+
+    private fun folder(context: Context) = File(context.cacheDir, "update").apply { mkdirs() }
+
+    /** Downloads the newest app, telling [progress] how far it has got, 0 to 100. Call off the main thread. */
+    fun download(context: Context, progress: (Int) -> Unit): File {
+        val target = File(folder(context), "KueTV.apk")
+        val part = File(folder(context), "KueTV.apk.part")
+        val big = Provider.http.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
+        val request = Request.Builder().url(APP_URL).cacheControl(CacheControl.FORCE_NETWORK).header("User-Agent", Provider.USER_AGENT).build()
+        big.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) throw java.io.IOException("the download answered " + response.code)
+            val total = response.body.contentLength()
+            response.body.byteStream().use { input ->
+                part.outputStream().use { output ->
+                    val buffer = ByteArray(64 * 1024)
+                    var done = 0L
+                    var shown = -1
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        output.write(buffer, 0, n)
+                        done += n
+                        if (total > 0) {
+                            val now = (done * 100 / total).toInt()
+                            if (now != shown) { shown = now; progress(now) }
+                        }
+                    }
+                }
+            }
+        }
+        target.delete()
+        if (!part.renameTo(target)) throw java.io.IOException("the downloaded app couldn't be kept")
+        // Each build is kept under its own name, so a second download can never replace the file the
+        // installer is still reading.
+        val build = buildInside(context, target) ?: return target
+        val kept = File(folder(context), "KueTV-" + build + ".apk")
+        if (kept.exists() && buildInside(context, kept) == build) {
+            target.delete()
+            return kept
+        }
+        kept.delete()
+        if (!target.renameTo(kept)) throw java.io.IOException("the downloaded app couldn't be kept")
+        return kept
+    }
+
+    /**
+     * The build number inside a downloaded app, read the way the installer reads it. Null when the file
+     * isn't a whole, readable app (cut short, or something other than an app).
+     */
+    fun buildInside(context: Context, file: File): Long? = runCatching {
+        val info = context.packageManager.getPackageArchiveInfo(file.path, 0) ?: return null
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()
+    }.getOrNull()
+
+    /**
+     * Downloads the newest app and checks it before the installer sees it: it must be a whole app with a
+     * newer build number than the one running. If not, it downloads once more. Each try is written in the
+     * Report, so a failed update shows what was downloaded. Throws when neither try gives a newer app.
+     */
+    fun downloadChecked(context: Context, progress: (Int) -> Unit): File {
+        repeat(2) { attempt ->
+            val file = download(context, progress)
+            val inside = buildInside(context, file)
+            Report.note(
+                "Updates",
+                "try " + (attempt + 1) + ": downloaded " + file.length() + " bytes, build " + (inside?.toString() ?: "unreadable") +
+                    ", this is build " + BuildConfig.VERSION_CODE,
+            )
+            if (inside != null && inside > BuildConfig.VERSION_CODE) return file
+            file.delete()
+        }
+        throw java.io.IOException("the download wasn't a newer, whole app, twice")
+    }
+
+    /** Whether the device lets KueTV put apps on. Fire TV and phones ask for this once, in their own settings. */
+    fun mayInstall(context: Context): Boolean = Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
+
+    /** Opens the device's own page for letting KueTV put apps on. False when the device has no such page. */
+    fun openInstallPermission(context: Context): Boolean = runCatching {
+        context.startActivity(
+            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+        true
+    }.getOrDefault(false)
+
+    /** Hands the downloaded app to the device's installer, which asks before it installs over this one. */
+    fun install(context: Context, file: File) {
+        handedOver = buildInside(context, file)?.toInt() ?: readyCode
+        handedAt = android.os.SystemClock.uptimeMillis()
+        offer = null
+        // The Home watcher stands aside while the installer opens, so it can't pull KueTV back over it.
+        HomeGuard.pauseFor(HANDED_WAIT)
+        Report.note("Updates", "build " + handedOver + " handed to the installer (" + file.length() + " bytes)")
+        // KueTV writes the app into the installer itself, as KueSounds does, and the installer answers with how it
+        // went, so a refusal ("App not installed") is in the Report with its reason. The old way, the installer
+        // reading the file from KueTV and saying nothing back, is kept for when this one can't start.
+        val session = runCatching { installSession(context, file) }
+        if (session.isFailure) {
+            Report.note("Updates", "installer session couldn't start: " + session.exceptionOrNull()?.message + "; using the old way")
+            val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".files", file)
+            context.startActivity(
+                Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(uri, "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
+
+    /** Hands the app to Android's installer in a session: it asks "Update this app?" and then answers [UpdateReceiver]. */
+    private fun installSession(context: Context, file: File) {
+        val installer = context.packageManager.packageInstaller
+        val params = android.content.pm.PackageInstaller.SessionParams(android.content.pm.PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
+            setAppPackageName(context.packageName)
+            setSize(file.length())
+        }
+        val id = installer.createSession(params)
+        installer.openSession(id).use { session ->
+            session.openWrite("KueTV.apk", 0, file.length()).use { out ->
+                file.inputStream().use { it.copyTo(out) }
+                session.fsync(out)
+            }
+            val flags = android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) android.app.PendingIntent.FLAG_MUTABLE else 0)
+            val done = android.app.PendingIntent.getBroadcast(context, id, Intent(context, UpdateReceiver::class.java), flags)
+            session.commit(done.intentSender)
+        }
+        Report.note("Updates", "written to the installer, session $id")
+    }
+
+    /** Clears a downloaded app once the newer version is the one running. */
+    fun tidy(context: Context) {
+        runCatching { File(context.cacheDir, "update").deleteRecursively() }
+    }
+}
+
+/**
+ * Hears back from Android's installer: shows its "Update this app?" question when it has one, and writes in
+ * the Report how it went, with the installer's own reason when it refuses.
+ */
+class UpdateReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val status = intent.getIntExtra(android.content.pm.PackageInstaller.EXTRA_STATUS, -999)
+        val message = intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE).orEmpty()
+        when (status) {
+            android.content.pm.PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                @Suppress("DEPRECATION")
+                val ask = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
+                Report.note("Updates", "the installer is asking to update")
+                runCatching { context.startActivity(ask.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    .onFailure { Report.note("Updates", "the installer's question wouldn't open: " + it.message) }
+            }
+            android.content.pm.PackageInstaller.STATUS_SUCCESS -> Report.note("Updates", "the installer put the update on")
+            else -> Report.note("Updates", "the installer refused, status $status: $message")
+        }
+    }
+}
