@@ -305,6 +305,23 @@ object AddOns {
         return match?.text("id")
     }
 
+    /** Who is in a film or series, and who directed it, as the film index has them. */
+    class People(val cast: List<String>, val directors: List<String>)
+
+    /** Asks the film index who is in [name] and who directed it. Null when it isn't found. Blocks; call off the main thread. */
+    fun people(type: String, name: String): People? {
+        val id = idFor(type, name) ?: return null
+        val meta = fetch("$index/meta/$type/$id.json")?.inner("meta") ?: return null
+        val names: (String) -> List<String> = { key -> meta.list(key).mapNotNull { runCatching { it.asString.trim() }.getOrNull() }.filter { it.isNotEmpty() } }
+        val linked: (String) -> List<String> = { category ->
+            meta.list("links").mapNotNull { runCatching { it.asJsonObject }.getOrNull() }
+                .filter { it.text("category").equals(category, ignoreCase = true) }.map { it.text("name").trim() }.filter { it.isNotEmpty() }
+        }
+        val cast = names("cast").ifEmpty { linked("Cast") }.distinct().take(8)
+        val directors = names("director").ifEmpty { linked("Directors") }.distinct().take(3)
+        return if (cast.isEmpty() && directors.isEmpty()) null else People(cast, directors)
+    }
+
     /**
      * A subtitle file in [lang] from the subtitle add-ons, for a film or episode playing from the provider's own copy.
      * An episode is named "Show · S1 E2". Null when no subtitle add-on has one. Blocks; call off the main thread.

@@ -1374,6 +1374,8 @@ private fun TitleMenu(
     onFavourite: () -> Unit,
     onWatched: () -> Unit,
     onClose: () -> Unit,
+    /** Opens who is in it and who directed it, each leading to their other films. */
+    onPeople: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val found by produceState(trailer, name) {
@@ -1400,6 +1402,7 @@ private fun TitleMenu(
             FocusRow("Play", { onClose(); onPlay() }, Modifier.focusRequester(first), look = Look.MAIN, textSize = 17.sp, padV = 8.dp)
             FocusRow(if (favourite) "★ Remove from favourites" else "★ Add to favourites", { onFavourite(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
             FocusRow(if (watched) "Mark as not watched" else "✓ Mark as watched", { onWatched(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+            if (onPeople != null) FocusRow("Cast and director", { onClose(); onPeople() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "Their other films")
             if (playUrl.isNotBlank()) {
                 FocusRow("⬇ Download to watch offline", {
                     onClose()
@@ -2165,6 +2168,46 @@ private fun MainScreen(
                 }
                 // Hold OK on a film: a short list of what can be done with it.
                 var menuFilm by remember { mutableStateOf<Film?>(null) }
+                // Cast and director: whose films to list (with true for a director), and the lists once found.
+                var peopleOf by remember { mutableStateOf<Film?>(null) }
+                var peopleMenu by remember { mutableStateOf<Pair<String, List<Pair<String, () -> Unit>>>?>(null) }
+                var creditsOf by remember { mutableStateOf<Pair<String, Boolean>?>(null) }
+                var creditsMenu by remember { mutableStateOf<Pair<String, List<Pair<String, () -> Unit>>>?>(null) }
+                LaunchedEffect(peopleOf) {
+                    val film = peopleOf ?: return@LaunchedEffect
+                    kueToast(context, "Asking the film index who is in it…", long = false)
+                    val found = withContext(Dispatchers.IO) { runCatching { AddOns.people("movie", film.name) }.getOrNull() }
+                    peopleOf = null
+                    if (found == null) { kueToast(context, "The film index doesn't know who is in " + film.name + "."); return@LaunchedEffect }
+                    peopleMenu = film.name to (found.cast.map { who -> "With $who" to { creditsOf = who to false } } + found.directors.map { who -> "Directed by $who" to { creditsOf = who to true } })
+                }
+                LaunchedEffect(creditsOf) {
+                    val (who, directed) = creditsOf ?: return@LaunchedEffect
+                    kueToast(context, "Finding " + who + "'s films…", long = false)
+                    val films = withContext(Dispatchers.IO) { runCatching { Credits.films(who, directed) }.getOrNull() }
+                    creditsOf = null
+                    if (films == null) { kueToast(context, "Couldn't reach Wikidata, where the films are listed. Try again in a minute."); return@LaunchedEffect }
+                    if (films.isEmpty()) { kueToast(context, "No films are listed for $who."); return@LaunchedEffect }
+                    val mine = library.films.groupBy { Credits.plain(it.name) }
+                    val canStream = addOns.any { it.streams }
+                    val rows = films.mapNotNull { c ->
+                        val ours = mine[Credits.plain(c.title)]?.firstOrNull()
+                        val label = c.title + (c.year?.let { " ($it)" } ?: "")
+                        when {
+                            ours != null -> "▶ $label · in your films" to {
+                                onPlay(listOf(Playable(ours.name, ours.url, find = finder("movie", ours.name, null, null), poster = ours.poster)), 0, false, "film:" + ours.id)
+                            }
+                            canStream -> "$label · from your add-ons" to {
+                                onPlay(listOf(Playable(c.title, "", find = streamFinder(addOns, "movie", c.title, null, null, subtitleLang, knownId = c.imdb))), 0, false, "credit:" + c.imdb)
+                            }
+                            else -> null
+                        }
+                    }.sortedBy { if (it.first.startsWith("▶")) 0 else 1 }
+                    if (rows.isEmpty()) kueToast(context, "None of $who's films are in your films, and you have no add-ons to play the rest from.")
+                    else creditsMenu = (if (directed) "Directed by " else "With ") + who + " · " + rows.size + " films" to rows
+                }
+                peopleMenu?.let { (title, options) -> OptionsBox("Cast and director · $title", options) { peopleMenu = null } }
+                creditsMenu?.let { (title, options) -> OptionsBox(title, options) { creditsMenu = null } }
                 menuFilm?.let { film ->
                     val favKey = Favourites.key(film, login)
                     TitleMenu(
@@ -2178,6 +2221,7 @@ private fun MainScreen(
                         onFavourite = { favourites.toggle(favKey) },
                         onWatched = { Watched.set(context, film.url, !Watched.isWatched(context, film.url)) },
                         onClose = { menuFilm = null },
+                        onPeople = { peopleOf = film },
                     )
                 }
                 Column(fill()) {
@@ -6749,6 +6793,7 @@ private fun OptionsBox(title: String, options: List<Pair<String, () -> Unit>>, o
         val armed = remember { booleanArrayOf(false) }
         Column(
             Modifier.width(420.dp).background(Page, RoundedCornerShape(18.dp)).padding(14.dp)
+                .verticalScroll(rememberScrollState())
                 .onPreviewKeyEvent { e ->
                     if (armed[0]) return@onPreviewKeyEvent false
                     if (e.type == KeyEventType.KeyDown && e.nativeKeyEvent.repeatCount == 0) { armed[0] = true; false } else true
