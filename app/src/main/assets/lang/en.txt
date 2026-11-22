@@ -1171,3 +1171,5 @@ OK: clear its cache, or uninstall it
 That app's page wouldn't open.
 Not enough storage on the TV for the update. Free some space in Settings › This TV, then use Settings › About › Check for updates.
 and tap Copy there. This address works whenever KueTV is on.
+↕ Move
+▲ ▼ to move it, OK to put it down

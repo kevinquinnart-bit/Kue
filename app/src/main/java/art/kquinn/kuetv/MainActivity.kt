@@ -2048,6 +2048,8 @@ private fun MainScreen(
                     menuChannel?.let { ch ->
                         ChannelMenu(
                             ch, login, favourites, mine, onClose = { menuChannel = null }, onPickToHide = { state.hiding = setOf(ch.id) },
+                            // Hold OK on a favourite: Move picks it up straight away, in place of a Sort button at the top of the list.
+                            onMove = if (sortable) ({ state.sorting = true; state.picked = ch.id }) else null,
                             // Starred (or taken off): the remote moves on to the channel that was under it, wherever the list now puts it.
                             onFavourite = { focusNext = shown.getOrNull(shown.indexOfFirst { it.id == ch.id } + 1)?.id },
                         )
@@ -2112,13 +2114,6 @@ private fun MainScreen(
                                 look = Look.MAIN, below = "Hidden just now",
                             )
                         }
-                        if (sortable && hiding == null) {
-                            FocusRow(
-                                if (sorting) "Done sorting" else "Sort my favourites",
-                                { state.sorting = !state.sorting; state.picked = null },
-                                look = if (sorting) Look.MAIN else Look.OTHER,
-                            )
-                        }
                         LazyColumn(
                             Modifier.fillMaxSize().focusRestorer().onPreviewKeyEvent { e ->
                                 // The number keys: a channel by its place in the list.
@@ -2154,9 +2149,10 @@ private fun MainScreen(
                                             hiding != null -> state.hiding = if (toHide) hiding - channel.id else hiding + channel.id
                                             !sorting -> onPlay(playables.value, i, true, key)
                                             state.picked == null -> state.picked = channel.id
-                                            state.picked == channel.id -> state.picked = null
+                                            // Put down: moving is over.
+                                            state.picked == channel.id -> { state.picked = null; state.sorting = false }
                                             // Phone: tapping another channel puts the picked one there.
-                                            else -> { moveTo(i); state.picked = null }
+                                            else -> { moveTo(i); state.picked = null; state.sorting = false }
                                         }
                                     },
                                     (if (key == resumeKey) Modifier.focusRequester(resume) else Modifier).then(if (i == jumpTo) Modifier.focusRequester(jumpFocus) else Modifier)
@@ -6968,6 +6964,8 @@ private fun AskBox(question: String, below: String, yes: String, no: String, onY
 @Composable
 private fun ChannelMenu(
     channel: ChannelGroup, login: Boolean, favourites: Favourites, mine: List<MyCategories.Mine>, onClose: () -> Unit, onPickToHide: () -> Unit = {},
+    /** In Favourites: picks the channel up, to move it to another place in the list. */
+    onMove: (() -> Unit)? = null,
     /** After the channel is made a favourite or taken off: so the list can move on to the next channel. */
     onFavourite: () -> Unit = {},
 ) {
@@ -7019,7 +7017,9 @@ private fun ChannelMenu(
                 FocusRow("Cancel", { matching = false }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
             } else when (naming) {
                 null -> {
-                    FocusRow(if (favourite) "★ Remove from favourites" else "★ Add to favourites", { favourites.toggleAll(favKeys); onClose(); onFavourite() }, Modifier.focusRequester(first), look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+                    // Moving comes first in Favourites, where it is what holding is mostly for (Kevin, 22 November 2026).
+                    if (onMove != null) FocusRow("↕ Move", { onClose(); onMove() }, Modifier.focusRequester(first), look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "▲ ▼ to move it, OK to put it down")
+                    FocusRow(if (favourite) "★ Remove from favourites" else "★ Add to favourites", { favourites.toggleAll(favKeys); onClose(); onFavourite() }, if (onMove == null) Modifier.focusRequester(first) else Modifier, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
                     for (m in mine) {
                         val inIt = channel.id in m.channels
                         FocusRow((if (inIt) "Take out of " else "Add to ") + "📁 " + m.name, { MyCategories.toggle(context, m.id, channel.id); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
