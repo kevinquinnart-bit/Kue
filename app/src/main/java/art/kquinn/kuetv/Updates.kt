@@ -249,16 +249,24 @@ object Updates {
         // KueTV writes the app into the installer itself, as KueSounds does, and the installer answers with how it
         // went, so a refusal ("App not installed") is in the Report with its reason. The old way, the installer
         // reading the file from KueTV and saying nothing back, is kept for when this one can't start.
-        val session = runCatching { installSession(context, file) }
-        if (session.isFailure) {
-            Report.note("Updates", "installer session couldn't start: " + session.exceptionOrNull()?.message + "; using the old way")
-            val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".files", file)
-            context.startActivity(
-                Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(uri, "application/vnd.android.package-archive")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }
+        // Said at once, and the 83 MB written to the installer away from the screen: written on the screen, it froze
+        // the remote for 5 to 7 seconds with nothing said, and the update got asked for twice (Kevin, 22 November 2026).
+        kueToast(context, "Update downloaded. Handing it to the TV's installer…", long = false)
+        val app = context.applicationContext
+        Thread({
+            val session = runCatching { installSession(app, file) }
+            if (session.isFailure) {
+                Report.note("Updates", "installer session couldn't start: " + session.exceptionOrNull()?.message + "; using the old way")
+                val uri = androidx.core.content.FileProvider.getUriForFile(app, app.packageName + ".files", file)
+                runCatching {
+                    app.startActivity(
+                        Intent(Intent.ACTION_VIEW)
+                            .setDataAndType(uri, "application/vnd.android.package-archive")
+                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            }
+        }, "kuetv-install").start()
     }
 
     /** Hands the app to Android's installer in a session: it asks "Update this app?" and then answers [UpdateReceiver]. */

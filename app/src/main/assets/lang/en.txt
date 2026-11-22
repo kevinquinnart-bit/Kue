@@ -1173,3 +1173,4 @@ Not enough storage on the TV for the update. Free some space in Settings › Thi
 and tap Copy there. This address works whenever KueTV is on.
 ↕ Move
 ▲ ▼ to move it, OK to put it down
+Update downloaded. Handing it to the TV's installer…
