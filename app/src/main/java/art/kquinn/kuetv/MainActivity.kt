@@ -1782,8 +1782,26 @@ private fun MainScreen(
     // Coming back from the player isn't opening a section, so it stays where it was.
     LaunchedEffect(section) {
         if (before[0] != section && !(!shownOnce[0] && state.resumeKey != null)) {
+            // Each section opens on Favourites when there are any (Kevin, 22 November 2026: in place of All, and of
+            // Live TV opening on the category it was last in).
+            val favGroups = library.liveIndex.favourites(favs)
+            val liveFavs = favGroups.isNotEmpty()
+            // Catch-up only when a favourite has catch-up, so it never opens on an empty list.
+            val catchUpFavs = favGroups.any { g -> g.versions.any { it.channel.catchupDays > 0 } }
             when (section) {
-                Section.LIVE -> Unit
+                Section.LIVE -> if (liveFavs && state.liveCategory != FAVOURITES) {
+                    state.liveCategory = FAVOURITES
+                    launch { runCatching { state.liveCategoryList.scrollToItem(0) } }
+                    launch { runCatching { state.channelList.scrollToItem(0) } }
+                }
+                Section.GUIDE, Section.CATCHUP -> {
+                    val pick = if (section == Section.GUIDE) state.guide else state.catchUp
+                    if ((if (section == Section.GUIDE) liveFavs else catchUpFavs) && pick.open == null && pick.category != FAVOURITES) {
+                        pick.category = FAVOURITES
+                        launch { runCatching { pick.categoryList.scrollToItem(0) } }
+                        launch { runCatching { pick.channelList.scrollToItem(0) } }
+                    }
+                }
                 Section.FILMS -> {
                     state.filmCategory = if (library.films.any { Favourites.key(it, login) in favs }) FAVOURITES else ALL
                     launch { runCatching { state.filmCategoryList.scrollToItem(0) } }
