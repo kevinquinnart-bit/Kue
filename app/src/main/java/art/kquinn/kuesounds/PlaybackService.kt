@@ -35,9 +35,12 @@ class PlaybackService : MediaSessionService() {
         Google.init(this)
         Scanner.init(this)
         Offline.init(this)
+        Podcasts.init(this)
         val upstream = OkHttpDataSource.Factory(Drive.http)
         // Every request for a song carries the current Drive pass, fetched fresh when the old one has run out.
+        // Only requests to Google's Drive: a podcast comes from its own website, which must never see the pass.
         val withPass = ResolvingDataSource.Factory(upstream) { spec ->
+            if (spec.uri.host?.endsWith("googleapis.com") != true) return@Factory spec
             val token = Google.tokenBlocking().orEmpty()
             spec.withAdditionalHeaders(mapOf("Authorization" to "Bearer $token"))
         }
@@ -72,11 +75,58 @@ class PlaybackService : MediaSessionService() {
                 }
             }
         })
+        listenToPodcasts(player)
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         session = MediaSession.Builder(this, player).setSessionActivity(open).build()
+    }
+
+    private val tick = android.os.Handler(android.os.Looper.getMainLooper())
+    private var ticks = 0
+
+    /**
+     * Podcasts: where each episode has got to is kept every 10 seconds (and in the Drive on pause and every two
+     * minutes), an episode played to the end is marked played, and moving on to an episode starts it where it was left.
+     */
+    private fun listenToPodcasts(player: ExoPlayer) {
+        var current = ""
+        val keep = object : Runnable {
+            override fun run() {
+                val id = player.currentMediaItem?.mediaId.orEmpty()
+                if (id.startsWith("pod:") && player.isPlaying) {
+                    ticks++
+                    Podcasts.keepPosition(id.removePrefix("pod:"), player.currentPosition, ticks % 12 == 0)
+                }
+                tick.postDelayed(this, 10_000)
+            }
+        }
+        tick.postDelayed(keep, 10_000)
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                val id = player.currentMediaItem?.mediaId.orEmpty()
+                if (!isPlaying && id.startsWith("pod:") && player.playbackState != Player.STATE_ENDED) {
+                    Podcasts.keepPosition(id.removePrefix("pod:"), player.currentPosition, true)
+                }
+            }
+
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                // The episode before played to its end.
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && current.startsWith("pod:")) Podcasts.setPlayed(current.removePrefix("pod:"), true)
+                current = mediaItem?.mediaId.orEmpty()
+                // Moved on to another episode: it starts where it was left (the first one is started there already).
+                if (reason != Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED && current.startsWith("pod:")) {
+                    val id = current.removePrefix("pod:")
+                    val at = Podcasts.position(id)
+                    if (at > 5_000 && !Podcasts.isPlayed(id)) player.seekTo(at)
+                }
+            }
+
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED && current.startsWith("pod:")) Podcasts.setPlayed(current.removePrefix("pod:"), true)
+            }
+        })
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
@@ -88,6 +138,7 @@ class PlaybackService : MediaSessionService() {
     }
 
     override fun onDestroy() {
+        tick.removeCallbacksAndMessages(null)
         scope.cancel()
         session?.run {
             player.release()

@@ -103,10 +103,13 @@ sealed class Screen {
     data class FolderPage(val id: String?, val name: String) : Screen()
     data object NowPlaying : Screen()
     data object Settings : Screen()
+    data object PodcastFind : Screen()
+    data class ShowPage(val feed: String) : Screen()
+    data class EpisodePage(val id: String) : Screen()
 }
 
 enum class Tab(val label: String) {
-    ALBUMS("Albums"), ARTISTS("Artists"), SONGS("Songs"), SINGLES("Singles"), FOLDERS("Folders"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
+    ALBUMS("Albums"), PODCASTS("Podcasts"), ARTISTS("Artists"), SONGS("Songs"), SINGLES("Singles"), FOLDERS("Folders"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
 }
 
 object Ui {
@@ -118,7 +121,7 @@ object Ui {
     }
 
     @Composable
-    private fun Words(
+    internal fun Words(
         text: String,
         size: Int = 16,
         colour: Color = K.Ink,
@@ -164,7 +167,7 @@ object Ui {
 
     /** A big yellow button, or a blue one when it is the second choice. */
     @Composable
-    private fun Button(label: String, main: Boolean = true, glyph: Glyph? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    internal fun Button(label: String, main: Boolean = true, glyph: Glyph? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
         Row(
             modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Panel)
                 .clickable(onClick = onClick).padding(horizontal = 18.dp),
@@ -180,7 +183,7 @@ object Ui {
     }
 
     @Composable
-    private fun RoundButton(glyph: Glyph, label: String, size: Dp = 44.dp, onClick: () -> Unit) {
+    internal fun RoundButton(glyph: Glyph, label: String, size: Dp = 44.dp, onClick: () -> Unit) {
         Box(
             Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClickLabel = label, onClick = onClick),
             contentAlignment = Alignment.Center,
@@ -242,6 +245,9 @@ object Ui {
                     is Screen.FolderPage -> FolderPage(s, data, back, go)
                     Screen.NowPlaying -> NowPlaying(back)
                     Screen.Settings -> Settings(back)
+                    Screen.PodcastFind -> PodUi.Find(back, go)
+                    is Screen.ShowPage -> PodUi.ShowPage(s.feed, back, go)
+                    is Screen.EpisodePage -> PodUi.EpisodePage(s.id, back, go)
                 }
             }
             if (stack.last() != Screen.NowPlaying && Playing.active) MiniPlayer { go(Screen.NowPlaying) }
@@ -286,6 +292,8 @@ object Ui {
             }
             Box(Modifier.weight(1f)) {
                 when {
+                    // Podcasts don't need any music in the Drive.
+                    tab == Tab.PODCASTS && query.isBlank() -> PodUi.Home(go)
                     Scanner.data.tracks.isEmpty() -> Empty()
                     query.isNotBlank() -> {
                         val results = remember(query, albums) { Library.search(query, Scanner.data.tracks, albums, artists) }
@@ -320,7 +328,7 @@ object Ui {
     }
 
     @Composable
-    private fun Note(text: String) {
+    internal fun Note(text: String) {
         Box(Modifier.fillMaxSize().padding(28.dp)) { Words(text, 17, K.Soft, lines = 4) }
     }
 
@@ -752,7 +760,7 @@ object Ui {
                     if (Playing.problem.isNotEmpty()) Words(Playing.problem, 15, K.Accent, lines = 2)
                 }
                 val fav = Sync.isFavourite(Playing.currentId)
-                Box(
+                if (!Playing.isPodcast) Box(
                     Modifier.size(52.dp).clip(CircleShape).background(K.Panel)
                         .clickable(onClickLabel = if (fav) "Take out of favourites" else "Add to favourites") { Sync.flipFavourite(Playing.currentId) },
                     contentAlignment = Alignment.Center,
@@ -774,6 +782,7 @@ object Ui {
                     Words(Library.clock(duration), 14, K.Soft)
                 }
             }
+            if (Playing.isPodcast) PodUi.Controls() else
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Control(Glyph.SHUFFLE, "Shuffle", 48.dp, if (Playing.shuffle) K.Accent else K.Soft) { Playing.flipShuffle() }
                 Control(Glyph.PREVIOUS, "Previous", 56.dp, K.Ink) { Playing.previous() }

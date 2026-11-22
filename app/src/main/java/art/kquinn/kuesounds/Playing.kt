@@ -42,6 +42,33 @@ object Playing {
         private set
     var problem by mutableStateOf("")
         private set
+    var speed by mutableStateOf(1f)
+        private set
+    /** The sleep timer: when it stops the playing (0 for off), or at the end of this episode. */
+    var sleepAt by mutableStateOf(0L)
+        private set
+    var sleepAtEnd by mutableStateOf(false)
+        private set
+    private val clock = android.os.Handler(android.os.Looper.getMainLooper())
+    private val sleepCheck = object : Runnable {
+        override fun run() {
+            val c = controller
+            if (sleepAt > 0 && System.currentTimeMillis() >= sleepAt) {
+                c?.pause()
+                sleepAt = 0
+                return
+            }
+            if (sleepAtEnd && c != null && c.duration > 0 && c.duration - c.currentPosition < 1_500) {
+                c.pause()
+                sleepAtEnd = false
+                return
+            }
+            if (sleepAt > 0 || sleepAtEnd) clock.postDelayed(this, 1_000)
+        }
+    }
+
+    /** A podcast episode is playing (rather than a song). */
+    val isPodcast: Boolean get() = currentId.startsWith("pod:")
 
     /** Whether anything is loaded to play. */
     val active: Boolean get() = currentId.isNotEmpty()
@@ -79,6 +106,7 @@ object Playing {
         durationMs = p.duration.takeIf { it > 0 } ?: 0L
         shuffle = p.shuffleModeEnabled
         repeat = p.repeatMode
+        speed = p.playbackParameters.speed
         if (p.isPlaying) problem = ""
     }
 
@@ -122,10 +150,85 @@ object Playing {
             return play(onPhone, chosen?.let { onPhone.indexOf(it) }?.takeIf { it >= 0 } ?: 0, shuffled)
         }
         c.shuffleModeEnabled = shuffled
+        // Music always plays at its own speed: a podcast's faster speed stays with podcasts.
+        c.setPlaybackSpeed(1f)
         val first = if (shuffled) list.indices.random() else start.coerceIn(0, list.size - 1)
         c.setMediaItems(list.map { item(it) }, first, 0L)
         c.prepare()
         c.play()
+    }
+
+    /** A podcast episode to play: from the phone when saved there, otherwise from the show's own website. */
+    fun episodeItem(e: Podcasts.Episode): MediaItem {
+        val show = Podcasts.showOf(e)
+        val local = Podcasts.fileFor(e)
+        val art = e.art.ifEmpty { show?.art.orEmpty() }
+        return MediaItem.Builder()
+            .setMediaId("pod:" + e.id)
+            .setUri(local?.let { Uri.fromFile(it).toString() } ?: e.url)
+            .setMediaMetadata(
+                MediaMetadata.Builder()
+                    .setTitle(e.title)
+                    .setArtist(show?.title.orEmpty())
+                    .setAlbumTitle(show?.title.orEmpty())
+                    .setArtworkUri(art.takeIf { it.isNotEmpty() }?.let { Uri.parse(it) })
+                    .setIsPlayable(true)
+                    .setIsBrowsable(false)
+                    .build(),
+            )
+            .build()
+    }
+
+    /** Plays [list] from [start], each episode from where it was left, at the podcast speed. */
+    fun playEpisodes(list: List<Podcasts.Episode>, start: Int) {
+        val c = controller ?: return
+        if (list.isEmpty()) return
+        val chosen = list[start.coerceIn(0, list.size - 1)]
+        if (!Net.online(appContext) && Podcasts.fileFor(chosen) == null) {
+            problem = "No internet, and this episode isn't saved on the phone."
+            return
+        }
+        c.shuffleModeEnabled = false
+        c.repeatMode = Player.REPEAT_MODE_OFF
+        val at = if (Podcasts.isPlayed(chosen.id)) 0L else Podcasts.position(chosen.id)
+        if (Podcasts.isPlayed(chosen.id)) Podcasts.setPlayed(chosen.id, false)
+        c.setMediaItems(list.map { episodeItem(it) }, start.coerceIn(0, list.size - 1), at)
+        c.setPlaybackSpeed(Podcasts.speed())
+        c.prepare()
+        c.play()
+    }
+
+    /** Forward (or back, below 0) by [ms]. */
+    fun skip(ms: Long) {
+        val c = controller ?: return
+        val to = (c.currentPosition + ms).coerceAtLeast(0L)
+        c.seekTo(if (c.duration > 0) to.coerceAtMost(c.duration - 1_000) else to)
+    }
+
+    /** The next podcast speed along: 0.8, 1, 1.2, 1.5, 1.75, 2, 2.5, 3, then round again. */
+    fun nextSpeed() {
+        val c = controller ?: return
+        val speeds = Podcasts.SPEEDS.split(',').map { it.toFloat() }
+        val at = speeds.indexOfFirst { kotlin.math.abs(it - c.playbackParameters.speed) < 0.01f }
+        val next = speeds[(at + 1) % speeds.size]
+        c.setPlaybackSpeed(next)
+        Podcasts.speed(next)
+    }
+
+    /** The sleep timer, along: off, 15, 30, 45, 60 minutes, the end of this episode, then off again. */
+    fun nextSleep() {
+        val now = System.currentTimeMillis()
+        val minutesLeft = if (sleepAt > 0) ((sleepAt - now) / 60_000 + 1).toInt() else 0
+        when {
+            sleepAtEnd -> { sleepAtEnd = false; sleepAt = 0 }
+            sleepAt == 0L -> sleepAt = now + 15 * 60_000L
+            minutesLeft <= 15 -> sleepAt = now + 30 * 60_000L
+            minutesLeft <= 30 -> sleepAt = now + 45 * 60_000L
+            minutesLeft <= 45 -> sleepAt = now + 60 * 60_000L
+            else -> { sleepAt = 0; sleepAtEnd = true }
+        }
+        clock.removeCallbacks(sleepCheck)
+        if (sleepAt > 0 || sleepAtEnd) clock.post(sleepCheck)
     }
 
     fun toggle() {

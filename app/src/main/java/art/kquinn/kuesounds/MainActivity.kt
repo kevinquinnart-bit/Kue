@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
         Scanner.init(this)
         Offline.init(this)
         Sync.init(this)
+        Podcasts.init(this)
         Playing.connect(this)
         Fixer.askPermission = ::askEdit
         // Settings › Notifications › Turn on: Android's question the first time; after that (Android won't

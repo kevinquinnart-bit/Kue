@@ -81,6 +81,16 @@ object Sync {
         later(3000)
     }
 
+    /** Any remembered choice by its name ("" or null when there is none). */
+    fun get(key: String): String? = entries[key]?.value?.takeIf { it.isNotEmpty() }
+
+    /** Remembers a choice, here and (in a moment) in the Drive. */
+    fun put(key: String, value: String) {
+        if (!::app.isInitialized) return
+        if ((entries[key]?.value ?: "") == value) return
+        set(key, value)
+    }
+
     // Favourites ------------------------------------------------------------------------------
 
     fun isFavourite(id: String): Boolean = entries["fav:$id"]?.value == "1"
