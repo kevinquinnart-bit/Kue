@@ -2106,6 +2106,9 @@ private fun MainScreen(
                                 look = Look.MAIN, below = "Hidden just now",
                             )
                         }
+                        // A new category starts its list afresh: ▶ from the categories lands on its first channel, not on
+                        // the place the remote was in the last list (Kevin, 22 November 2026).
+                        androidx.compose.runtime.key(liveCategory) {
                         LazyColumn(
                             Modifier.fillMaxSize().focusRestorer().onPreviewKeyEvent { e ->
                                 // The number keys: a channel by its place in the list.
@@ -2156,6 +2159,7 @@ private fun MainScreen(
                                     below = nowLine(library.account, channel.versions[channel.start].channel.id, channel.name),
                                 )
                             }
+                        }
                         }
                     }
                 }
