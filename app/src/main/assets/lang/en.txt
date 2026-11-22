@@ -1161,3 +1161,5 @@ Stremio said
 10 s back
 30 s on
 That isn't a link. It should start with http:// or https://
+and tap Copy there. The page stays open for 15 minutes, even if you leave this screen.
+The page for your phone couldn't open this time. Press Done and open this screen again.

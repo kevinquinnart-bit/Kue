@@ -4863,31 +4863,64 @@ private fun GridCell(
  * The report: what the app did and what went wrong, to copy and send. A phone copies it with a button.
  * A TV shows an address to open on a phone on the same Wi-Fi, where the same report can be copied.
  */
+/** The report with the lines saying what it came from, as it stands right now. */
+private fun reportText(context: android.content.Context, phone: Boolean): String {
+    val drive = Recordings.drive(context)
+    return Report.text(
+        listOf(
+            "KueTV, version " + BuildConfig.VERSION_NAME,
+            (if (phone) "Phone" else "TV") + ": " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE,
+            "Add-ons: " + AddOnStore.all(context).size + " · Google Drive: " + (if (!drive.isSetUp) "no keys in this copy" else if (drive.signedIn) "signed in" else "not signed in") +
+                " · Set to record: " + TimedStore.all(context).size + " · Recordings here: " + Recordings.here(context).size,
+        ) + runCatching { TvProbe.lines(context) }.getOrDefault(listOf("TV inputs: couldn't be asked")),
+    )
+}
+
+/**
+ * The report's page for the phone. It stays open for 15 minutes after the Report screen was last opened, whatever
+ * the TV shows meanwhile: tied to the screen, it shut whenever the screen went (seen on Kevin's TV, 22 November
+ * 2026: shut 4 seconds after opening, before the phone had asked). Each visit gets the report as it is then.
+ */
+private object ReportPage {
+    private const val OPEN_MS = 15 * 60_000L
+    private var server: PageServer? = null
+    @Volatile private var until = 0L
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val check = object : Runnable {
+        override fun run() {
+            if (android.os.SystemClock.uptimeMillis() >= until) { server?.stop(); server = null } else main.postDelayed(this, 30_000)
+        }
+    }
+
+    /** Opens the page (or keeps it open) and gives its address, or null when it can't be opened. */
+    fun open(context: android.content.Context): String? {
+        val ip = PhoneSetup.localAddress() ?: return null
+        until = android.os.SystemClock.uptimeMillis() + OPEN_MS
+        if (server == null) {
+            val app = context.applicationContext
+            val fresh = PageServer { PageServer.copyPage("KueTV report", reportText(app, false)) }
+            if (fresh.start() == null) return null
+            server = fresh
+            main.removeCallbacks(check)
+            main.postDelayed(check, 30_000)
+        }
+        return "http://$ip:" + PageServer.PORT
+    }
+}
+
 @Composable
 private fun ReportScreen(onDone: () -> Unit) {
     val context = LocalContext.current
     val phone = LocalPhone.current
-    val text = remember {
-        val drive = Recordings.drive(context)
-        Report.text(
-            listOf(
-                "KueTV, version " + BuildConfig.VERSION_NAME,
-                (if (phone) "Phone" else "TV") + ": " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + ", Android " + android.os.Build.VERSION.RELEASE,
-                "Add-ons: " + AddOnStore.all(context).size + " · Google Drive: " + (if (!drive.isSetUp) "no keys in this copy" else if (drive.signedIn) "signed in" else "not signed in") +
-                    " · Set to record: " + TimedStore.all(context).size + " · Recordings here: " + Recordings.here(context).size,
-            ) + runCatching { TvProbe.lines(context) }.getOrDefault(listOf("TV inputs: couldn't be asked")),
-        )
-    }
+    val text = remember { reportText(context, phone) }
     var address by remember { mutableStateOf<String?>(null) }
     var copied by remember { mutableStateOf(false) }
     var pageFailed by remember { mutableStateOf(false) }
     BackHandler { onDone() }
-    DisposableEffect(Unit) {
-        val server = if (phone) null else PageServer { PageServer.copyPage("KueTV report", text) }
-        val ip = PhoneSetup.localAddress()
-        address = if (server != null && ip != null && server.start() != null) "http://$ip:" + PageServer.PORT else null
-        pageFailed = server != null && ip != null && address == null
-        onDispose { server?.stop() }
+    LaunchedEffect(Unit) {
+        if (phone) return@LaunchedEffect
+        address = ReportPage.open(context)
+        pageFailed = address == null && PhoneSetup.localAddress() != null
     }
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) {
@@ -4908,7 +4941,7 @@ private fun ReportScreen(onDone: () -> Unit) {
         } else if (address != null) {
             Note("To send it: on your phone, on the same Wi-Fi, open")
             Text(address.orEmpty(), color = AccentInk, fontSize = Sizes.CODE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
-            Note("and tap Copy there. Keep this screen open while you do.")
+            Note("and tap Copy there. The page stays open for 15 minutes, even if you leave this screen.")
         } else if (pageFailed) {
             Note("The page for your phone couldn't open this time. Press Done and open this screen again.")
         } else {
