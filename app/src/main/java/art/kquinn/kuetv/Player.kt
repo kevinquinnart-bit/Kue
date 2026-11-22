@@ -1786,12 +1786,42 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
     // One small TV player shared by every section, so moving between them doesn't stop and restart it.
     val player = remember(address) { SharedMini.take(context, address) }
     DisposableEffect(player) {
+        // What the small TV's picture does, for the Report: it lost its picture (sound on) after taking over from
+        // full screen (Kevin, 22 November 2026), and these lines show where it stops.
+        val tookOver = player.playbackState != Player.STATE_IDLE
+        var frames = false
+        if (tookOver) Report.note("Small TV", "carrying on what was playing: " + (player.videoFormat?.let { it.sampleMimeType + " " + it.width + "x" + it.height } ?: "no picture format"))
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) { retry += 1 }
+            override fun onRenderedFirstFrame() {
+                if (!frames) Report.note("Small TV", "picture showing")
+                frames = true
+            }
+        }
+        val details = object : androidx.media3.exoplayer.analytics.AnalyticsListener {
+            override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
+                Report.note("Small TV", "picture decoder started: $decoderName")
+            }
+            override fun onVideoCodecError(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, videoCodecError: Exception) {
+                Report.note("Small TV", "picture decoder error: " + ErrorDetail.words(videoCodecError))
+            }
+            override fun onDroppedVideoFrames(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                if (!frames) Report.note("Small TV", "$droppedFrames pictures dropped in $elapsedMs ms")
+            }
         }
         player.addListener(listener)
+        player.addAnalyticsListener(details)
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val check = Runnable {
+            if (!frames) Report.note("Small TV", "no picture 5 seconds after showing (" + (if (tookOver) "carried on from full screen" else "started here") +
+                "); playing " + player.isPlaying + ", state " + player.playbackState + ", picture " + (player.videoSize.width.toString() + "x" + player.videoSize.height) +
+                ", format " + (player.videoFormat?.sampleMimeType ?: "none"))
+        }
+        main.postDelayed(check, 5_000)
         onDispose {
+            main.removeCallbacks(check)
             player.removeListener(listener)
+            player.removeAnalyticsListener(details)
             SharedMini.give()
         }
     }
