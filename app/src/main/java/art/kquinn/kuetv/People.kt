@@ -11,6 +11,50 @@ import java.util.concurrent.TimeUnit
  * that isn't in the provider's list can still be played from the add-ons.
  */
 object Credits {
+    /** One person in a series' cast, as TVmaze has them: their name, who they play, and TVmaze's number for them. */
+    class Role(val person: String, val character: String, val personId: Int)
+
+    /** A series someone was in: its name, first year and IMDb number (empty when TVmaze doesn't have one). */
+    class Series(val name: String, val year: Int?, val imdb: String, val poster: String)
+
+    private const val TVMAZE = "https://api.tvmaze.com"
+
+    private fun get(url: String): String =
+        http.newCall(Request.Builder().url(url).header("User-Agent", AGENT).build()).execute().use { r ->
+            if (!r.isSuccessful) throw java.io.IOException("TVmaze answered " + r.code) else r.body.string()
+        }
+
+    /**
+     * The cast of a series, from TVmaze (free, no account): found by its IMDb number when that is known, otherwise by
+     * its name. Empty when TVmaze doesn't have it. Blocks; call off the main thread.
+     */
+    fun seriesCast(name: String, imdb: String?): List<Role> {
+        val showId = (if (!imdb.isNullOrBlank()) runCatching { JsonParser.parseString(get("$TVMAZE/lookup/shows?imdb=$imdb")).asJsonObject.get("id").asInt }.getOrNull() else null)
+            ?: runCatching { JsonParser.parseString(get("$TVMAZE/singlesearch/shows?q=" + URLEncoder.encode(name, "UTF-8"))).asJsonObject.get("id").asInt }.getOrNull()
+            ?: return emptyList()
+        return JsonParser.parseString(get("$TVMAZE/shows/$showId/cast")).asJsonArray.mapNotNull { e ->
+            runCatching {
+                val o = e.asJsonObject
+                val person = o.getAsJsonObject("person")
+                Role(person.get("name").asString, o.getAsJsonObject("character")?.get("name")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(), person.get("id").asInt)
+            }.getOrNull()
+        }.distinctBy { it.personId }.take(10)
+    }
+
+    /** The series a person (by TVmaze's number) has been in, newest first. Blocks; call off the main thread. */
+    fun seriesOf(personId: Int): List<Series> =
+        JsonParser.parseString(get("$TVMAZE/people/$personId/castcredits?embed=show")).asJsonArray.mapNotNull { e ->
+            runCatching {
+                val show = e.asJsonObject.getAsJsonObject("_embedded").getAsJsonObject("show")
+                Series(
+                    show.get("name").asString,
+                    show.get("premiered")?.takeIf { it.isJsonPrimitive }?.asString?.take(4)?.toIntOrNull(),
+                    show.getAsJsonObject("externals")?.get("imdb")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                    show.getAsJsonObject("image")?.get("medium")?.takeIf { it.isJsonPrimitive }?.asString.orEmpty(),
+                )
+            }.getOrNull()
+        }.distinctBy { it.name }.sortedByDescending { it.year ?: 0 }
+
     class Film(val title: String, val imdb: String, val year: Int?)
 
     private val http by lazy { Provider.http.newBuilder().callTimeout(25, TimeUnit.SECONDS).build() }

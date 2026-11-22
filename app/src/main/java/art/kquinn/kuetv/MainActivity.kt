@@ -3341,7 +3341,7 @@ private fun Pane.SeriesPane(
     val account = library.account
     val opened = state.openShow
     if (opened != null && (account != null || opened.id.startsWith(Catalogue.PREFIX))) {
-        EpisodePage(opened, account, state, resume, finder, onPlay)
+        EpisodePage(opened, account, state, resume, finder, onPlay, library.shows)
         return
     }
     if ((account == null || library.shows.isEmpty()) && catalogues.isEmpty()) {
@@ -3430,8 +3430,51 @@ private fun Pane.EpisodePage(
     resume: FocusRequester,
     finder: (String, String, Int?, Int?) -> (suspend () -> Search)?,
     onPlay: (items: List<Playable>, index: Int, live: Boolean, key: String) -> Unit,
+    /** The provider's series, so another series an actor was in opens the provider's own copy when it has one. */
+    shows: List<Show> = emptyList(),
 ) {
     BackHandler { state.showJustClosed = true; state.openShow = null }
+    // Cast: who is in it (from TVmaze), then the other series one of them was in.
+    val castContext = LocalContext.current
+    var castAsked by remember(show.id) { mutableStateOf(false) }
+    var castMenu by remember(show.id) { mutableStateOf<Pair<String, List<Pair<String, () -> Unit>>>?>(null) }
+    var castPerson by remember(show.id) { mutableStateOf<Credits.Role?>(null) }
+    var seriesMenu by remember(show.id) { mutableStateOf<Pair<String, List<Pair<String, () -> Unit>>>?>(null) }
+    LaunchedEffect(castAsked) {
+        if (!castAsked) return@LaunchedEffect
+        castAsked = false
+        kueToast(castContext, "Asking TVmaze who is in it…", long = false)
+        val imdb = if (show.id.startsWith(Catalogue.PREFIX)) show.id.removePrefix(Catalogue.PREFIX) else null
+        val cast = withContext(Dispatchers.IO) {
+            runCatching { Credits.seriesCast(show.name, imdb ?: AddOns.idFor("series", show.name)) }.getOrNull()
+        }
+        when {
+            cast == null -> kueToast(castContext, "Couldn't reach TVmaze, where the cast is listed. Try again in a minute.")
+            cast.isEmpty() -> kueToast(castContext, "TVmaze doesn't list the cast of " + show.name + ".")
+            else -> castMenu = show.name to cast.map { r -> (r.person + if (r.character.isBlank()) "" else " as " + r.character) to { castPerson = r } }
+        }
+    }
+    LaunchedEffect(castPerson) {
+        val who = castPerson ?: return@LaunchedEffect
+        castPerson = null
+        kueToast(castContext, "Finding " + who.person + "'s other series…", long = false)
+        val list = withContext(Dispatchers.IO) { runCatching { Credits.seriesOf(who.personId) }.getOrNull() }
+        if (list == null) { kueToast(castContext, "Couldn't reach TVmaze. Try again in a minute."); return@LaunchedEffect }
+        val mine = shows.groupBy { Credits.plain(it.name) }
+        val rows = list.filter { Credits.plain(it.name) != Credits.plain(show.name) }.mapNotNull { s ->
+            val ours = mine[Credits.plain(s.name)]?.firstOrNull()
+            val label = s.name + (s.year?.let { " ($it)" } ?: "")
+            when {
+                ours != null -> "▶ $label · in your series" to { state.openShow = ours }
+                s.imdb.startsWith("tt") -> "$label · from the film index" to { state.openShow = Show(Catalogue.PREFIX + s.imdb, s.name, s.poster, "") }
+                else -> null
+            }
+        }.sortedBy { if (it.first.startsWith("▶")) 0 else 1 }
+        if (rows.isEmpty()) kueToast(castContext, "No other series of " + who.person + "'s are listed.")
+        else seriesMenu = "With " + who.person + " · " + rows.size + " series" to rows
+    }
+    castMenu?.let { (title, options) -> OptionsBox("Cast · $title", options) { castMenu = null } }
+    seriesMenu?.let { (title, options) -> OptionsBox(title, options) { seriesMenu = null } }
 
     val loaded by produceState<Result<List<Episode>>?>(state.loadedEpisodes[show.id]?.let { Result.success(it) }, show.id) {
         if (value != null) return@produceState
@@ -3506,6 +3549,7 @@ private fun Pane.EpisodePage(
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 FocusRow("Order: " + if (newest) "newest first" else "oldest first", { EpisodeOrder.set(context, show.id, !newest) }, look = Look.OTHER, below = "OK to change")
+                                FocusRow("Cast", { castAsked = true }, look = Look.OTHER, below = "Who is in it, and their other series")
                                 // The next five not yet watched, in the series' own order, saved to watch offline.
                                 val toFetch = episodes.filter { it.url.isNotBlank() && !Watched.isWatched(context, it.url) }.take(5)
                                 if (toFetch.isNotEmpty()) {
