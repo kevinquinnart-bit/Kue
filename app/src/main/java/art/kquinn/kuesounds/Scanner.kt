@@ -190,6 +190,8 @@ object Scanner {
         // Not while files are being fixed: the two would change the library at once.
         if (job?.isActive == true || Fixer.running) return
         running = true
+        // Keeps going with KueSounds closed or the screen off, with its progress in the pull-down.
+        runCatching { WorkService.start(app) }.onFailure { note("couldn't keep the search going in the background: " + it.message) }
         job = scope.launch {
             problem = ""
             // A dropped connection (the phone waking up, or the Wi-Fi changing as KueSounds opens) is tried

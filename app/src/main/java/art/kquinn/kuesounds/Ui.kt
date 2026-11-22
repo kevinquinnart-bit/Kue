@@ -934,7 +934,7 @@ object Ui {
                 val context = LocalContext.current
                 val on = Fixer.noticesOn
                 Words("Progress in the pull-down: " + if (on) "on" else "off", 17)
-                Words("Shows how saving to the phone and fixing the files are going, while KueSounds is closed. Both work the same without it.", 14, K.Soft, lines = 4)
+                Words("Shows how looking through your music, saving to the phone and fixing the files are going, while KueSounds is closed. They all work the same without it.", 14, K.Soft, lines = 4)
                 Spacer(Modifier.height(8.dp))
                 Button(if (on) "Turn off in the phone's settings" else "Turn on", main = false, modifier = Modifier.fillMaxWidth()) {
                     if (on) runCatching {

@@ -153,8 +153,8 @@ object Fixer {
 }
 
 /**
- * Keeps the long jobs going with the screens closed (saving songs to the phone, fixing files), with a
- * notice showing how far they have got.
+ * Keeps the long jobs going with the screens closed or the phone locked (looking through the music,
+ * saving songs to the phone, fixing files), with a notice showing how far they have got.
  */
 class WorkService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -172,7 +172,7 @@ class WorkService : Service() {
     private fun notice(text: String): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         if (android.os.Build.VERSION.SDK_INT >= 26) {
-            manager.createNotificationChannel(NotificationChannel("work", "Saving and fixing music", NotificationManager.IMPORTANCE_LOW))
+            manager.createNotificationChannel(NotificationChannel("work", "Looking through, saving and fixing music", NotificationManager.IMPORTANCE_LOW))
         }
         return NotificationCompat.Builder(this, "work")
             .setSmallIcon(android.R.drawable.stat_sys_download)
@@ -192,10 +192,25 @@ class WorkService : Service() {
             started = true
             scope.launch {
                 val show: (String) -> Unit = { text -> getSystemService(NotificationManager::class.java).notify(7, notice(text)) }
-                do {
-                    if (Offline.hasWork) Offline.run(show)
-                    if (Fixer.hasWork) Fixer.run(this@WorkService, show)
-                } while (Offline.hasWork || Fixer.hasWork)
+                // The phone stays awake enough to keep working with the screen off, for at most 6 hours at a time.
+                val awake = getSystemService(android.os.PowerManager::class.java)
+                    .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "KueSounds:work").apply { setReferenceCounted(false) }
+                try {
+                    do {
+                        awake.acquire(6 * 60 * 60_000L)
+                        // Looking through the music: the notice follows how far it has got.
+                        var shown = ""
+                        while (Scanner.running) {
+                            val now = Scanner.status.ifEmpty { "Looking through your music" }
+                            if (now != shown) { shown = now; show(now) }
+                            kotlinx.coroutines.delay(2000)
+                        }
+                        if (Offline.hasWork) Offline.run(show)
+                        if (Fixer.hasWork) Fixer.run(this@WorkService, show)
+                    } while (Scanner.running || Offline.hasWork || Fixer.hasWork)
+                } finally {
+                    if (awake.isHeld) awake.release()
+                }
                 started = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
