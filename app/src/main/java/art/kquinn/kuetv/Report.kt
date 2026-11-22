@@ -58,25 +58,47 @@ class PageServer(private val page: () -> String) {
     @Volatile private var socket: ServerSocket? = null
 
     fun start(port: Int = PORT): Int? {
-        val server = runCatching { ServerSocket(port) }.getOrNull() ?: return null
+        val server = try {
+            ServerSocket(port)
+        } catch (e: Exception) {
+            // So the report shows why the page couldn't be opened.
+            Report.note("Report page", "couldn't open on port $port: " + e.javaClass.simpleName + " " + (e.message ?: ""))
+            return null
+        }
         socket = server
+        Report.note("Report page", "open on port " + server.localPort)
         thread(isDaemon = true, name = "page-server") {
             while (!server.isClosed) {
-                val client = runCatching { server.accept() }.getOrNull() ?: break
-                thread(isDaemon = true) { runCatching { answer(client) }; runCatching { client.close() } }
+                val client = try {
+                    server.accept()
+                } catch (e: Exception) {
+                    if (!server.isClosed) Report.note("Report page", "stopped answering: " + e.javaClass.simpleName + " " + (e.message ?: ""))
+                    break
+                }
+                thread(isDaemon = true) {
+                    runCatching { answer(client) }.onFailure {
+                        Report.note("Report page", "answer to " + (client.inetAddress?.hostAddress ?: "?") + " failed: " + it.javaClass.simpleName + " " + (it.message ?: ""))
+                    }
+                    runCatching { client.close() }
+                }
             }
         }
         return server.localPort
     }
 
     fun stop() {
+        if (socket != null) Report.note("Report page", "closed")
         runCatching { socket?.close() }
         socket = null
     }
 
     private fun answer(client: Socket) {
         client.soTimeout = 8_000
-        client.getInputStream().bufferedReader().readLine() ?: return
+        val first = client.getInputStream().bufferedReader().readLine() ?: run {
+            Report.note("Report page", "asked by " + (client.inetAddress?.hostAddress ?: "?") + " with nothing in the request")
+            return
+        }
+        Report.note("Report page", "asked for by " + (client.inetAddress?.hostAddress ?: "?") + ": " + first.substringBefore(" HTTP"))
         val bytes = page().toByteArray(Charsets.UTF_8)
         val out = client.getOutputStream()
         out.write(("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray())

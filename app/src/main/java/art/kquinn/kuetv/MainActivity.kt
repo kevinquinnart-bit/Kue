@@ -4880,11 +4880,13 @@ private fun ReportScreen(onDone: () -> Unit) {
     }
     var address by remember { mutableStateOf<String?>(null) }
     var copied by remember { mutableStateOf(false) }
+    var pageFailed by remember { mutableStateOf(false) }
     BackHandler { onDone() }
     DisposableEffect(Unit) {
         val server = if (phone) null else PageServer { PageServer.copyPage("KueTV report", text) }
         val ip = PhoneSetup.localAddress()
         address = if (server != null && ip != null && server.start() != null) "http://$ip:" + PageServer.PORT else null
+        pageFailed = server != null && ip != null && address == null
         onDispose { server?.stop() }
     }
     val first = remember { FocusRequester() }
@@ -4907,6 +4909,8 @@ private fun ReportScreen(onDone: () -> Unit) {
             Note("To send it: on your phone, on the same Wi-Fi, open")
             Text(address.orEmpty(), color = AccentInk, fontSize = Sizes.CODE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
             Note("and tap Copy there. Keep this screen open while you do.")
+        } else if (pageFailed) {
+            Note("The page for your phone couldn't open this time. Press Done and open this screen again.")
         } else {
             Note("This TV isn't on a home network, so the report can only be read here.")
         }
