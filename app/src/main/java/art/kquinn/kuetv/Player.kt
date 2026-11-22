@@ -1789,6 +1789,12 @@ object SharedMini {
         player = full
         address = url
         adopted = true
+        // Why a taken-over player stops, for the Report (seen on Kevin's TV, 22 November 2026: stopped at once, twice).
+        full.addListener(object : Player.Listener {
+            override fun onPlayerError(error: PlaybackException) {
+                if (player === full) Report.note("Small TV", "full screen's player stopped: " + error.errorCodeName + " · " + ErrorDetail.words(error))
+            }
+        })
         // Nothing showing it until the small TV appears: stopped if none does in a moment.
         if (users == 0) main.postDelayed(idle, 3_000)
     }
@@ -1801,6 +1807,16 @@ object SharedMini {
     fun stop() {
         main.removeCallbacks(idle)
         halt()
+    }
+
+    /**
+     * The taken-over full-screen player has stopped (it can't start again: its other parts are closed). It is let
+     * go, so the small TV takes a fresh player of its own. True when there was one to let go.
+     */
+    fun dropIfDeadAdopted(p: ExoPlayer): Boolean {
+        if (!adopted || player !== p || p.playbackState != Player.STATE_IDLE) return false
+        halt()
+        return true
     }
 }
 
@@ -1889,6 +1905,8 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
     val visible = Screen.visible
     LaunchedEffect(player, visible, retry) {
         if (!visible) { SharedMini.stop(); return@LaunchedEffect }
+        // Full screen's player, taken over but already stopped: a fresh one in its place (this one is let go).
+        if (SharedMini.dropIfDeadAdopted(player)) return@LaunchedEffect
         // A few tries after a drop, a little apart, then it is left quiet rather than hammering the provider.
         if (retry > 5) return@LaunchedEffect
         if (retry > 0) delay(3_000)
@@ -1896,6 +1914,15 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
         if (retry == 0 && player.playbackState != Player.STATE_IDLE) return@LaunchedEffect
         player.seekToDefaultPosition()
         player.prepare()
+        // Kevin's provider allows one screen, and counts the full-screen one as still in use for a few seconds
+        // after it closes (22 November 2026: "screens allowed 1, in use now 1"), so a small TV started then can sit
+        // waiting with nothing coming. Still nothing after 8 seconds: it asks again, a few times, a little apart.
+        delay(8_000)
+        if (player.videoFormat == null && player.audioFormat == null && player.playbackState != Player.STATE_READY && retry < 5) {
+            Report.note("Small TV", "nothing has come after 8 seconds; asking again (" + (retry + 1) + ")")
+            player.stop()
+            retry += 1
+        }
     }
     // The remote can move onto it: OK plays the channel full screen, and Back comes back here.
     val link = LocalSmallTv.current
