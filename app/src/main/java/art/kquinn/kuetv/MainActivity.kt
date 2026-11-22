@@ -2996,6 +2996,10 @@ private fun Pane.ProgrammePage(
     val day: (Long) -> String = { dayText.format(java.util.Date(it)) }
     val time: (Long) -> String = { timeText.format(java.util.Date(it)) }
     val step = pick.pickDay
+    // Record by time: a start and a length picked here, for a channel with no guide or a time the guide doesn't show.
+    var byTime by remember(channel.id) { mutableStateOf(false) }
+    var startAt by remember(channel.id) { mutableLongStateOf((now / QUARTER_MS + 1) * QUARTER_MS) }
+    var lengthMin by remember(channel.id) { mutableIntStateOf(60) }
 
     BackHandler {
         when (step) {
@@ -3004,6 +3008,7 @@ private fun Pane.ProgrammePage(
             else -> pick.pickDay = CHOOSING_DAY
         }
     }
+    BackHandler(enabled = byTime) { byTime = false }
 
     // null while loading; a failure carries the sentence to show.
     val loaded by produceState<Result<List<Programme>>?>(pick.loaded[channel.id]?.let { Result.success(it) }, channel.id) {
@@ -3035,10 +3040,46 @@ private fun Pane.ProgrammePage(
     val reminders = remember(Reminders.changes) { Reminders.all(context) }
     val linksNow = SeriesLinks.changes
     Column(fill()) {
-        Heading(channel.name + if (catchUp) " · catch-up" else " · guide · OK on a later programme: ◆ reminder, then ● record, then neither")
+        Heading(
+            channel.name + when {
+                byTime -> " · record by time"
+                catchUp -> " · catch-up · hold OK on a programme to save it to Recordings"
+                else -> " · guide · OK on a later programme: ◆ reminder, then ● record, then neither"
+            },
+        )
         val result = loaded
         when {
             result == null -> Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentInk) }
+
+            // Record by time: when it starts and how long for, then set.
+            byTime -> {
+                val earliest = (System.currentTimeMillis() / QUARTER_MS) * QUARTER_MS
+                val lengthWords = (if (lengthMin >= 60) (lengthMin / 60).toString() + " h" else "") + (if (lengthMin % 60 != 0) " " + (lengthMin % 60) + " min" else "")
+                LazyColumn(Modifier.fillMaxSize()) {
+                    item(key = "start") {
+                        FocusRow(
+                            "Starts: " + day(startAt) + "  " + time(startAt), { startAt += QUARTER_MS }, Modifier.focusRequester(first), look = Look.OTHER,
+                            onHold = { startAt = (startAt - QUARTER_MS).coerceAtLeast(earliest) },
+                            below = if (LocalPhone.current) "Tap 15 min later · press and hold 15 min earlier" else "OK 15 min later · hold OK 15 min earlier",
+                        )
+                    }
+                    item(key = "length") {
+                        FocusRow(
+                            "Lasts: " + lengthWords.trim(), { lengthMin = (lengthMin + 15).coerceAtMost(6 * 60) }, look = Look.OTHER,
+                            onHold = { lengthMin = (lengthMin - 15).coerceAtLeast(15) },
+                            below = if (LocalPhone.current) "Tap 15 min longer · press and hold 15 min shorter" else "OK 15 min longer · hold OK 15 min shorter",
+                        )
+                    }
+                    item(key = "set") {
+                        FocusRow("● Set to record " + time(startAt) + " to " + time(startAt + lengthMin * 60_000L), {
+                            val plan = Timed.make(channel.name, "recorded by time", channel.url, startAt, startAt + lengthMin * 60_000L)
+                            TimedStore.add(context, plan)
+                            kueToast(context, "Set to record " + channel.name + ", " + day(startAt) + " " + time(startAt) + " to " + time(plan.stopMs) + ". It's in Recordings.")
+                            byTime = false
+                        })
+                    }
+                }
+            }
 
             // Choosing a day: today back to the oldest day the provider keeps.
             step == CHOOSING_DAY -> {
@@ -3084,6 +3125,9 @@ private fun Pane.ProgrammePage(
                     if (catchUp) item(key = "pick") {
                         FocusRow("Pick a date and time", { pick.pickDay = CHOOSING_DAY }, Modifier.focusRequester(first))
                     }
+                    if (!catchUp) item(key = "bytime") {
+                        FocusRow("● Record by time", { startAt = maxOf(startAt, (System.currentTimeMillis() / QUARTER_MS + 1) * QUARTER_MS); byTime = true }, look = Look.OTHER, below = "Pick when it starts and how long it lasts")
+                    }
                     if (all == null) item(key = "problem") { Note(result.exceptionOrNull()?.message ?: "Couldn't load the guide for this channel.") }
                     else if (rows.isEmpty()) item(key = "none") {
                         Note(if (catchUp) "Your provider sent no past programmes for this channel. Pick a date and time instead." else "Your provider sent no guide for this channel.")
@@ -3115,6 +3159,12 @@ private fun Pane.ProgrammePage(
                             },
                             modifier = (if (i == 0 && lead == 0) Modifier.focusRequester(first) else Modifier)
                                 .then(if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier),
+                            // Catch-up: holding OK saves the whole programme to Recordings, without watching it.
+                            onHold = if (!catchUp) null else ({
+                                val p = catchupPlayable(channel.name, account, channel.id, programme, serverAheadSec)
+                                TimedStore.add(context, Timed.whole(channel.name, programme.title.ifBlank { "Programme" }, p.url, programme.startMs, programme.stopMs - programme.startMs, System.currentTimeMillis()))
+                                kueToast(context, "Saving \"" + programme.title.ifBlank { "this programme" } + "\" to Recordings. It carries on with the app closed.")
+                            }),
                         )
                     }
                 }
@@ -3122,6 +3172,9 @@ private fun Pane.ProgrammePage(
         }
     }
 }
+
+/** A quarter of an hour, the step for record by time. */
+private const val QUARTER_MS = 15 * 60_000L
 
 private fun startOfDay(ms: Long): Long {
     val c = java.util.Calendar.getInstance()
@@ -3135,7 +3188,7 @@ private fun startOfDay(ms: Long): Long {
 
 /** A programme: when it is on, its title, and its description while the row is focused. */
 @Composable
-private fun ProgrammeRow(whenText: String, title: String, description: String, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun ProgrammeRow(whenText: String, title: String, description: String, onClick: () -> Unit, modifier: Modifier = Modifier, onHold: (() -> Unit)? = null) {
     var focused by remember { mutableStateOf(false) }
     Column(
         modifier
@@ -3144,7 +3197,7 @@ private fun ProgrammeRow(whenText: String, title: String, description: String, o
             .focusRing(focused)
             .background(if (focused) Accent else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(onClick = onClick)
+            .press(onClick, onHold)
             .padding(horizontal = 16.dp, vertical = 10.dp),
     ) {
         Text(whenText, color = if (focused) Color.Black else Soft, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)

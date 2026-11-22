@@ -21,18 +21,32 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-/** One programme set to be recorded when it comes on: the channel, its address, and when. */
-data class Timed(val id: Int, val channel: String, val title: String, val url: String, val startMs: Long, val stopMs: Long) {
+/**
+ * One programme set to be recorded when it comes on: the channel, its address, and when. [whole]: a past
+ * programme saved from the provider's catch-up, copied from start to end as fast as the provider sends it.
+ */
+data class Timed(val id: Int, val channel: String, val title: String, val url: String, val startMs: Long, val stopMs: Long, val whole: Boolean = false) {
     fun toJson(): String = JsonObject().apply {
         addProperty("id", id); addProperty("channel", channel); addProperty("title", title)
         addProperty("url", url); addProperty("start", startMs); addProperty("stop", stopMs)
+        if (whole) addProperty("whole", true)
     }.toString()
 
     companion object {
         fun fromJson(text: String): Timed? = runCatching {
             val o = JsonParser.parseString(text).asJsonObject
-            Timed(o.get("id").asInt, o.get("channel").asString, o.get("title").asString, o.get("url").asString, o.get("start").asLong, o.get("stop").asLong)
+            Timed(
+                o.get("id").asInt, o.get("channel").asString, o.get("title").asString, o.get("url").asString, o.get("start").asLong, o.get("stop").asLong,
+                o.get("whole")?.asBoolean ?: false,
+            )
         }.getOrNull()
+
+        /**
+         * A past programme to save from catch-up, starting now. It is given its length and half an hour more to
+         * arrive, in case the provider only sends it as fast as it plays.
+         */
+        fun whole(channel: String, title: String, url: String, airedMs: Long, lengthMs: Long, now: Long): Timed =
+            Timed(((url.hashCode() * 31L + airedMs / 1000).toInt()) and 0x7fffffff, channel, title, url, now, now + lengthMs + 30 * 60_000L, whole = true)
 
         /** The same programme on the same channel always gets the same number, so setting it twice is setting it once. */
         fun make(channel: String, title: String, url: String, startMs: Long, stopMs: Long): Timed =
@@ -175,6 +189,8 @@ class TimedService : Service() {
                             val input = response.body.byteStream()
                             while (System.currentTimeMillis() < end) {
                                 val count = input.read(buffer)
+                                // A saved catch-up programme is finished when the provider's copy of it ends.
+                                if (count < 0 && timed.whole && written > 0) return
                                 if (count < 0) break
                                 out.write(buffer, 0, count)
                                 written += count
