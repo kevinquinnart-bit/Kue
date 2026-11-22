@@ -149,6 +149,7 @@ class MainActivity : ComponentActivity() {
         if (Report.file == null) Report.keepIn(java.io.File(filesDir, "report.txt"))
         PhoneSetup.app = applicationContext
         Report.note("App", "opened, version " + BuildConfig.VERSION_NAME)
+        Stalls.start()
         Thread { runCatching { Report.note("Storage", Storage.line(applicationContext)) } }.start()
         runCatching { Report.note("Memory", Memory.line(applicationContext)) }
         // TV: what the TV's own channel list holds (the aerial, and the channels the TV apps add), written where a

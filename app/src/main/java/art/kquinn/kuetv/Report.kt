@@ -123,3 +123,41 @@ class PageServer(private val page: () -> String) {
         }
     }
 }
+
+/**
+ * Watches the screen's own thread: when it is stuck for more than [LIMIT_MS] (the remote then feels dead, and a
+ * second press lands late), the Report gets how long it was stuck and what KueTV was doing at that moment, so the
+ * slow part can be found and moved off it.
+ */
+object Stalls {
+    private const val LIMIT_MS = 600L
+    @Volatile private var started = false
+
+    fun start() {
+        if (started) return
+        started = true
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        thread(isDaemon = true, name = "stall-watch") {
+            var lastNote = 0L
+            while (true) {
+                val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+                val sent = android.os.SystemClock.uptimeMillis()
+                main.post { answered.set(true) }
+                Thread.sleep(LIMIT_MS)
+                if (answered.get()) { Thread.sleep(200); continue }
+                // Stuck: what it is doing now, then how long until it is free again.
+                val where = android.os.Looper.getMainLooper().thread.stackTrace
+                while (!answered.get()) Thread.sleep(50)
+                val stuck = android.os.SystemClock.uptimeMillis() - sent
+                val now = android.os.SystemClock.uptimeMillis()
+                if (now - lastNote < 3_000) continue
+                lastNote = now
+                val ours = where.filter { it.className.startsWith("art.kquinn") }.take(6)
+                val shown = (ours.ifEmpty { where.take(6).toList() }).joinToString(" < ") {
+                    it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber
+                }
+                Report.note("Slow", "the screen was stuck for " + stuck + " ms; at the time: " + shown.ifEmpty { "(nothing given)" })
+            }
+        }
+    }
+}
