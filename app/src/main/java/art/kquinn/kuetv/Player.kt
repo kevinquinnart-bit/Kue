@@ -635,7 +635,7 @@ fun PlayerScreen(
             // 2026). Not while pause and rewind, a recording or a torrent is using this player: those close with it.
             val playingUrl = streamsAt(index).getOrNull(stream)?.url
             val handOver = live && shiftHolder[0] == null && !recording && !usedTorrent[0] && player.playerError == null &&
-                playingUrl != null && AddOns.showable(playingUrl) && Screen.visible
+                playingUrl != null && AddOns.showable(playingUrl)
             if (handOver) {
                 if (speed != 1f) player.setPlaybackSpeed(1f)
                 SharedMini.adopt(player, resolvedAddress(playingUrl!!) ?: playingUrl)
