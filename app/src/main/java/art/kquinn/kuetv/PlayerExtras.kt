@@ -52,6 +52,20 @@ object SoundSync {
     }
 }
 
+/**
+ * A player error in a line for the Report: the deepest cause's kind and words, then the first places in the code
+ * it passed through, so the part that stopped can be found.
+ */
+object ErrorDetail {
+    fun words(error: Throwable): String {
+        var root = error
+        var steps = 0
+        while (root.cause != null && root.cause !== root && steps < 8) { root = root.cause!!; steps++ }
+        val where = root.stackTrace.take(6).joinToString(" < ") { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
+        return root.javaClass.name + (root.message?.let { " \"$it\"" } ?: "") + " at " + where.ifEmpty { "(no place given)" }
+    }
+}
+
 /** The player's parts, with its sound moved by [SoundSync.offsetUs]. */
 @OptIn(UnstableApi::class)
 class SyncedRenderers(context: Context) : DefaultRenderersFactory(context) {

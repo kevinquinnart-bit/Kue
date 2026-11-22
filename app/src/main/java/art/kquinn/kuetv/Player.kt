@@ -589,6 +589,8 @@ fun PlayerScreen(
                     items.getOrNull(index)?.name.orEmpty() + " (" + kind + ", stream " + (stream + 1) + " of " + versions.size.coerceAtLeast(1) + "): " +
                         error.errorCodeName + " · " + (error.cause?.message ?: error.message ?: "no detail"),
                 )
+                // What actually went wrong, and where: the player's own words for it are often only "Unexpected runtime error".
+                Report.note("Player", "the cause: " + ErrorDetail.words(error))
                 val addOnSub = addOnSubtitles[index]
                 val plainUrl = versions.getOrNull(stream)?.url ?: items.getOrNull(index)?.url.orEmpty()
                 if (!live && !started[0] && addOnSub != null && withoutSubtitles.add(plainUrl)) {

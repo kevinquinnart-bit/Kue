@@ -150,6 +150,7 @@ class MainActivity : ComponentActivity() {
         PhoneSetup.app = applicationContext
         Report.note("App", "opened, version " + BuildConfig.VERSION_NAME)
         Thread { runCatching { Report.note("Storage", Storage.line(applicationContext)) } }.start()
+        runCatching { Report.note("Memory", Memory.line(applicationContext)) }
         // TV: what the TV's own channel list holds (the aerial, and the channels the TV apps add), written where a
         // computer can read it, to find out how Freely's way of opening channels can be brought into KueTV.
         if (isTv(this)) Thread { TvChannels.writeProbe(applicationContext) }.start()
