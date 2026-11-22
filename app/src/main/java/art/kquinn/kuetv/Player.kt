@@ -636,6 +636,13 @@ fun PlayerScreen(
             val playingUrl = streamsAt(index).getOrNull(stream)?.url
             val handOver = live && shiftHolder[0] == null && !recording && !usedTorrent[0] && player.playerError == null &&
                 playingUrl != null && AddOns.showable(playingUrl) && !Stalker.isLink(playingUrl)
+            if (live) Report.note(
+                "Small TV", if (handOver) "taking over full screen's channel" else "not taking over full screen's channel: " + listOfNotNull(
+                    "pause and rewind on".takeIf { shiftHolder[0] != null }, "recording".takeIf { recording }, "torrent".takeIf { usedTorrent[0] },
+                    "player error".takeIf { player.playerError != null }, "no address".takeIf { playingUrl == null },
+                    "add-on channel".takeIf { playingUrl != null && !AddOns.showable(playingUrl) }, "portal channel".takeIf { playingUrl != null && Stalker.isLink(playingUrl) },
+                ).joinToString(", "),
+            )
             if (handOver) {
                 if (speed != 1f) player.setPlaybackSpeed(1f)
                 SharedMini.adopt(player, playingUrl!!)
@@ -1750,7 +1757,11 @@ object SharedMini {
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private val idle = Runnable { halt() }
 
+    /** The provider in use, so a small TV with no picture can say how many of its screens are in use. */
+    @Volatile var account: Account? = null
+
     private fun halt() {
+        if (adopted) Report.note("Small TV", "let go of full screen's player")
         if (adopted) {
             player?.release()
             player = null
@@ -1765,6 +1776,7 @@ object SharedMini {
         users++
         val now = player
         if (now != null && address == url) return now
+        if (now != null && adopted) Report.note("Small TV", "full screen's player not used: the small TV wants another address")
         now?.release()
         adopted = false
         return lightPlayer(context.applicationContext, url).also { player = it; address = url }
@@ -1852,9 +1864,18 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
         player.addAnalyticsListener(details)
         val main = android.os.Handler(android.os.Looper.getMainLooper())
         val check = Runnable {
-            if (!frames) Report.note("Small TV", "no picture 5 seconds after showing (" + (if (tookOver) "carried on from full screen" else "started here") +
-                "); playing " + player.isPlaying + ", state " + player.playbackState + ", picture " + (player.videoSize.width.toString() + "x" + player.videoSize.height) +
-                ", format " + (player.videoFormat?.sampleMimeType ?: "none"))
+            if (!frames) {
+                Report.note("Small TV", "no picture 5 seconds after showing (" + (if (tookOver) "carried on from full screen" else "started here") +
+                    "); playing " + player.isPlaying + ", state " + player.playbackState + ", picture " + (player.videoSize.width.toString() + "x" + player.videoSize.height) +
+                    ", format " + (player.videoFormat?.sampleMimeType ?: "none") + ", loading " + player.isLoading + ", buffered " + player.totalBufferedDuration / 1000 + " s")
+                // The provider's own count of its screens in use, in case the small TV is being turned away.
+                SharedMini.account?.let { acc ->
+                    Thread {
+                        val sub = runCatching { Provider.subscription(acc) }.getOrNull()
+                        Report.note("Small TV", "provider says: " + (sub?.let { "screens allowed " + (it.screens ?: "?") + ", in use now " + (it.inUse ?: "?") } ?: "couldn't ask"))
+                    }.start()
+                }
+            }
         }
         main.postDelayed(check, 5_000)
         onDispose {

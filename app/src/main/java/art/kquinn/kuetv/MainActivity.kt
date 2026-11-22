@@ -2807,6 +2807,7 @@ private fun MainScreen(
     }
     // The small TV, wherever it shows: OK on it (a tap on a phone) plays its channel full screen; Back comes
     // back to this section, onto the small TV.
+    SharedMini.account = library.account
     val smallTv = SmallTvLink(
         open = {
             LastLive.item?.let { small ->
