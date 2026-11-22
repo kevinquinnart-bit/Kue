@@ -191,6 +191,54 @@ class BoostProcessor : BaseAudioProcessor() {
     }
 }
 
+/**
+ * How loud the sound coming out of the player is, so a live channel that plays with no sound can be noticed and
+ * left (Kevin, 22 November 2026: 4 Seven played with a picture and no sound). Measured on ordinary sound only; while
+ * the sound goes to the TV untouched (Dolby passed on), nothing is measured and [measuring] stays false.
+ */
+object SoundLevel {
+    /** Below this (about -56 dB), a moment counts as silent. */
+    const val QUIET = 0.0015f
+    @Volatile var measuring = false
+    @Volatile var lastHeardAt = 0L
+
+    /** A new stream: nothing known about its sound yet. */
+    fun reset() {
+        measuring = false
+        lastHeardAt = 0L
+    }
+
+    /** The loudest sample in 16-bit [samples], 1 being full. */
+    fun peak(samples: ShortArray): Float {
+        var top = 0
+        for (v in samples) { val a = if (v < 0) -v.toInt() else v.toInt(); if (a > top) top = a }
+        return top / 32768f
+    }
+}
+
+/** Listens to the sound as it passes, for [SoundLevel]; changes nothing. Samples are taken out before writing, as in [BoostProcessor]. */
+@OptIn(UnstableApi::class)
+class LevelProcessor : BaseAudioProcessor() {
+    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
+        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) { SoundLevel.measuring = false; return AudioProcessor.AudioFormat.NOT_SET }
+        SoundLevel.measuring = true
+        return inputAudioFormat
+    }
+
+    override fun queueInput(inputBuffer: ByteBuffer) {
+        val input = inputBuffer.order(ByteOrder.nativeOrder())
+        val samples = ShortArray(input.remaining() / 2)
+        for (i in samples.indices) samples[i] = input.short
+        val leftover = ByteArray(input.remaining())
+        input.get(leftover)
+        if (samples.isNotEmpty() && SoundLevel.peak(samples) >= SoundLevel.QUIET) SoundLevel.lastHeardAt = System.currentTimeMillis()
+        val out = replaceOutputBuffer(samples.size * 2 + leftover.size)
+        for (v in samples) out.putShort(v)
+        out.put(leftover)
+        out.flip()
+    }
+}
+
 /** VLC's smoothing of combed lines on interlaced broadcast channels: VLC's own choice (only when marked), or always. */
 object Smoothing {
     private fun prefs(context: Context) = context.getSharedPreferences("player", Context.MODE_PRIVATE)

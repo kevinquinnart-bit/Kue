@@ -75,7 +75,7 @@ class SyncedRenderers(context: Context) : DefaultRenderersFactory(context) {
         val sink = DefaultAudioSink.Builder(context)
             .setEnableFloatOutput(enableFloatOutput)
             .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-            .setAudioProcessors(arrayOf(NightProcessor { Sound.night(context) }, BoostProcessor()))
+            .setAudioProcessors(arrayOf(LevelProcessor(), NightProcessor { Sound.night(context) }, BoostProcessor()))
             .apply { if (decodeHere) setAudioCapabilities(androidx.media3.exoplayer.audio.AudioCapabilities.DEFAULT_AUDIO_CAPABILITIES) }
             .build()
         return object : ForwardingAudioSink(sink) {

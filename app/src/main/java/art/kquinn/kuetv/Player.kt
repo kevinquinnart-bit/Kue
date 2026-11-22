@@ -217,6 +217,8 @@ private const val MAX_TRIES = 6
 
 /** A picture that stays stopped this long moves down to the next version. */
 private const val LONG_STOP_MS = 12_000L
+// A live channel playing its picture with no sound for this long is left for the next version, or its own app.
+private const val NO_SOUND_MS = 10_000L
 
 /** This many short stops inside [STOPS_WINDOW_MS] also moves down. */
 private const val STOPS_TO_MOVE = 3
@@ -475,6 +477,25 @@ fun PlayerScreen(
         stream = next
     }
 
+    // Channels already handed to their own app in this sitting: once each, so coming Back doesn't send it off again.
+    val sentToApp = remember { HashSet<String>() }
+    /**
+     * The last version of a live channel won't do: the channel's own app plays it instead when it is on the TV
+     * (4 Seven in Channel 4's app; Kevin, 22 November 2026). True when it was handed over.
+     */
+    val toOwnApp: (String) -> Boolean = handOff@{ why ->
+        val name = items.getOrNull(index)?.name ?: return@handOff false
+        val ch = LiveInApps.forChannel(name) ?: return@handOff false
+        val onTv = runCatching { context.packageManager.getPackageInfo(ch.pkg, 0) }.isSuccess
+        if (!onTv || !sentToApp.add(name)) return@handOff false
+        Report.note("Player", "$name: $why Opening it in ${ch.app}.")
+        player.pause()
+        moved = "$why Opening it in ${ch.app}."
+        note = "Playing in ${ch.app}. Pick another channel, or press Play to try here again."
+        LiveInApps.open(context, ch)
+        true
+    }
+
     // The TV switched to the picture's own frame rate, when that is chosen; back to its usual one after.
     // The picture's details for Options are kept up to date at the same time.
     DisposableEffect(player) {
@@ -614,7 +635,9 @@ fun PlayerScreen(
                 }
                 tries += 1
                 if (tries >= maxOf(MAX_TRIES, versions.size * 2)) {
-                    note = if (live) "This channel isn't playing right now." else "This film isn't playing right now."
+                    if (!(live && toOwnApp("This channel isn't playing here."))) {
+                        note = if (live) "This channel isn't playing right now." else "This film isn't playing right now."
+                    }
                 } else if (live && versions.size > 1 && tries % 2 == 0) {
                     // Two failures in a row on this version: try the next one, going round to the first after the last.
                     val next = (stream + 1) % versions.size
@@ -786,11 +809,39 @@ fun PlayerScreen(
             delay(LONG_STOP_MS)
             if (stream < versions.size - 1) {
                 change(stream + 1, "Kept stopping on " + versions[stream].label + ". Now on " + versions[stream + 1].label + ".")
+            } else {
+                toOwnApp("This channel keeps stopping here.")
             }
         } else if (versions.size > 1 && !started[0]) {
             // A film's stream that is taking too long to start: the next one may be quicker.
             delay(if (versions.getOrNull(stream)?.url?.startsWith("magnet:") == true) SLOW_TORRENT_MS else SLOW_START_MS)
             if (!started[0] && stream < versions.size - 1) change(stream + 1, nextStream(versions, stream + 1))
+        }
+    }
+    // A live channel with a picture and no sound: no sound in the stream, or only silence for [NO_SOUND_MS]. It moves
+    // to the next version, and from the last to the channel's own app, as it does when there is no picture.
+    LaunchedEffect(index, stream, reload) {
+        if (!live) return@LaunchedEffect
+        SoundLevel.reset()
+        var quietFrom = System.currentTimeMillis()
+        while (true) {
+            delay(1_000)
+            val now = System.currentTimeMillis()
+            // Paused, stopped, not yet started, or turned right down in KueTV: no judging.
+            if (!player.isPlaying || !started[0] || player.volume <= 0f) { quietFrom = now; continue }
+            val audio = player.currentTracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_AUDIO }
+            val noTrack = !player.currentTracks.isEmpty && audio.none { it.isSelected }
+            val silent = SoundLevel.measuring && now - maxOf(SoundLevel.lastHeardAt, quietFrom) > NO_SOUND_MS
+            if (!(noTrack && now - quietFrom > NO_SOUND_MS) && !silent) continue
+            val versions = streamsAt(index)
+            val what = if (noTrack) "has no sound track" else "is silent"
+            Report.note("Player", items.getOrNull(index)?.name.orEmpty() + " (stream " + (stream + 1) + " of " + versions.size.coerceAtLeast(1) + ") " + what)
+            if (stream < versions.size - 1) {
+                change(stream + 1, "No sound on " + versions[stream].label + ". Now on " + versions[stream + 1].label + ".")
+            } else if (!toOwnApp("No sound on this channel here.")) {
+                say("No sound on this channel right now.")
+            }
+            break
         }
     }
     // Every few seconds, note how far in a film has got.
