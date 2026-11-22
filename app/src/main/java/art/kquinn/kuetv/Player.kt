@@ -302,6 +302,8 @@ fun PlayerScreen(
     val started = remember { booleanArrayOf(false) }
     // Streams whose separate subtitle file has been left off, because they wouldn't play with it.
     val withoutSubtitles = remember { HashSet<String>() }
+    // A film or episode playing from the provider's copy alone: a subtitle file from the subtitle add-ons, once asked.
+    val addOnSubtitles = remember { HashMap<Int, String?>() }
     var reload by remember { mutableIntStateOf(0) }
     // Whether a torrent has been played in this sitting: only then is there a torrent to stop or tidy away.
     val usedTorrent = remember { booleanArrayOf(false) }
@@ -587,7 +589,13 @@ fun PlayerScreen(
                     items.getOrNull(index)?.name.orEmpty() + " (" + kind + ", stream " + (stream + 1) + " of " + versions.size.coerceAtLeast(1) + "): " +
                         error.errorCodeName + " · " + (error.cause?.message ?: error.message ?: "no detail"),
                 )
-                if (!live && versions.size > 1 && !started[0]) {
+                val addOnSub = addOnSubtitles[index]
+                val plainUrl = versions.getOrNull(stream)?.url ?: items.getOrNull(index)?.url.orEmpty()
+                if (!live && !started[0] && addOnSub != null && withoutSubtitles.add(plainUrl)) {
+                    // The provider's copy with the subtitle add-on's file didn't start: try it again without them.
+                    reload += 1
+                    return
+                } else if (!live && versions.size > 1 && !started[0]) {
                     // A film's stream that never started. First without its separate subtitles, in case they are the fault.
                     val now = versions.getOrNull(stream)
                     when {
@@ -651,7 +659,7 @@ fun PlayerScreen(
                 item.name + ": " + if (result == null) "asking them failed" else theirs.size.toString() + " streams, " + theirs.count { it.url.startsWith("magnet:") } + " of them torrents",
             )
             // Something with no copy at the provider plays from the add-ons alone.
-            found[index] = if (item.url.isEmpty()) theirs else theirs + Stream(PROVIDER_COPY, item.url)
+            found[index] = if (item.url.isEmpty()) theirs else theirs + Stream(PROVIDER_COPY, item.url, subtitle = result?.subtitle)
             note = null
             if (theirs.isEmpty() && item.url.isEmpty()) {
                 note = if (result == null) "Couldn't ask your add-ons. Check the internet and try again." else "Your add-ons have nothing to play this from."
@@ -715,8 +723,18 @@ fun PlayerScreen(
             shiftUrl[0] = null
             shifting = false
         }
+        // The provider's copy of a film or episode, with no add-on streams: its subtitles from the subtitle add-ons.
+        if (!live && subsOn && now?.subtitle == null && item.find == null && item.poster != null && index !in addOnSubtitles && AddOns.inUse.any { it.subtitles }) {
+            note = "Finding subtitles…"
+            addOnSubtitles[index] = kotlinx.coroutines.withTimeoutOrNull(10_000) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { AddOns.subtitleFor(AddOns.inUse, item.name, lang) }.getOrNull() }
+            }
+            note = null
+            Report.note("Add-ons", item.name + ": " + if (addOnSubtitles[index] != null) "subtitles from a subtitle add-on" else "no subtitles from the subtitle add-ons")
+        }
         val media = MediaItem.Builder().setUri(playFrom)
         val subtitle = now?.subtitle?.takeIf { now.url !in withoutSubtitles }
+            ?: addOnSubtitles[index]?.takeIf { (now?.url ?: item.url) !in withoutSubtitles }
         if (subtitle != null) {
             val kind = if (subtitle.substringBefore('?').endsWith(".vtt", ignoreCase = true)) androidx.media3.common.MimeTypes.TEXT_VTT else androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
             media.setSubtitleConfigurations(

@@ -49,7 +49,8 @@ data class Catalogue(val base: String, val type: String, val id: String, val nam
 data class CatItem(val id: String, val type: String, val name: String, val poster: String, val about: About)
 
 /** What the add-ons had for one film or episode, the best to try first. */
-class Search(val streams: List<Stream>)
+/** What the add-ons gave for a film or episode: its streams, and a subtitle file from a subtitle add-on, if one had it. */
+class Search(val streams: List<Stream>, val subtitle: String? = null)
 
 /**
  * Add-ons, of the kind made for Stremio: small web services the user adds by a link. Asked about a film
@@ -304,6 +305,28 @@ object AddOns {
         return match?.text("id")
     }
 
+    /**
+     * A subtitle file in [lang] from the subtitle add-ons, for a film or episode playing from the provider's own copy.
+     * An episode is named "Show · S1 E2". Null when no subtitle add-on has one. Blocks; call off the main thread.
+     */
+    fun subtitleFor(addOns: List<AddOn>, name: String, lang: Lang): String? {
+        val givers = addOns.filter { it.subtitles }
+        if (givers.isEmpty() || name.isBlank()) return null
+        val episode = Regex("^(.*) · S(\\d+) E(\\d+)$").find(name)
+        val type = if (episode != null) "series" else "movie"
+        val id = idFor(type, episode?.groupValues?.get(1) ?: name) ?: return null
+        val asked = if (episode != null) id + ":" + episode.groupValues[2] + ":" + episode.groupValues[3] else id
+        for (a in givers) {
+            val url = runCatching {
+                fetch(a.base + "/subtitles/" + type + "/" + asked + ".json")?.list("subtitles").orEmpty()
+                    .mapNotNull { runCatching { it.asJsonObject }.getOrNull() }
+                    .firstOrNull { Langs.matches(lang, it.text("lang")) }?.text("url")?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+            }.getOrNull()
+            if (url != null) return url
+        }
+        return null
+    }
+
     // ------------------------------------------------------------------------------------------ finding streams
 
     /**
@@ -359,7 +382,7 @@ object AddOns {
                         ?.filter { it.value.isJsonPrimitive }?.associate { it.key to it.value.asString }.orEmpty()
                     Stream("Add-on stream", address(row), headers, own ?: spare)
                 }
-            return Search(ranked)
+            return Search(ranked, spare)
         } finally {
             pool.shutdownNow()
         }
