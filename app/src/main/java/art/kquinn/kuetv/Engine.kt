@@ -153,27 +153,28 @@ object VolumeBoost {
 
 /**
  * Volume boost's sound: every sample lifted by [VolumeBoost.gain]. Near full, it is rounded off softly
- * instead of cut, so loud moments don't crackle. Works on ordinary sound (16-bit) and passes it on
- * untouched while the boost is off.
+ * instead of cut, so loud moments don't crackle. Works on ordinary sound (16-bit). While the boost is off when
+ * something starts, it stays out of the sound's path altogether (as night mode does).
+ * The samples are taken out before the output is written: the player can hand back this processor's own last
+ * output as its next input (seen on Kevin's TV, 22 November 2026: every live channel stopped at the copy).
  */
 @OptIn(UnstableApi::class)
 class BoostProcessor : BaseAudioProcessor() {
     override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat =
-        if (inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) AudioProcessor.AudioFormat.NOT_SET else inputAudioFormat
+        if (VolumeBoost.gain <= 1.001f || inputAudioFormat.encoding != C.ENCODING_PCM_16BIT) AudioProcessor.AudioFormat.NOT_SET
+        else inputAudioFormat
 
     override fun queueInput(inputBuffer: ByteBuffer) {
         val want = VolumeBoost.gain
-        val out = replaceOutputBuffer(inputBuffer.remaining())
-        if (want <= 1.001f) {
-            out.put(inputBuffer)
-            out.flip()
-            return
-        }
         val input = inputBuffer.order(ByteOrder.nativeOrder())
-        while (input.remaining() >= 2) {
-            out.putShort((softLimit(input.short / 32768f * want) * 32767f).toInt().toShort())
-        }
-        while (input.hasRemaining()) out.put(input.get())
+        val samples = ShortArray(input.remaining() / 2)
+        for (i in samples.indices) samples[i] = input.short
+        val leftover = ByteArray(input.remaining())
+        input.get(leftover)
+        val out = replaceOutputBuffer(samples.size * 2 + leftover.size)
+        if (want <= 1.001f) for (v in samples) out.putShort(v)
+        else for (v in samples) out.putShort((softLimit(v / 32768f * want) * 32767f).toInt().toShort())
+        out.put(leftover)
         out.flip()
     }
 
