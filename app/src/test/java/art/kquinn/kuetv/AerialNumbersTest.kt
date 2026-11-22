@@ -13,10 +13,12 @@ class AerialNumbersTest {
         assertEquals(252, Aerial.numberFor("Channel 4 plus 1"))
         assertEquals(301, Aerial.numberFor("BBC News"))
         assertEquals(259, Aerial.numberFor("U&Dave ja vu"))
+        assertEquals(1, Aerial.numberFor("UK: BBC One HD"))
+        assertEquals(2, Aerial.numberFor("BBC Two"))
     }
 
     @Test fun notOnTheAerial() {
-        assertEquals(null, Aerial.numberFor("BBC One"))
+        assertEquals(null, Aerial.numberFor("Channel 5"))
         assertEquals(null, Aerial.numberFor("Sky Sports Main Event"))
     }
 }

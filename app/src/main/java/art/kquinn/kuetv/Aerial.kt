@@ -100,10 +100,13 @@ object Aerial {
     /**
      * The aerial's channels on Kevin's TV, by their number in Freely's guide (Freely's "backup channels", which come
      * from the aerial and start at 233). Read from his photos of Freely's guide, 22 November 2026; Freely's own lower
-     * numbers come over the internet. BBC One, BBC Two and Channel 5 aren't on his aerial list. A rescan in Freely may
+     * numbers come over the internet, except BBC One and BBC Two. Channel 5 isn't on his aerial. A rescan in Freely may
      * renumber them.
      */
     private val numbers: Map<String, Int> = mapOf(
+        // BBC One and BBC Two play from the aerial on Freely's own 1 and 2 (the tuner locked on the aerial, full
+        // signal, on Kevin's TV, 22 November 2026); they have no backup copy. Freely's 5 isn't from the aerial.
+        "bbcone" to 1, "bbc1" to 1, "bbctwo" to 2, "bbc2" to 2,
         "itv" to 233, "itv1" to 233, "itv1hd" to 233, "itvhd" to 233, "utv" to 233,
         "itv2" to 238, "itv3" to 239, "itv4" to 240, "itvquiz" to 241, "itvbe" to 241,
         "channel4" to 242, "c4" to 242, "ch4" to 242, "film4" to 243, "more4" to 244, "4seven" to 245,
