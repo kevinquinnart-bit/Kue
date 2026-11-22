@@ -81,10 +81,14 @@ object Google {
         return if (w.isEmpty()) "" else "\nGoogle's words: $w"
     }
 
-    private fun keep(email: String, token: String) = synchronized(passes) { passes[email] = Pass(token, System.currentTimeMillis()) }
+    private fun keep(email: String, token: String) {
+        synchronized(passes) { passes[email] = Pass(token, System.currentTimeMillis()) }
+    }
 
     /** Forgets a pass Google turned down, so the next call asks for a fresh one. */
-    fun drop(email: String) = synchronized(passes) { passes.remove(email) }
+    fun drop(email: String) {
+        synchronized(passes) { passes.remove(email) }
+    }
 
     /** A pass for [email], fresh when the last is near an hour old. Null when Google wants the person asked again. */
     suspend fun token(context: Context, email: String): String? = lock.withLock {
