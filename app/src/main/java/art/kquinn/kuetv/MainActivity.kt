@@ -541,12 +541,18 @@ private fun App() {
         driveNote = backUpNow()
     }
     // The free UK and Irish guides: read once the lists are in, for the channels the provider has no guide for.
-    val guidesOn = remember(FreeGuides.changes) { FreeGuides.sources.count { FreeGuides.isOn(context, it.id) } }
-    LaunchedEffect(library?.groups?.size, guidesOn, Resumes.count) {
+    val guidesOn = remember(FreeGuides.changes) { FreeGuides.all(context).filter { FreeGuides.isOn(context, it.id) }.joinToString { it.id } }
+    LaunchedEffect(library?.groups?.size, guidesOn, Resumes.count, FreeGuides.matchChanges) {
         val lib = library ?: return@LaunchedEffect
-        if (guidesOn == 0) return@LaunchedEffect
-        delay(15_000)
-        withContext(Dispatchers.IO) { runCatching { FreeGuides.refresh(context, lib.groups.map { it.name }) } }
+        if (guidesOn.isEmpty()) return@LaunchedEffect
+        delay(if (FreeGuides.matchChanges > 0) 1_000 else 15_000)
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val hand = FreeGuides.matches(context)
+                val byHand = lib.groups.mapNotNull { g -> g.versions.firstNotNullOfOrNull { hand[it.channel.id] }?.let { FreeGuides.key(g.name) to it } }.toMap()
+                FreeGuides.refresh(context, lib.groups.map { it.name }, byHand = byHand)
+            }
+        }
         NowNext.forgetEmpty()
     }
     // Provider details that have loaded are kept on the list, to switch back to later.
@@ -2355,6 +2361,43 @@ private fun MainScreen(
                                 "DNS server: " + KueDns.names[dns], { KueDns.set(context, (dns + 1) % KueDns.names.size) }, look = Look.OTHER,
                                 below = "If your internet blocks your provider, try another · OK to change",
                             )
+                            // Tidy names: the same words taken off the front, middle or end of every channel's name at once.
+                            var tidyWords by remember { mutableStateOf<String?>(null) }
+                            val tidyTyped = tidyWords
+                            val renamesNow = remember(Renames.changes) { Renames.all(context) }
+                            if (tidyTyped == null) {
+                                FocusRow(
+                                    "Tidy channel names", { tidyWords = "" }, look = Look.OTHER,
+                                    below = "Take the same words off every name at once, such as \"UK |\"" + if (renamesNow.isEmpty()) "" else " · " + renamesNow.size + " renamed now",
+                                )
+                            } else {
+                                val cut = tidyTyped.trim()
+                                val hits = remember(cut, library, renamesNow) {
+                                    if (cut.isEmpty()) emptyList()
+                                    else library.channels.mapNotNull { c ->
+                                        val now = renamesNow[c.id] ?: c.name
+                                        if (!now.contains(cut, ignoreCase = true)) null
+                                        else c.id to now.replace(cut, " ", ignoreCase = true).replace(Regex("\\s+"), " ").trim()
+                                    }.filter { it.second.isNotEmpty() }
+                                }
+                                Field("Words to take off every channel name", tidyTyped) { tidyWords = it }
+                                FocusRow(
+                                    if (hits.isEmpty()) "Type the words to take off" else "Take them off " + hits.size + " channel" + (if (hits.size == 1) "" else "s"), {
+                                        if (hits.isNotEmpty()) {
+                                            for ((id, name) in hits) Renames.set(context, listOf(id), name)
+                                            kueToast(context, "Tidied " + hits.size + " channel names.")
+                                            tidyWords = null
+                                        }
+                                    }, look = Look.MAIN,
+                                    below = hits.firstOrNull()?.let { "For example: " + it.second } ?: "",
+                                )
+                                if (renamesNow.isNotEmpty()) FocusRow("Put back all your provider's names", {
+                                    Renames.set(context, renamesNow.keys.toList(), "")
+                                    kueToast(context, "Your provider's names are back.")
+                                    tidyWords = null
+                                }, look = Look.OTHER)
+                                FocusRow("Cancel", { tidyWords = null }, look = Look.OTHER)
+                            }
                             val hiddenCount = remember(Choices.changes) { listOf("live", "film", "show").sumOf { Choices.hidden(context, it).size } }
                             FocusRow("Categories: show, hide and order" + if (hiddenCount == 0) "" else " ($hiddenCount hidden)", onCategories, look = Look.OTHER)
                             sub("Backup")
@@ -2369,9 +2412,29 @@ private fun MainScreen(
                             )
                             sub("Free TV guides")
                             val guidesNow = FreeGuides.changes
-                            for (g in FreeGuides.sources) {
+                            for (g in FreeGuides.all(context)) {
                                 val on = guidesNow >= 0 && FreeGuides.isOn(context, g.id)
-                                FocusRow(g.name + ": " + if (on) "on" else "off", { FreeGuides.setOn(context, g.id, !on) }, look = Look.OTHER)
+                                val added = g.id.startsWith("own-")
+                                FocusRow(
+                                    g.name + ": " + if (on) "on" else "off", { FreeGuides.setOn(context, g.id, !on) }, look = Look.OTHER,
+                                    onHold = if (added) ({ FreeGuides.removeOwn(context, g.id); kueToast(context, g.name + " taken out.") }) else null,
+                                    below = if (added) g.url + if (phone) " · press and hold to take it out" else " · hold OK to take it out" else null,
+                                )
+                            }
+                            var guideAddress by remember { mutableStateOf<String?>(null) }
+                            val typedAddress = guideAddress
+                            if (typedAddress == null) {
+                                FocusRow("Add a guide by its web address", { guideAddress = "" }, look = Look.OTHER, below = "Any XMLTV guide, plain or .gz")
+                            } else {
+                                Field("The guide's web address", typedAddress, onDone = null) { guideAddress = it }
+                                FocusRow("Add this guide", {
+                                    if (typedAddress.isNotBlank()) {
+                                        val made = FreeGuides.addOwn(context, typedAddress)
+                                        kueToast(context, made.name + " added. Its programmes follow in a minute or so.")
+                                    }
+                                    guideAddress = null
+                                }, look = Look.MAIN)
+                                FocusRow("Cancel", { guideAddress = null }, look = Look.OTHER)
                             }
                             Note(
                                 "Used for channels your provider has no guide for, and for free channels. " +
@@ -6723,9 +6786,11 @@ private fun ChannelMenu(
     // Typing a name: for a new category (true), or for the channel (false); null while not typing.
     var naming by remember { mutableStateOf<Boolean?>(null) }
     var typed by remember { mutableStateOf("") }
+    // Matching this channel to a channel in the free TV guides, by hand.
+    var matching by remember { mutableStateOf(false) }
     val first = remember { FocusRequester() }
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose) {
-        LaunchedEffect(naming) {
+        LaunchedEffect(naming, matching) {
             withFrameNanos { }
             runCatching { first.requestFocus() }
         }
@@ -6741,7 +6806,27 @@ private fun ChannelMenu(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(channel.name, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
-            when (naming) {
+            if (matching) {
+                val wanted = FreeGuides.key(typed)
+                val found = remember(typed, FreeGuides.changes) {
+                    if (wanted.isEmpty()) emptyList() else FreeGuides.guideNames.filter { FreeGuides.key(it).contains(wanted) }.take(12)
+                }
+                Field("Search the guides' channels", typed, modifier = Modifier.focusRequester(first)) { typed = it }
+                if (FreeGuides.guideNames.isEmpty()) Note("No free guide has been read yet. Turn one on in Settings › Your provider › Free TV guides.")
+                else if (wanted.isNotEmpty() && found.isEmpty()) Note("No guide channel has that in its name.")
+                for (name in found) {
+                    FocusRow(name, {
+                        FreeGuides.match(context, channel.versions.map { it.channel.id }, name)
+                        kueToast(context, channel.name + " now uses " + name + " from the free guides.")
+                        onClose()
+                    }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+                }
+                FocusRow("Back to matching by name", {
+                    FreeGuides.match(context, channel.versions.map { it.channel.id }, null)
+                    onClose()
+                }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+                FocusRow("Cancel", { matching = false }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+            } else when (naming) {
                 null -> {
                     FocusRow(if (favourite) "★ Remove from favourites" else "★ Add to favourites", { favourites.toggleAll(favKeys); onClose(); onFavourite() }, Modifier.focusRequester(first), look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
                     for (m in mine) {
@@ -6750,6 +6835,10 @@ private fun ChannelMenu(
                     }
                     FocusRow("New category with this channel", { typed = ""; naming = true }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
                     FocusRow("Rename this channel", { typed = channel.name; naming = false }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+                    FocusRow(
+                        "Match to a TV guide channel", { typed = channel.name.replace(Regex("^[A-Z]{2,3}\\s*[:|]\\s*"), ""); matching = true }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp,
+                        below = "When the free guide shows the wrong programmes",
+                    )
                     FocusRow("Hide this channel", { HiddenChannels.hide(context, channel.versions.map { it.channel.id }); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
                     FocusRow("Pick channels to hide", { onPickToHide(); onClose() }, look = Look.OTHER, below = "OK picks each one; then hide them all at once", textSize = 17.sp, padV = 8.dp)
                     FocusRow("Close", onClose, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)

@@ -38,8 +38,56 @@ object FreeGuides {
 
     private fun prefs(context: Context) = context.getSharedPreferences("free_guides", Context.MODE_PRIVATE)
 
-    /** Freeview and Ireland are on to begin with. */
-    fun isOn(context: Context, id: String): Boolean = prefs(context).getBoolean("on.$id", id == "freeview" || id == "ie")
+    /** Freeview, Ireland and guides added in Settings are on to begin with. */
+    fun isOn(context: Context, id: String): Boolean = prefs(context).getBoolean("on.$id", id == "freeview" || id == "ie" || id.startsWith("own-"))
+
+    /** Guides added by their web address in Settings, kept on this device. */
+    fun own(context: Context): List<Source> =
+        prefs(context).getString("own", "").orEmpty().split('\n').mapNotNull { line -> line.split('\u0001').takeIf { it.size == 3 }?.let { Source(it[0], it[1], it[2]) } }
+
+    /** The built-in free guides, then the ones added. */
+    fun all(context: Context): List<Source> = sources + own(context)
+
+    /** Adds a guide by its web address (an XMLTV file, plain or .gz). Named after its website. */
+    fun addOwn(context: Context, address: String): Source {
+        val url = address.trim().let { if (it.startsWith("http://") || it.startsWith("https://")) it else "http://$it" }
+        val host = runCatching { java.net.URI(url).host.orEmpty().removePrefix("www.") }.getOrDefault("").ifEmpty { "your guide" }
+        val source = Source("own-" + (url.hashCode() and 0x7fffffff), "Your guide from $host", url)
+        val kept = own(context).filter { it.id != source.id } + source
+        prefs(context).edit().putString("own", kept.joinToString("\n") { it.id + "\u0001" + it.name + "\u0001" + it.url }).apply()
+        changes++
+        return source
+    }
+
+    fun removeOwn(context: Context, id: String) {
+        val kept = own(context).filter { it.id != id }
+        prefs(context).edit().putString("own", kept.joinToString("\n") { it.id + "\u0001" + it.name + "\u0001" + it.url }).remove("on.$id").apply()
+        File(context.cacheDir, "guide-$id").delete()
+        changes++
+    }
+
+    /** Every channel name in the guides read last time, A to Z, for matching a channel by hand. */
+    @Volatile var guideNames: List<String> = emptyList()
+        private set
+
+    /**
+     * Channels matched to a guide channel by hand: the channel's id to the guide channel's [key]. Used before the
+     * matching by name, so a wrong match can be put right.
+     */
+    fun matches(context: Context): Map<String, String> =
+        context.getSharedPreferences("guide_matches", Context.MODE_PRIVATE).all.mapNotNull { (k, v) -> (v as? String)?.let { k to it } }.toMap()
+
+    /** Changes when a channel is matched by hand, so the guides are read again. */
+    var matchChanges by mutableIntStateOf(0)
+        private set
+
+    /** Matches a channel (all its [channelIds]) to the guide channel called [guideName]; null goes back to matching by name. */
+    fun match(context: Context, channelIds: List<String>, guideName: String?) {
+        val edit = context.getSharedPreferences("guide_matches", Context.MODE_PRIVATE).edit()
+        for (id in channelIds) if (guideName == null) edit.remove(id) else edit.putString(id, key(guideName))
+        edit.apply()
+        matchChanges++
+    }
 
     fun setOn(context: Context, id: String, on: Boolean) {
         prefs(context).edit().putBoolean("on.$id", on).apply()
@@ -58,22 +106,30 @@ object FreeGuides {
      * Fetches the free guides that are on (when the copy kept here is old) and reads the programmes for the channels
      * called [names]. Call off the main thread. Returns how many of [names] have a guide.
      */
-    fun refresh(context: Context, names: Collection<String>, now: Long = System.currentTimeMillis()): Int {
+    fun refresh(
+        context: Context,
+        names: Collection<String>,
+        now: Long = System.currentTimeMillis(),
+        /** Channels matched by hand: the channel's name, as [key] gives it, to the guide channel's. */
+        byHand: Map<String, String> = emptyMap(),
+    ): Int {
         val wanted = names.mapTo(HashSet()) { key(it) }.filterTo(HashSet()) { it.isNotBlank() }
         val all = HashMap<String, MutableList<Programme>>()
-        for (source in sources) {
+        val seen = java.util.TreeSet(String.CASE_INSENSITIVE_ORDER)
+        for (source in all(context)) {
             if (!isOn(context, source.id)) continue
             val file = File(context.cacheDir, "guide-" + source.id)
             try {
                 if (!file.exists() || now - file.lastModified() > FRESH_MS) fetch(source.url, file)
                 file.inputStream().buffered().use { input ->
-                    for ((name, list) in read(unzipped(input), wanted, now)) all.getOrPut(name) { ArrayList() }.addAll(list)
+                    for ((name, list) in read(unzipped(input), wanted, now, byHand, seen)) all.getOrPut(name) { ArrayList() }.addAll(list)
                 }
             } catch (e: Exception) {
                 Report.note("Free guides", source.name + " couldn't be read: " + (e.message ?: e.javaClass.simpleName))
             }
         }
         index = all.mapValues { (_, list) -> list.sortedBy { it.startMs }.distinctBy { it.startMs } }
+        guideNames = seen.toList()
         matched = index.size
         prefs(context).edit().putLong("fetched", now).apply()
         changes++
@@ -105,7 +161,15 @@ object FreeGuides {
      * (as [key] gives them). A channel in the file serves a wanted name when its own is the same, or, for a regional
      * channel, when it is the wanted name followed by a region ("bbc1london" for "bbc1"; London is preferred).
      */
-    fun read(input: InputStream, wanted: Set<String>, now: Long = System.currentTimeMillis()): Map<String, List<Programme>> {
+    fun read(
+        input: InputStream,
+        wanted: Set<String>,
+        now: Long = System.currentTimeMillis(),
+        /** Channels matched by hand: a wanted name to the guide channel's own [key]. */
+        byHand: Map<String, String> = emptyMap(),
+        /** Every channel's name in the file is added here, as the file writes it. */
+        seen: MutableCollection<String>? = null,
+    ): Map<String, List<Programme>> {
         val parser = android.util.Xml.newPullParser()
         parser.setInput(input, null)
         val names = HashMap<String, MutableList<String>>()  // the file's channel id -> its plain names
@@ -123,7 +187,7 @@ object FreeGuides {
                     "channel" -> channelId = parser.getAttributeValue(null, "id")
                     "display-name" -> field = if (channelId != null) "display-name" else ""
                     "programme" -> {
-                        if (serves == null) serves = match(names, wanted)
+                        if (serves == null) serves = match(names, wanted, byHand)
                         val ch = parser.getAttributeValue(null, "channel").orEmpty()
                         programme = if (serves[ch].isNullOrEmpty()) null
                         else arrayOf(ch, parser.getAttributeValue(null, "start").orEmpty(), parser.getAttributeValue(null, "stop").orEmpty(), "", "")
@@ -135,7 +199,10 @@ object FreeGuides {
                 XmlPullParser.TEXT -> {
                     val text = parser.text.orEmpty()
                     when (field) {
-                        "display-name" -> channelId?.let { id -> names.getOrPut(id) { ArrayList() } += key(text) }
+                        "display-name" -> channelId?.let { id ->
+                            names.getOrPut(id) { ArrayList() } += key(text)
+                            text.trim().takeIf { it.isNotEmpty() }?.let { seen?.add(it) }
+                        }
                         "title" -> programme?.let { if (it[3].isEmpty()) it[3] = text.trim() }
                         "desc" -> programme?.let { if (it[4].isEmpty()) it[4] = text.trim() }
                     }
@@ -162,11 +229,18 @@ object FreeGuides {
     }
 
     /** Which of the file's channels serve which wanted names: the same plain name first, then a regional one. */
-    private fun match(names: Map<String, List<String>>, wanted: Set<String>): Map<String, List<String>> {
+    private fun match(names: Map<String, List<String>>, wanted: Set<String>, byHand: Map<String, String> = emptyMap()): Map<String, List<String>> {
         val out = HashMap<String, MutableList<String>>()
         val exact = HashSet<String>()
-        for ((id, plains) in names) for (p in plains) if (p in wanted) { out.getOrPut(id) { ArrayList() } += p; exact += p }
-        for (w in wanted - exact) {
+        // Matched by hand first: those wanted names take only the guide channel chosen for them.
+        for ((w, g) in byHand) {
+            if (w !in wanted) continue
+            val id = names.entries.firstOrNull { (_, plains) -> g in plains }?.key ?: continue
+            out.getOrPut(id) { ArrayList() } += w
+            exact += w
+        }
+        for ((id, plains) in names) for (p in plains) if (p in wanted && p !in byHand) { out.getOrPut(id) { ArrayList() } += p; exact += p }
+        for (w in wanted - exact - byHand.keys) {
             val regional = names.entries.filter { (_, keys) -> keys.any { it.startsWith(w) && it.removePrefix(w) in regions } }
             val pick = regional.firstOrNull { (_, keys) -> keys.any { it.endsWith("london") } } ?: regional.firstOrNull()
             if (pick != null) out.getOrPut(pick.key) { ArrayList() } += w
