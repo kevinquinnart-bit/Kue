@@ -1789,6 +1789,10 @@ object SharedMini {
         player = full
         address = url
         adopted = true
+        // A small TV already on screen picked its player before this ran (the screen is drawn before full screen's
+        // player is closed), and that one has just been let go: every small TV takes this one instead (seen on
+        // Kevin's TV, 22 November 2026: "started here", nothing came, until the next channel).
+        generation++
         // Why a taken-over player stops, for the Report (seen on Kevin's TV, 22 November 2026: stopped at once, twice).
         full.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
