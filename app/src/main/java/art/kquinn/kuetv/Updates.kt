@@ -329,8 +329,21 @@ object Reopen {
         Report.note("Updates", "update on (Android said so); handed over " + (if (ago < 0) "not by KueTV" else "$ago seconds ago"))
         if (at == 0L || System.currentTimeMillis() - at > WITHIN_MS || !isTv(context)) return
         Report.note("Updates", "update on: opening KueTV again")
+        open(context)
+        // It opened, then the installer's last screen closing put Fire TV's home over it (Kevin, 22 November 2026,
+        // 18:45: opened, yet Fire TV's home showed). So it looks again a few times, and comes back to the front if covered.
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        for (wait in listOf(3_000L, 6_000L, 10_000L, 15_000L)) main.postDelayed({
+            if (!Screen.visible) {
+                Report.note("Updates", "KueTV covered after opening (" + wait / 1000 + " s); bringing it back")
+                open(context)
+            }
+        }, wait)
+    }
+
+    private fun open(context: Context) {
         runCatching {
-            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            context.startActivity(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         }.onFailure { Report.note("Updates", "couldn't open KueTV again: " + it.message) }
     }
 }

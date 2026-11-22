@@ -1816,7 +1816,27 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
                 if (!frames) Report.note("Small TV", "picture showing")
                 frames = true
             }
+            override fun onSurfaceSizeChanged(width: Int, height: Int) {
+                Report.note("Small TV", "picture area now ${width}x$height")
+            }
         }
+        // Carried on from full screen: the sound went on but the picture didn't reach the small TV's area (Kevin,
+        // 22 November 2026, twice). Once the small area is ready, the picture decoder is started again onto it; the
+        // sound carries on throughout.
+        val main0 = android.os.Handler(android.os.Looper.getMainLooper())
+        val restartPicture = Runnable {
+            if (player.playbackState == Player.STATE_IDLE) return@Runnable
+            val before = player.trackSelectionParameters
+            player.trackSelectionParameters = before.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, true).build()
+            // Back on a moment later: done at once, the player would only see the last of the two.
+            main0.postDelayed({
+                if (player.playbackState != Player.STATE_IDLE) {
+                    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setTrackTypeDisabled(androidx.media3.common.C.TRACK_TYPE_VIDEO, false).build()
+                    Report.note("Small TV", "picture decoder started again onto the small TV")
+                }
+            }, 300)
+        }
+        if (tookOver) main0.postDelayed(restartPicture, 400)
         val details = object : androidx.media3.exoplayer.analytics.AnalyticsListener {
             override fun onVideoDecoderInitialized(eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime, decoderName: String, initializedTimestampMs: Long, initializationDurationMs: Long) {
                 Report.note("Small TV", "picture decoder started: $decoderName")
@@ -1838,6 +1858,7 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
         }
         main.postDelayed(check, 5_000)
         onDispose {
+            main0.removeCallbacks(restartPicture)
             main.removeCallbacks(check)
             player.removeListener(listener)
             player.removeAnalyticsListener(details)
