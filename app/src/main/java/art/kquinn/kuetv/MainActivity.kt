@@ -1401,6 +1401,10 @@ private fun TitleMenu(
             FocusRow(if (favourite) "★ Remove from favourites" else "★ Add to favourites", { onFavourite(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
             FocusRow(if (watched) "Mark as not watched" else "✓ Mark as watched", { onWatched(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
             if (playUrl.isNotBlank()) {
+                FocusRow("⬇ Download to watch offline", {
+                    onClose()
+                    kueToast(context, Downloads.start(context, name, playUrl) ?: ("Downloading " + name + ". It will be in Recordings, and carries on with the app closed."))
+                }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
                 FocusRow("Play in another player", {
                     onClose()
                     if (!openElsewhere(context, playUrl, name)) kueToast(context, "There is no other video player on this device. VLC or MX Player can be installed from the app store.")
@@ -3458,6 +3462,18 @@ private fun Pane.EpisodePage(
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                 FocusRow("Order: " + if (newest) "newest first" else "oldest first", { EpisodeOrder.set(context, show.id, !newest) }, look = Look.OTHER, below = "OK to change")
+                                // The next five not yet watched, in the series' own order, saved to watch offline.
+                                val toFetch = episodes.filter { it.url.isNotBlank() && !Watched.isWatched(context, it.url) }.take(5)
+                                if (toFetch.isNotEmpty()) {
+                                    FocusRow("⬇ Download the next " + (if (toFetch.size == 1) "episode" else toFetch.size.toString() + " episodes"), {
+                                        val problems = toFetch.mapNotNull { e -> Downloads.start(context, show.name + " · S" + e.season + " E" + e.number, e.url) }
+                                        kueToast(
+                                            context,
+                                            if (problems.size == toFetch.size) problems.first()
+                                            else "Downloading " + (toFetch.size - problems.size) + " episodes, one after another. They will be in Recordings.",
+                                        )
+                                    }, look = Look.OTHER, below = "To watch with no internet · the ones not watched yet")
+                                }
                                 // The series' trailer, when the provider gives one.
                                 val trailer = show.about.trailer
                                 if (!trailer.isNullOrBlank()) {
@@ -3848,10 +3864,10 @@ private fun Pane.RecordingsPane(
             }
             // Programmes set to record that haven't been recorded yet. They are set from the TV Guide.
             itemsIndexed(toCome, key = { _, t -> "timed:" + t.id }) { _, plan ->
-                val going = plan.id in TimedService.running
+                val going = if (plan.whole) plan.id == TimedService.wholeNow else plan.id in TimedService.running
                 ProgrammeRow(
-                    whenText = (if (going) "Recording now · until " + endText.format(java.util.Date(plan.stopMs)) else "Will record · " + whenText.format(java.util.Date(plan.startMs)) + " to " + endText.format(java.util.Date(plan.stopMs))) + " · " + plan.channel,
-                    title = plan.title,
+                    whenText = if (plan.whole) (if (going) "Downloading now" else "Waiting to download") + (if (plan.title.isBlank()) "" else " · " + plan.channel) else (if (going) "Recording now · until " + endText.format(java.util.Date(plan.stopMs)) else "Will record · " + whenText.format(java.util.Date(plan.startMs)) + " to " + endText.format(java.util.Date(plan.stopMs))) + " · " + plan.channel,
+                    title = plan.title.ifBlank { plan.channel },
                     description = "",
                     onClick = {
                         when {

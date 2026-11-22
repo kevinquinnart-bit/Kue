@@ -156,7 +156,15 @@ class TimedService : Service() {
                 }
             }.getOrNull()
             try {
-                record(timed)
+                // Saved programmes and downloads go one at a time, so they don't take every screen the provider allows.
+                if (timed.whole) {
+                    synchronized(ONE_AT_A_TIME) {
+                        wholeNow = timed.id
+                        try { record(timed) } finally { wholeNow = 0 }
+                    }
+                } else {
+                    record(timed)
+                }
             } finally {
                 runCatching { lock?.release() }
                 running.remove(id)
@@ -223,11 +231,40 @@ class TimedService : Service() {
     }
 
     companion object {
+        private val ONE_AT_A_TIME = Any()
+
+        /** The download or saved programme being fetched now (the others wait their turn); 0 when none. */
+        @Volatile var wholeNow: Int = 0
+
         /** The recordings being made right now, by their number. */
         val running: MutableSet<Int> = ConcurrentHashMap.newKeySet()
 
         fun start(context: Context, id: Int) {
             runCatching { context.startForegroundService(Intent(context, TimedService::class.java).putExtra("id", id)) }
+        }
+    }
+}
+
+/**
+ * Downloads: a film or episode from the provider's own copy, saved whole into Recordings to watch with no
+ * internet. Made by [TimedService] one at a time, with the app closed if need be.
+ */
+object Downloads {
+    /** Room kept free on the device: a download isn't started with less than this. */
+    private const val ROOM_BYTES = 2L * 1024 * 1024 * 1024
+
+    /** Says why it can't be downloaded, or null when it has been set going. */
+    fun start(context: Context, name: String, url: String): String? {
+        val address = url.substringBefore('?')
+        return when {
+            url.isBlank() -> "This one has no copy from your provider to download."
+            address.endsWith(".m3u8", ignoreCase = true) || address.endsWith(".mpd", ignoreCase = true) -> "This one comes in pieces as it plays, so it can't be downloaded."
+            Recordings.folder(context).usableSpace < ROOM_BYTES ->
+                "Not enough storage here: " + Recordings.folder(context).usableSpace / (1024 * 1024) + " MB free, and a download needs at least 2 GB."
+            else -> {
+                TimedStore.add(context, Timed.whole(name, "", url, 0L, 8 * 3_600_000L, System.currentTimeMillis()))
+                null
+            }
         }
     }
 }
