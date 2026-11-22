@@ -67,6 +67,7 @@ class MainActivity : ComponentActivity() {
         Offline.init(this)
         Sync.init(this)
         Podcasts.init(this)
+        Backup.init(this)
         Playing.connect(this)
         Fixer.askPermission = ::askEdit
         // Settings › Notifications › Turn on: Android's question the first time; after that (Android won't
@@ -94,6 +95,11 @@ class MainActivity : ComponentActivity() {
         if (signedIn && Net.online(this) && (Scanner.data.tracks.isEmpty() || unfinished || System.currentTimeMillis() - Scanner.data.scannedAt > 6 * 60 * 60 * 1000L)) {
             Scanner.scan()
         }
+        // The daily backup to the Drive, a minute after opening, out of the way of everything else.
+        if (signedIn) Thread({
+            Thread.sleep(60_000)
+            kotlinx.coroutines.runBlocking { Backup.ifDue() }
+        }, "kuesounds-backup").start()
         setContent {
             Ui.App(
                 // Google can take a sign-in back (a changed password, access removed): then it's asked for again.

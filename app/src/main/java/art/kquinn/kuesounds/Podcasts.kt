@@ -133,6 +133,58 @@ object Podcasts {
     /** Checks for new episodes when it hasn't been done for a while. */
     fun refreshIfStale(): Boolean = System.currentTimeMillis() - prefs().getLong("refreshedAt", 0) > 30 * 60_000L
 
+    // Moving from another podcast app --------------------------------------------------------
+
+    /**
+     * The shows' web addresses in a file from another podcast app: the usual OPML export (every podcast app
+     * can make one), or failing that any web addresses in the file, one per show.
+     */
+    fun feedsInFile(text: String): List<String> {
+        val found = LinkedHashSet<String>()
+        runCatching {
+            val p = android.util.Xml.newPullParser()
+            p.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
+            p.setInput(text.reader())
+            var event = p.eventType
+            while (event != XmlPullParser.END_DOCUMENT) {
+                if (event == XmlPullParser.START_TAG && p.name.equals("outline", ignoreCase = true)) {
+                    (p.getAttributeValue(null, "xmlUrl") ?: p.getAttributeValue(null, "xmlurl") ?: p.getAttributeValue(null, "url"))
+                        ?.trim()?.takeIf { it.startsWith("http", ignoreCase = true) }?.let { found += it }
+                }
+                event = p.next()
+            }
+        }
+        if (found.isEmpty()) Regex("https?://[^\\s\"'<>]+").findAll(text).forEach { found += it.value.trimEnd('.', ',', ')') }
+        return found.toList()
+    }
+
+    /** Where bringing shows in from a file has got to ("12 of 40 added"), or "" when not doing it. */
+    var importing by mutableStateOf("")
+        private set
+
+    /** Follows each show in [feeds] not followed already. Off the main thread. Gives how many came in, and how many couldn't. */
+    fun importFeeds(feeds: List<String>): Pair<Int, Int> {
+        var added = 0
+        var failed = 0
+        val todo = feeds.filter { !isFollowed(it) }
+        try {
+            todo.forEachIndexed { i, feed ->
+                importing = "Adding " + (i + 1) + " of " + todo.size + "…"
+                if (runCatching { follow(feed) }.isSuccess) added++ else failed++
+            }
+        } finally {
+            importing = ""
+        }
+        return added to failed
+    }
+
+    /** Your shows as an OPML file, which any other podcast app can bring in. */
+    fun opml(): String {
+        fun esc(t: String) = t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
+        val lines = followed().joinToString("\n") { s -> "    <outline type=\"rss\" text=\"" + esc(s.title) + "\" title=\"" + esc(s.title) + "\" xmlUrl=\"" + esc(s.feed) + "\" />" }
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<opml version=\"2.0\">\n  <head><title>KueSounds podcasts</title></head>\n  <body>\n" + lines + "\n  </body>\n</opml>\n"
+    }
+
     // Finding shows ----------------------------------------------------------------------------
 
     /** Searches Apple's free podcast directory. Off the main thread. */

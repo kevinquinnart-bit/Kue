@@ -82,6 +82,29 @@ object PodUi {
         LaunchedEffect(followed.size) {
             if (followed.isNotEmpty() && Podcasts.refreshIfStale()) withContext(Dispatchers.IO) { Podcasts.refresh() }
         }
+        val context = androidx.compose.ui.platform.LocalContext.current
+        var moved by remember { mutableStateOf("") }
+        // A file of shows from another podcast app (OPML): every show in it is followed here.
+        val bringIn = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            moved = ""
+            scope.launch {
+                val text = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } }.getOrNull().orEmpty() }
+                val feeds = Podcasts.feedsInFile(text)
+                if (feeds.isEmpty()) { moved = "No shows were found in that file. In your other app, look for Export or Back up, and pick OPML."; return@launch }
+                val (added, failed) = withContext(Dispatchers.IO) { Podcasts.importFeeds(feeds) }
+                moved = "$added shows added" + (if (feeds.size - added - failed > 0) ", " + (feeds.size - added - failed) + " already here" else "") +
+                    (if (failed > 0) ", $failed couldn't be read" else "") + "."
+            }
+        }
+        // Your shows as a file, to take to another podcast app.
+        val sendOut = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/x-opml")) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { runCatching { context.contentResolver.openOutputStream(uri)?.use { it.write(Podcasts.opml().toByteArray()) } }.isSuccess }
+                moved = if (ok) "Your shows are saved in that file." else "The file couldn't be written."
+            }
+        }
         val going = remember(touched, Podcasts.episodes, Sync.entries) { Podcasts.inProgress().take(10) }
         val latest = remember(touched, Podcasts.episodes, Sync.entries) { Podcasts.latest() }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -93,6 +116,14 @@ object PodUi {
                     }
                 }
             }
+            item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item { Chip("Bring in shows from another app") { bringIn.launch(arrayOf("*/*")) } }
+                    if (followed.isNotEmpty()) item { Chip("Save shows as a file") { sendOut.launch("KueSounds podcasts.opml") } }
+                }
+            }
+            if (Podcasts.importing.isNotEmpty()) item { Ui.Words(Podcasts.importing, 15, K.Accent) }
+            if (moved.isNotEmpty()) item { Ui.Words(moved, 15, K.Accent, lines = 3) }
             if (Podcasts.problem.isNotEmpty()) item { Ui.Words(Podcasts.problem, 15, K.Accent, lines = 3) }
             if (followed.isEmpty()) {
                 item {

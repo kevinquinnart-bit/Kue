@@ -802,6 +802,43 @@ object Ui {
         }
     }
 
+    /**
+     * Settings › Backup: when KueSounds was last backed up to the Drive, Back up now, and Bring back a backup
+     * (asked twice, as it replaces what is on this phone).
+     */
+    @Composable
+    private fun BackupPanel() {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var sure by remember { mutableStateOf(false) }
+        Panel {
+            Words("Backup", 14, K.Soft)
+            val at = Backup.lastAt
+            Words(if (at == 0L) "Not backed up yet" else "Backed up " + java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(at)), 17)
+            Words(
+                "Your settings, the podcasts you follow and where you got to, favourites, and your music's details as looked up, kept in your Drive as \"" +
+                    Backup.FILE_NAME + "\". Done by itself once a day. Not your sign-in, songs or covers.",
+                14, K.Soft, lines = 6,
+            )
+            if (Backup.busy.isNotEmpty()) Words(Backup.busy, 15, K.Accent)
+            if (Backup.problem.isNotEmpty()) Words(Backup.problem, 15, K.Accent, lines = 3)
+            Spacer(Modifier.height(10.dp))
+            if (Backup.busy.isEmpty()) {
+                Button("Back up now", modifier = Modifier.fillMaxWidth()) { scope.launch { withContext(Dispatchers.IO) { runCatching { Backup.now() } } } }
+                Spacer(Modifier.height(8.dp))
+                Button(if (sure) "Yes, replace what's on this phone" else "Bring back a backup", main = false, modifier = Modifier.fillMaxWidth()) {
+                    if (!sure) sure = true
+                    else scope.launch {
+                        sure = false
+                        val ok = withContext(Dispatchers.IO) { Backup.restore() }
+                        if (ok) Backup.restart(context)
+                    }
+                }
+                if (sure) Words("This puts back the backup from your Drive in place of this phone's settings, shows and music details, then KueSounds starts again.", 14, K.Soft, lines = 4)
+            }
+        }
+    }
+
     @Composable
     private fun Control(glyph: Glyph, label: String, size: Dp, colour: Color, onClick: () -> Unit) {
         Box(Modifier.size(size).clip(CircleShape).clickable(onClickLabel = label, onClick = onClick), contentAlignment = Alignment.Center) {
@@ -938,6 +975,7 @@ object Ui {
                     14, K.Soft, lines = 2,
                 )
             }
+            BackupPanel()
             Panel {
                 Words("Notifications", 14, K.Soft)
                 val context = LocalContext.current
