@@ -1584,14 +1584,6 @@ private class BarReach {
 @Composable
 private fun BarItem(section: Section, chosen: Boolean, picture: Boolean, modifier: Modifier, bar: BarReach, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    // Moving along the bar shows each section below as the remote rests on it, so ▼ goes straight into it
-    // (Kevin, 22 November 2026). Not Home (it fills the screen, with no bar), Search or Settings: those open with OK.
-    LaunchedEffect(focused) {
-        if (focused && !chosen && !picture && section != Section.HOME && bar.inside) {
-            delay(350)
-            if (focused) onClick()
-        }
-    }
     val shape = RoundedCornerShape(50)
     val ink = when {
         focused -> Color.Black
@@ -2814,7 +2806,17 @@ private fun MainScreen(
             LastLive.item?.let { small ->
                 val group = library.groups.firstOrNull { g -> g.versions.any { it.channel.url == small.url } }
                     ?: library.groups.firstOrNull { it.name == small.name }
-                onPlay(listOf(group?.let { livePlayable(it, library.account, library.serverAheadSec) } ?: small), 0, true, SMALL_TV_KEY)
+                if (group == null) onPlay(listOf(small), 0, true, SMALL_TV_KEY)
+                else {
+                    // Full screen with the channels around it, so ▲ ▼ change channel there: alone in its list, they did
+                    // nothing (Kevin, 22 November 2026). A favourite: the favourites, in their order; else its category.
+                    val favSet = library.liveIndex.favourites(favs)
+                    val around = if (group in favSet) library.groups.filter { it in favSet }.sortedBy { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
+                        else library.liveIndex.byCategory[group.versions[0].channel.categoryId].orEmpty()
+                    val list = around.ifEmpty { listOf(group) }
+                    val at = list.indexOf(group).coerceAtLeast(0)
+                    onPlay(list.map { livePlayable(it, library.account, library.serverAheadSec) }, at, true, SMALL_TV_KEY)
+                }
             }
         },
         back = if (state.resumeKey == SMALL_TV_KEY) resume else null,

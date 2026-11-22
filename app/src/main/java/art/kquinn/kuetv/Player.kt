@@ -285,6 +285,8 @@ fun PlayerScreen(
 ) {
     val context = LocalContext.current
     val phone = LocalPhone.current
+    // The small TV stops at once: one picture at a time.
+    remember { SharedMini.stop() }
     // What is to be played: those given, and for catch-up, each next programme added as the one before it ends.
     val items = remember { androidx.compose.runtime.mutableStateListOf<Playable>().apply { addAll(firstItems) } }
     var index by remember { mutableIntStateOf(startIndex.coerceIn(0, (items.size - 1).coerceAtLeast(0))) }
@@ -519,6 +521,9 @@ fun PlayerScreen(
                     if (!live && !started[0] && item != null) History.add(context, if (item.poster != null) History.FILM else History.OTHER, item.name, item.key, item.poster)
                     started[0] = true
                     if (item != null) Settled.played(item, stream, versions.size)
+                    // The small TV carries on with the version playing here, not one this player has moved off
+                    // (Kevin, 22 November 2026: full screen moved FHD to HD, the small TV stayed on a dead copy).
+                    if (live && item != null) versions.getOrNull(stream)?.url?.takeIf { AddOns.showable(it) }?.let { LastLive.item = Playable(item.name, it) }
                 }
                 // The picture was playing and has stopped to catch up. Too many of those: move down a version.
                 if (state == Player.STATE_BUFFERING && live && hasPlayed[0] && stream < versions.size - 1) {
@@ -1718,8 +1723,41 @@ fun PlayerScreen(
 }
 
 /**
- * The small TV: a live channel playing in a corner while the lists are browsed. It has its own simple
- * player, which is closed when the full-screen one opens. It stops when KueTV leaves the screen.
+ * The small TV's one player, shared by every place the small TV shows, so it plays on while moving between
+ * sections (each had its own, stopped and started again at every move: Kevin, 22 November 2026). Stopped when the
+ * full-screen player opens or no small TV has shown for a moment; replaced when the channel changes.
+ */
+@OptIn(UnstableApi::class)
+object SharedMini {
+    private var player: ExoPlayer? = null
+    private var address: String? = null
+    private var users = 0
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+    private val idle = Runnable { player?.stop() }
+
+    fun take(context: android.content.Context, url: String): ExoPlayer {
+        main.removeCallbacks(idle)
+        users++
+        val now = player
+        if (now != null && address == url) return now
+        now?.release()
+        return lightPlayer(context.applicationContext, url).also { player = it; address = url }
+    }
+
+    fun give() {
+        users = (users - 1).coerceAtLeast(0)
+        if (users == 0) { main.removeCallbacks(idle); main.postDelayed(idle, 1_500) }
+    }
+
+    fun stop() {
+        main.removeCallbacks(idle)
+        player?.stop()
+    }
+}
+
+/**
+ * The small TV: a live channel playing in a corner while the lists are browsed, on [SharedMini]'s player,
+ * which stops when the full-screen one opens and when KueTV leaves the screen.
  */
 @OptIn(UnstableApi::class)
 @Composable
@@ -1727,7 +1765,8 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val address = resolvedAddress(item.url) ?: return
     var retry by remember(address) { mutableIntStateOf(0) }
-    val player = remember(address) { lightPlayer(context, address) }
+    // One small TV player shared by every section, so moving between them doesn't stop and restart it.
+    val player = remember(address) { SharedMini.take(context, address) }
     DisposableEffect(player) {
         val listener = object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) { retry += 1 }
@@ -1735,15 +1774,17 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
         player.addListener(listener)
         onDispose {
             player.removeListener(listener)
-            player.release()
+            SharedMini.give()
         }
     }
     val visible = Screen.visible
     LaunchedEffect(player, visible, retry) {
-        if (!visible) { player.stop(); return@LaunchedEffect }
+        if (!visible) { SharedMini.stop(); return@LaunchedEffect }
         // A few tries after a drop, a little apart, then it is left quiet rather than hammering the provider.
         if (retry > 5) return@LaunchedEffect
         if (retry > 0) delay(3_000)
+        // Already playing (shown in another section a moment ago): it carries on as it is.
+        if (retry == 0 && player.playbackState != Player.STATE_IDLE) return@LaunchedEffect
         player.seekToDefaultPosition()
         player.prepare()
     }
@@ -1764,6 +1805,8 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
             modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
             factory = { ctx -> PlayerView(ctx).apply { useController = false; isFocusable = false } },
             update = { it.player = player },
+            // Let go of the shared player when this small TV goes, so the next one shows the picture.
+            onRelease = { it.player = null },
         )
         Text(
             if (focused) "OK: full screen" else item.name,
