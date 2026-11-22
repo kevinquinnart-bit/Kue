@@ -27,10 +27,20 @@ class TaggerTest {
         assertEquals("Wrong Album", before.album)
         assertEquals(hadPicture, before.pictures > 0)
         val length = before.lengthSeconds
+        // An old comment inside the file: fixing must take it out with everything else.
+        org.jaudiotagger.audio.AudioFileIO.read(f).let { a ->
+            a.tagOrCreateAndSetDefault.setField(org.jaudiotagger.tag.FieldKey.COMMENT, "Ripped by somebody")
+            org.jaudiotagger.audio.AudioFileIO.write(a)
+        }
 
-        Tagger.fix(f, Tagger.Details("Right Album", "Right Artist", 1995, right))
+        Tagger.fix(f, Tagger.Details("Right Song", "Right Singer", "Right Album", "Right Artist", 1995, 3, 1, right))
 
         val after = Tagger.read(f)
+        val tag = org.jaudiotagger.audio.AudioFileIO.read(f).tag
+        assertEquals("Right Song", after.title)
+        assertEquals("Right Singer", tag.getFirst(org.jaudiotagger.tag.FieldKey.ARTIST))
+        assertEquals("", tag.getFirst(org.jaudiotagger.tag.FieldKey.COMMENT))
+        assertTrue(tag.getFirst(org.jaudiotagger.tag.FieldKey.TRACK).startsWith("3"))
         assertEquals("Right Album", after.album)
         assertEquals("Right Artist", after.albumArtist)
         assertTrue(after.year.startsWith("1995"))

@@ -106,3 +106,30 @@ class CatalogueTest {
         assertEquals(false, Catalogue.isVarious("Oasis"))
     }
 }
+
+/** Checks on reading an album's own list of songs, and finding which one a file is. */
+class ReleaseSongsTest {
+    private val json = """
+        {"media":[{"position":1,"tracks":[
+          {"position":1,"title":"Wonderwall","artist-credit":[{"name":"Oasis","joinphrase":""}]},
+          {"position":2,"title":"Don’t Look Back in Anger","artist-credit":[{"name":"Oasis","joinphrase":""}]}
+        ]},{"position":2,"tracks":[
+          {"position":1,"title":"Fairytale of New York","artist-credit":[{"name":"The Pogues","joinphrase":" feat. "},{"name":"Kirsty MacColl","joinphrase":""}]}
+        ]}]}
+    """.trimIndent()
+
+    @Test
+    fun readsEverySongWithItsDiscPlaceNameAndArtist() {
+        val songs = Catalogue.parseReleaseSongs(json)
+        org.junit.Assert.assertEquals(3, songs.size)
+        org.junit.Assert.assertEquals(Catalogue.Song(2, 1, "Fairytale of New York", "The Pogues feat. Kirsty MacColl"), songs[2])
+        org.junit.Assert.assertEquals("Don't Look Back in Anger", songs[1].title)
+    }
+
+    @Test
+    fun findsTheSongByNameWithBracketsAsideAndNeverGuesses() {
+        val songs = Catalogue.parseReleaseSongs(json)
+        org.junit.Assert.assertEquals("Wonderwall", Catalogue.songFor(songs, "wonderwall (Remastered)")?.title)
+        org.junit.Assert.assertEquals(null, Catalogue.songFor(songs, "Some Might Say"))
+    }
+}

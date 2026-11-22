@@ -42,13 +42,19 @@ object Catalogue {
     /** Writes a value into a search so its punctuation is read as words, not as search commands. */
     fun quote(text: String): String = "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
-    private fun ask(path: String, query: String, limit: Int = 10): String {
+    private fun ask(path: String, query: String, limit: Int = 10): String =
+        askAt(
+            (SEARCH + path).toHttpUrl().newBuilder().addQueryParameter("query", query).addQueryParameter("fmt", "json")
+                .addQueryParameter("limit", limit.toString()).build(),
+        )
+
+    /** Asks MusicBrainz at [url], at most once a second, waiting and asking again while it is busy. */
+    @Synchronized
+    private fun askAt(url: okhttp3.HttpUrl): String {
         // One question a second at most, as MusicBrainz asks.
         val wait = lastAsked + 1100 - System.currentTimeMillis()
         if (wait > 0) Thread.sleep(wait)
         lastAsked = System.currentTimeMillis()
-        val url = (SEARCH + path).toHttpUrl().newBuilder().addQueryParameter("query", query).addQueryParameter("fmt", "json")
-            .addQueryParameter("limit", limit.toString()).build()
         val request = Request.Builder().url(url).header("User-Agent", WHO).header("Accept", "application/json").build()
         // Busy: wait longer each time (3, 6, 12, 24 then 45 seconds), or as long as MusicBrainz says to.
         val waits = longArrayOf(3_000, 6_000, 12_000, 24_000, 45_000)
@@ -204,6 +210,44 @@ object Catalogue {
         if (artist.isBlank() || artist == Library.UNKNOWN_ARTIST || isVarious(artist)) return SongHome(null, null)
         val query = "recording:" + quote(title) + " AND artist:" + quote(artist) + " AND status:official AND (primarytype:album OR primarytype:single)"
         return chooseSongHome(parseRecordings(ask("recording/", query, 15)), title, artist)
+    }
+
+    /** One song on a release, as the catalogue writes it: its disc and place, its proper name and its artist. */
+    data class Song(val disc: Int, val position: Int, val title: String, val artist: String)
+
+    /** Reads a release's list of songs. */
+    fun parseReleaseSongs(json: String): List<Song> {
+        val root = JsonParser.parseString(json).asJsonObject
+        return root.getAsJsonArray("media")?.flatMap { m ->
+            val medium = m.asJsonObject
+            val disc = medium.get("position")?.asInt ?: 1
+            medium.getAsJsonArray("tracks")?.mapNotNull { t ->
+                val o = t.asJsonObject
+                val title = (o.get("title")?.asString ?: o.getAsJsonObject("recording")?.get("title")?.asString).orEmpty().replace('’', '\'')
+                if (title.isBlank()) return@mapNotNull null
+                val artist = creditOf(o).ifBlank { o.getAsJsonObject("recording")?.let { creditOf(it) }.orEmpty() }.replace('’', '\'')
+                Song(disc, o.get("position")?.asInt ?: 0, title, artist)
+            }.orEmpty()
+        }.orEmpty()
+    }
+
+    /** Every song on the release [releaseId], with its proper name and artist. Call off the main thread. */
+    fun releaseSongs(releaseId: String): List<Song> =
+        parseReleaseSongs(
+            askAt(
+                (SEARCH + "release/" + releaseId).toHttpUrl().newBuilder().addQueryParameter("inc", "recordings+artist-credits")
+                    .addQueryParameter("fmt", "json").build(),
+            ),
+        )
+
+    /**
+     * Which song on a release a file is: the one with the same name, brackets aside ("Wonderwall (Remastered)"
+     * is "Wonderwall"). Null when none has it, so a file is never given another song's name.
+     */
+    fun songFor(songs: List<Song>, title: String): Song? {
+        val name = bare(title)
+        if (name.isEmpty()) return null
+        return songs.firstOrNull { bare(it.title) == name } ?: songs.firstOrNull { Library.sortName(it.title) == Library.sortName(title) }
     }
 
     /** Fetches the album's front cover (500 dots across). Null when the catalogue has none. */

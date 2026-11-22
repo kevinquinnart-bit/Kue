@@ -629,7 +629,7 @@ object Ui {
         val context = LocalContext.current
         var sure by remember { mutableStateOf(false) }
         val todo = albums.filter { Fixer.canFix(it) && !Fixer.isFixed(it) }
-        val songs = todo.sumOf { al -> al.tracks.count { Tagger.canFix(it.fileName) && !it.fixed } }
+        val songs = todo.sumOf { al -> al.tracks.count { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) } }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when {
                 // Nothing matched yet: nothing has been fixed either, so it mustn't say so.
@@ -643,8 +643,8 @@ object Ui {
                 !sure -> Button(label, main = false, modifier = Modifier.fillMaxWidth()) { sure = true }
                 else -> {
                     Words(
-                        "This puts the right cover and album details into " + count(songs, "song file") +
-                            " in your Drive and takes out any other pictures. Google keeps the old versions for 30 days.",
+                        "For " + count(songs, "song file") + " in your Drive: puts each song's name and artist right, takes out " +
+                            "everything else inside the file, then writes the album and its cover. Google keeps the old versions for 30 days.",
                         14, K.Soft, lines = 5,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -839,11 +839,17 @@ object Ui {
                     (if (!Scanner.running && Scanner.problem.isNotEmpty()) "\n" + Scanner.problem else ""),
             )
             Step(
-                4, "Fix the files", "Only when you press Fix: writes the right album name and cover into each song file in your Drive and takes out wrong pictures. Google keeps the old files for 30 days.",
+                4, "Fix the files", "Only when you press Fix, for each song: its name and artist put right, everything else inside the file taken out, then the album's name and cover written in. Google keeps the old files for 30 days.",
                 state = if (Fixer.running) NOW else if (view.matched.isNotEmpty() && view.leftToFix == 0) DONE else WAITING,
                 progress = if (view.matched.isEmpty()) "Nothing ready to fix yet"
-                else n(view.leftToFix) + " of " + count(view.matched.size, "matched album") + " still to fix · see Fix the files below",
+                else n(view.leftToFix) + " of " + count(view.matched.size, "matched album") + " still to fix" +
+                    (if (Scanner.running && !Fixer.running) "\nFixing starts once step 3 has finished." else ""),
             )
+            // The button is here, under step 4, as well as further down.
+            if (view.matched.isNotEmpty()) {
+                if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 3)
+                FixFiles(view.matched, "Fix all matched albums")
+            }
         }
     }
 

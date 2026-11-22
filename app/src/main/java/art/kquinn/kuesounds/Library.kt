@@ -28,6 +28,11 @@ data class Track(
     var checked: Boolean = false,
     /** True once the right cover and album details have been written into the file in the Drive. */
     var fixed: Boolean = false,
+    /**
+     * True once the file was fixed the full way: its own song name and artist put right, everything else
+     * inside it taken out, then the album and cover written. Files fixed before that are fixed again.
+     */
+    var fixedFully: Boolean = false,
     /** True once the song has been looked up on its own (a song from a compilation, or with no album). */
     var ownLook: Boolean = false,
     /** True once the song has been looked up to see whether it came out as a single. */

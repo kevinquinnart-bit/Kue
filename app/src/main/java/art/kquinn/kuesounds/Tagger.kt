@@ -25,16 +25,26 @@ object Tagger {
 
     fun canFix(fileName: String): Boolean = Library.ending(fileName) in fixable
 
-    data class Details(val album: String, val albumArtist: String, val year: Int, val cover: File?)
+    data class Details(
+        val title: String,
+        val artist: String,
+        val album: String,
+        val albumArtist: String,
+        val year: Int,
+        val trackNo: Int,
+        val discNo: Int,
+        val cover: File?,
+    )
 
     /** What a file holds, read back after a change to check it. */
-    data class Inside(val album: String, val albumArtist: String, val year: String, val pictures: Int, val firstPicture: ByteArray?, val lengthSeconds: Int)
+    data class Inside(val title: String, val album: String, val albumArtist: String, val year: String, val pictures: Int, val firstPicture: ByteArray?, val lengthSeconds: Int)
 
     fun read(file: File): Inside {
         val audio = AudioFileIO.read(file)
         val tag = audio.tag
         val pics = tag?.artworkList.orEmpty()
         return Inside(
+            title = tag?.getFirst(FieldKey.TITLE).orEmpty(),
             album = tag?.getFirst(FieldKey.ALBUM).orEmpty(),
             albumArtist = tag?.getFirst(FieldKey.ALBUM_ARTIST).orEmpty(),
             year = tag?.getFirst(FieldKey.YEAR).orEmpty(),
@@ -45,28 +55,37 @@ object Tagger {
     }
 
     /**
-     * Writes [d] into [file], in place, then reads the file back to check it: the details must be
-     * there, there must be exactly one picture (or none when no cover was given), and the song must be
-     * as long as before. Throws when the check fails, so a damaged file is never sent back to the Drive.
+     * Fixes [file] in place, in this order: the song's own name and artist are settled, everything else
+     * written inside the file is taken out (old details, comments and every picture), then the song's name,
+     * artist, album, album artist, year, track and disc number and the cover are written in fresh. The file
+     * is read back to check it: the details must be there, there must be exactly one picture (or none when no
+     * cover was given), and the song must be as long as before. Throws when the check fails, so a damaged
+     * file is never sent back to the Drive.
      */
     fun fix(file: File, d: Details) {
-        val before = AudioFileIO.read(file)
-        val length = before.audioHeader?.trackLength ?: 0
-        val tag = before.tagOrCreateAndSetDefault
-        tag.deleteArtworkField()
+        val length = AudioFileIO.read(file).audioHeader?.trackLength ?: 0
+        // Everything written inside the file goes: every kind of details block it holds, and its pictures.
+        AudioFileIO.delete(AudioFileIO.read(file))
+        val clean = AudioFileIO.read(file)
+        val tag = clean.tagOrCreateAndSetDefault
+        if (d.title.isNotBlank()) tag.setField(FieldKey.TITLE, d.title)
+        if (d.artist.isNotBlank()) tag.setField(FieldKey.ARTIST, d.artist)
+        tag.setField(FieldKey.ALBUM, d.album)
+        if (d.albumArtist.isNotBlank()) tag.setField(FieldKey.ALBUM_ARTIST, d.albumArtist)
+        if (d.year > 0) tag.setField(FieldKey.YEAR, d.year.toString())
+        if (d.trackNo > 0) tag.setField(FieldKey.TRACK, d.trackNo.toString())
+        if (d.discNo > 0) tag.setField(FieldKey.DISC_NO, d.discNo.toString())
         if (d.cover != null) {
             val art = CoverArt().apply { setFromFile(d.cover) }
             art.pictureType = PictureTypes.DEFAULT_ID
             art.description = ""
             tag.setField(art)
         }
-        tag.setField(FieldKey.ALBUM, d.album)
-        if (d.albumArtist.isNotBlank()) tag.setField(FieldKey.ALBUM_ARTIST, d.albumArtist)
-        if (d.year > 0) tag.setField(FieldKey.YEAR, d.year.toString())
-        AudioFileIO.write(before)
+        AudioFileIO.write(clean)
 
         val after = read(file)
         check(after.album == d.album) { "the album name didn't stick" }
+        check(d.title.isBlank() || after.title == d.title) { "the song name didn't stick" }
         check(after.pictures == (if (d.cover != null) 1 else 0)) { "the file holds " + after.pictures + " pictures after the change" }
         check(kotlin.math.abs(after.lengthSeconds - length) <= 1) { "the song's length changed" }
     }
