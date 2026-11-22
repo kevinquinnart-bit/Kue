@@ -1740,8 +1740,25 @@ object SharedMini {
     private var player: ExoPlayer? = null
     private var address: String? = null
     private var users = 0
+    // The full-screen player, taken over: once stopped it can't simply start again (its pause-and-rewind and
+    // recording parts are closed), so it is let go instead (seen on Kevin's TV, 22 November 2026: started again,
+    // it sat loading with no picture).
+    private var adopted = false
+    /** Goes up when the player is let go, so a small TV still showing takes a fresh one. */
+    var generation by androidx.compose.runtime.mutableIntStateOf(0)
+        private set
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
-    private val idle = Runnable { player?.stop() }
+    private val idle = Runnable { halt() }
+
+    private fun halt() {
+        if (adopted) {
+            player?.release()
+            player = null
+            address = null
+            adopted = false
+            generation++
+        } else player?.stop()
+    }
 
     fun take(context: android.content.Context, url: String): ExoPlayer {
         main.removeCallbacks(idle)
@@ -1749,6 +1766,7 @@ object SharedMini {
         val now = player
         if (now != null && address == url) return now
         now?.release()
+        adopted = false
         return lightPlayer(context.applicationContext, url).also { player = it; address = url }
     }
 
@@ -1758,6 +1776,7 @@ object SharedMini {
         if (player !== full) player?.release()
         player = full
         address = url
+        adopted = true
         // Nothing showing it until the small TV appears: stopped if none does in a moment.
         if (users == 0) main.postDelayed(idle, 3_000)
     }
@@ -1769,7 +1788,7 @@ object SharedMini {
 
     fun stop() {
         main.removeCallbacks(idle)
-        player?.stop()
+        halt()
     }
 }
 
@@ -1784,7 +1803,7 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
     val address = resolvedAddress(item.url) ?: return
     var retry by remember(address) { mutableIntStateOf(0) }
     // One small TV player shared by every section, so moving between them doesn't stop and restart it.
-    val player = remember(address) { SharedMini.take(context, address) }
+    val player = remember(address, SharedMini.generation) { SharedMini.take(context, address) }
     DisposableEffect(player) {
         // What the small TV's picture does, for the Report: it lost its picture (sound on) after taking over from
         // full screen (Kevin, 22 November 2026), and these lines show where it stops.

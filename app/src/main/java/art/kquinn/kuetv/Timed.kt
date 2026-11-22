@@ -116,6 +116,8 @@ object TimedStore {
 /** Woken by the alarm for a programme, and after a restart or an update to set the alarms again. */
 class TimedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // Written to the report even with KueTV's screens closed (lines from here were lost before).
+        if (Report.file == null) Report.keepIn(java.io.File(context.filesDir, "report.txt"))
         if (intent.action == START) TimedService.start(context.applicationContext, intent.getIntExtra("id", 0))
         else {
             TimedStore.arm(context)

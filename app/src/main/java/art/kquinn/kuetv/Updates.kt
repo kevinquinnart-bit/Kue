@@ -325,6 +325,8 @@ object Reopen {
         val prefs = context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE)
         val at = prefs.getLong("at", 0L)
         prefs.edit().remove("at").apply()
+        val ago = if (at == 0L) -1L else (System.currentTimeMillis() - at) / 1000
+        Report.note("Updates", "update on (Android said so); handed over " + (if (ago < 0) "not by KueTV" else "$ago seconds ago"))
         if (at == 0L || System.currentTimeMillis() - at > WITHIN_MS || !isTv(context)) return
         Report.note("Updates", "update on: opening KueTV again")
         runCatching {
