@@ -25,6 +25,9 @@ object Aerial {
     var changes by mutableIntStateOf(0)
         private set
 
+    /** Something about the aerial changed (its channel list): Settings shows it afresh. */
+    fun bump() { android.os.Handler(android.os.Looper.getMainLooper()).post { changes++ } }
+
     private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("aerial", Context.MODE_PRIVATE)
 
     /** The TV's built-in tuner, or null when this device has none (a phone, a Fire TV stick). */
@@ -97,31 +100,6 @@ object Aerial {
         }
     }
 
-    /**
-     * The aerial's channels on Kevin's TV, by their number in Freely's guide (Freely's "backup channels", which come
-     * from the aerial and start at 233). Read from his photos of Freely's guide, 22 November 2026; Freely's own lower
-     * numbers come over the internet, except BBC One and BBC Two. Channel 5 isn't on his aerial. A rescan in Freely may
-     * renumber them.
-     */
-    private val numbers: Map<String, Int> = mapOf(
-        // BBC One and BBC Two play from the aerial on Freely's own 1 and 2 (the tuner locked on the aerial, full
-        // signal, on Kevin's TV, 22 November 2026); they have no backup copy. Freely's 5 isn't from the aerial.
-        "bbcone" to 1, "bbc1" to 1, "bbctwo" to 2, "bbc2" to 2,
-        "itv" to 233, "itv1" to 233, "itv1hd" to 233, "itvhd" to 233, "utv" to 233,
-        "itv2" to 238, "itv3" to 239, "itv4" to 240, "itvquiz" to 241, "itvbe" to 241,
-        "channel4" to 242, "c4" to 242, "ch4" to 242, "film4" to 243, "more4" to 244, "4seven" to 245,
-        "5star" to 246, "channel5star" to 246, "5action" to 247, "5usa" to 248, "5drama" to 249,
-        "itv1+1" to 251, "itv+1" to 251, "channel4+1" to 252, "c4+1" to 252, "4+1" to 252,
-        "5+1" to 253, "channel5+1" to 253, "itv2+1" to 254, "itv3+1" to 255, "film4+1" to 256, "more4+1" to 257,
-        "quest+1" to 258, "udavejavu" to 259, "davejavu" to 259, "udrama+1" to 260, "drama+1" to 260,
-        "itv4+1" to 261, "tlc+1" to 262, "greattv+1" to 263, "blaze+1" to 264, "greatplayer" to 265,
-        "togethertv+1" to 266,
-        "bbcnews" to 301, "bbcparliament" to 302, "skynews" to 303, "gbnews" to 304, "cnn" to 305,
-        "cnninternational" to 305, "cnnheadlines" to 305, "france24" to 306, "france24english" to 306,
-        "cbbc" to 351, "cbeebies" to 352, "pop" to 353, "popmax" to 354, "popup" to 355,
-        "ketchuptv" to 356, "ketchuptoo" to 357, "shaked" to 360,
-    )
-
     /** A channel's name as the provider writes it, made comparable: "UK: ITV 2 +1 HD" is "itv2+1". */
     internal fun key(name: String): String =
         java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase()
@@ -131,11 +109,11 @@ object Aerial {
             .replace(Regex("\\bplus\\s*1\\b"), "+1")
             .replace(Regex("[^a-z0-9+]"), "")
 
-    /** The aerial channel number in Freely for this channel, or null when the aerial doesn't carry it. */
-    fun numberFor(name: String): Int? = numbers[key(name)]
+    /** The aerial channel number for this channel in the list in use, or null when the aerial doesn't carry it. */
+    fun numberFor(name: String): Int? = AerialLists.current?.numbers?.get(key(name))
 
     /**
-     * Opens Freely on the aerial channel [number], through Fire TV's own TV player (tried on Kevin's TV,
+     * Opens the aerial channel [number] (in Freely on a Freely TV), through Fire TV's own TV player (tried on Kevin's TV,
      * 22 November 2026: 233 played ITV1 HD from the aerial with a full signal). False when it wouldn't open.
      */
     fun openChannel(context: Context, number: Int): Boolean {
@@ -197,4 +175,105 @@ object NetWatch {
 
     private fun reaches(caps: NetworkCapabilities): Boolean =
         caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+}
+
+/**
+ * The aerial's channel numbers for each TV platform (UK Freely, UK Freeview, Ireland's Saorview…), from KueTV's own
+ * channel file online, fetched once a day so a change reaches every TV without a new app; the copy inside the app
+ * covers the first start and no internet. Which list is used: the one picked in Settings › This TV, or by itself
+ * from the TV's country, Freely's app being on the TV choosing the Freely list.
+ */
+object AerialLists {
+    const val URL = "https://raw.githubusercontent.com/kevinquinnart-bit/Kue/main/channels/aerial-channels.json"
+    private const val DAY_MS = 24 * 3600_000L
+
+    class Channel(val number: Int, val name: String)
+    class Plan(val id: String, val label: String, val countries: List<String>, val whenInstalled: String?, val channels: List<Channel>) {
+        /** Every name each channel goes by, made comparable, to its number. */
+        val numbers: Map<String, Int> = HashMap<String, Int>().also { m ->
+            channels.forEach { c -> m.putIfAbsent(Aerial.key(c.name), c.number) }
+        }
+    }
+
+    @Volatile var plans: List<Plan> = emptyList()
+        private set
+    @Volatile var current: Plan? = null
+        private set
+    @Volatile var updated: String = ""
+        private set
+
+    private fun prefs(context: Context) = context.applicationContext.getSharedPreferences("aerial", Context.MODE_PRIVATE)
+    private fun cache(context: Context) = java.io.File(context.filesDir, "aerial-channels.json")
+
+    /** The list picked in Settings, or "" for the one KueTV picks by itself. */
+    fun chosen(context: Context): String = prefs(context).getString("list", "").orEmpty()
+    fun choose(context: Context, id: String) {
+        prefs(context).edit().putString("list", id).apply()
+        current = pick(context, plans)
+        Aerial.bump()
+    }
+
+    /** Reads the file kept from last time (or the app's own copy), then fetches a fresh one once a day. Off the screen's thread. */
+    fun load(context: Context) {
+        val kept = runCatching { cache(context).takeIf { it.exists() }?.readText() }.getOrNull()
+        val text = kept ?: runCatching { context.assets.open("aerial-channels.json").bufferedReader().use { it.readText() } }.getOrNull()
+        text?.let { use(context, it) }
+        val last = prefs(context).getLong("fetched", 0L)
+        if (System.currentTimeMillis() - last < DAY_MS && kept != null) return
+        runCatching {
+            Provider.http.newCall(okhttp3.Request.Builder().url(URL).header("User-Agent", Provider.USER_AGENT).build()).execute().use { r ->
+                if (!r.isSuccessful) throw IllegalStateException("answered " + r.code)
+                val fresh = r.body.string()
+                if (parse(fresh).isEmpty()) throw IllegalStateException("no lists in it")
+                cache(context).writeText(fresh)
+                prefs(context).edit().putLong("fetched", System.currentTimeMillis()).apply()
+                use(context, fresh)
+            }
+        }.onFailure { Report.note("Aerial", "channel file not fetched: " + it.message) }
+    }
+
+    private fun use(context: Context, text: String) {
+        val p = parse(text)
+        if (p.isEmpty()) return
+        plans = p
+        updated = runCatching { org.json.JSONObject(text).optString("updated") }.getOrDefault("")
+        current = pick(context, p)
+        Report.note("Aerial", "channel list: " + (current?.label ?: "none for this TV") + " (file of " + updated + ")")
+        Aerial.bump()
+    }
+
+    /** The list for this TV: the one picked in Settings; otherwise the first for the TV's country whose app is on it. */
+    private fun pick(context: Context, all: List<Plan>): Plan? {
+        all.firstOrNull { it.id == chosen(context) }?.let { return it }
+        val country = runCatching { context.resources.configuration.locales[0].country }.getOrDefault("").uppercase()
+        val pm = context.packageManager
+        val installed: (String) -> Boolean = { pkg -> runCatching { pm.getPackageInfo(pkg, 0) }.isSuccess }
+        return pickFor(all, country, installed)
+    }
+
+    internal fun pickFor(all: List<Plan>, country: String, installed: (String) -> Boolean): Plan? =
+        all.filter { country in it.countries }.firstOrNull { it.whenInstalled == null || installed(it.whenInstalled) }
+
+    internal fun parse(text: String): List<Plan> = runCatching {
+        val lists = org.json.JSONObject(text).optJSONArray("lists") ?: return@runCatching emptyList()
+        (0 until lists.length()).mapNotNull { i ->
+            val o = lists.optJSONObject(i) ?: return@mapNotNull null
+            val ch = o.optJSONArray("channels") ?: return@mapNotNull null
+            val channels = ArrayList<Channel>()
+            for (j in 0 until ch.length()) {
+                val c = ch.optJSONObject(j) ?: continue
+                val n = c.optInt("n", -1).takeIf { it > 0 } ?: continue
+                val names = c.optJSONArray("names") ?: continue
+                for (k in 0 until names.length()) channels += Channel(n, names.optString(k))
+            }
+            val countries = o.optJSONArray("countries")?.let { a -> (0 until a.length()).map { a.optString(it).uppercase() } }.orEmpty()
+            Plan(o.optString("id"), o.optString("label"), countries, o.optString("whenInstalled").ifBlank { null }, channels)
+        }
+    }.getOrDefault(emptyList())
+
+    /** For the tests: use these lists as if fetched, with [id] in use. */
+    internal fun setForChecks(all: List<Plan>, id: String) {
+        plans = all
+        current = all.firstOrNull { it.id == id }
+    }
 }

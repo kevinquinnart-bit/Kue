@@ -156,6 +156,7 @@ class MainActivity : ComponentActivity() {
         // computer can read it, to find out how Freely's way of opening channels can be brought into KueTV.
         if (isTv(this)) Thread { TvChannels.writeProbe(applicationContext) }.start()
         if (isTv(this)) Thread { runCatching { UiSounds.load(applicationContext) } }.start()
+        if (isTv(this)) Thread { runCatching { AerialLists.load(applicationContext) } }.start()
         // The report's page for the phone, open the whole time KueTV is on.
         if (isTv(this)) Thread { runCatching { ReportPage.open(applicationContext) } }.start()
         // A TV is always sideways. A phone turns with the way it is held.
@@ -2697,6 +2698,29 @@ private fun MainScreen(
                                 val offer = remember(Aerial.changes) { Aerial.offerWhenOffline(context) }
                                 FocusRow("Offer aerial TV when the internet goes: " + if (offer) "on" else "off", { Aerial.offerWhenOffline(context, !offer) },
                                     look = Look.OTHER, below = "OK to change")
+                                // Which channel numbers the aerial uses here: picked by KueTV from the TV's country, or chosen.
+                                val aerialTick = Aerial.changes
+                                val plan = remember(aerialTick) { AerialLists.current }
+                                val choice = remember(aerialTick) { AerialLists.chosen(context) }
+                                FocusRow("Aerial channel list: " + (plan?.label ?: "none for this TV") + if (choice.isEmpty()) " (picked by KueTV)" else "",
+                                    {
+                                        // OK goes round: picked by KueTV, then each list in turn.
+                                        val ids = listOf("") + AerialLists.plans.map { it.id }
+                                        AerialLists.choose(context, ids[(ids.indexOf(choice) + 1) % ids.size])
+                                    },
+                                    look = Look.OTHER,
+                                    below = "OK to change. Lets On aerial in the player find each channel. Kept up to date online" +
+                                        (AerialLists.updated.takeIf { it.isNotBlank() }?.let { " (list of $it)" } ?: ""))
+                                var showAerial by remember { mutableStateOf(false) }
+                                if (plan != null) FocusRow((if (showAerial) "Hide" else "Check") + " the aerial channels (" + plan.channels.map { it.number }.distinct().size + ")",
+                                    { showAerial = !showAerial }, look = Look.OTHER, below = "Each opens on the aerial, to check it's the right channel")
+                                if (showAerial && plan != null) {
+                                    plan.channels.distinctBy { it.number }.sortedBy { it.number }.forEach { c ->
+                                        FocusRow(c.number.toString() + "  " + c.name, {
+                                            if (!Aerial.openChannel(context, c.number)) kueToast(context, "Aerial channel " + c.number + " wouldn't open.")
+                                        }, look = Look.OTHER)
+                                    }
+                                }
                                 sub("The TV's settings")
                             }
                             // The TV's own settings: each opens straight onto that screen, and Back comes back here.

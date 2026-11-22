@@ -1,0 +1,892 @@
+{
+ "about": "KueTV's aerial channel numbers, by TV platform. KueTV downloads this file once a day, so a change here reaches every TV without a new app. Each list gives the number to tune and the names a channel goes by.",
+ "updated": "2026-11-22",
+ "lists": [
+  {
+   "id": "GB-freely",
+   "label": "UK · Freely",
+   "countries": [
+    "GB",
+    "IM",
+    "JE",
+    "GG"
+   ],
+   "whenInstalled": "com.vewd.core.opapp",
+   "source": "Freely's aerial channels (233 up) as listed on a Freely TV, 22 November 2026; timeshift, news and children's numbers match https://rxtvinfo.com/freely-channel-list-uk-epg/ (15 June 2026)",
+   "channels": [
+    {
+     "n": 1,
+     "names": [
+      "BBC One",
+      "BBC 1"
+     ]
+    },
+    {
+     "n": 2,
+     "names": [
+      "BBC Two",
+      "BBC 2"
+     ]
+    },
+    {
+     "n": 233,
+     "names": [
+      "ITV1 HD",
+      "ITV1",
+      "ITV",
+      "ITV HD",
+      "UTV"
+     ]
+    },
+    {
+     "n": 234,
+     "names": [
+      "ITV1 SD"
+     ]
+    },
+    {
+     "n": 238,
+     "names": [
+      "ITV2"
+     ]
+    },
+    {
+     "n": 239,
+     "names": [
+      "ITV3"
+     ]
+    },
+    {
+     "n": 240,
+     "names": [
+      "ITV4"
+     ]
+    },
+    {
+     "n": 241,
+     "names": [
+      "ITV Quiz",
+      "ITVBe"
+     ]
+    },
+    {
+     "n": 242,
+     "names": [
+      "Channel 4",
+      "C4",
+      "Ch4"
+     ]
+    },
+    {
+     "n": 243,
+     "names": [
+      "Film4"
+     ]
+    },
+    {
+     "n": 244,
+     "names": [
+      "More4"
+     ]
+    },
+    {
+     "n": 245,
+     "names": [
+      "4seven"
+     ]
+    },
+    {
+     "n": 246,
+     "names": [
+      "5Star",
+      "Channel 5 Star"
+     ]
+    },
+    {
+     "n": 247,
+     "names": [
+      "5Action"
+     ]
+    },
+    {
+     "n": 248,
+     "names": [
+      "5USA"
+     ]
+    },
+    {
+     "n": 249,
+     "names": [
+      "5Drama"
+     ]
+    },
+    {
+     "n": 251,
+     "names": [
+      "ITV1 +1",
+      "ITV +1"
+     ]
+    },
+    {
+     "n": 252,
+     "names": [
+      "Channel 4 +1",
+      "C4 +1",
+      "4 +1"
+     ]
+    },
+    {
+     "n": 253,
+     "names": [
+      "5 +1",
+      "Channel 5 +1"
+     ]
+    },
+    {
+     "n": 254,
+     "names": [
+      "ITV2 +1"
+     ]
+    },
+    {
+     "n": 255,
+     "names": [
+      "ITV3 +1"
+     ]
+    },
+    {
+     "n": 256,
+     "names": [
+      "Film4 +1"
+     ]
+    },
+    {
+     "n": 257,
+     "names": [
+      "More4 +1"
+     ]
+    },
+    {
+     "n": 258,
+     "names": [
+      "Quest +1"
+     ]
+    },
+    {
+     "n": 259,
+     "names": [
+      "U&Dave ja vu",
+      "Dave ja vu"
+     ]
+    },
+    {
+     "n": 260,
+     "names": [
+      "U&Drama +1",
+      "Drama +1"
+     ]
+    },
+    {
+     "n": 261,
+     "names": [
+      "ITV4 +1"
+     ]
+    },
+    {
+     "n": 262,
+     "names": [
+      "TLC +1"
+     ]
+    },
+    {
+     "n": 263,
+     "names": [
+      "Great! TV +1"
+     ]
+    },
+    {
+     "n": 264,
+     "names": [
+      "Blaze +1"
+     ]
+    },
+    {
+     "n": 265,
+     "names": [
+      "Great! Player"
+     ]
+    },
+    {
+     "n": 266,
+     "names": [
+      "Together TV +1"
+     ]
+    },
+    {
+     "n": 301,
+     "names": [
+      "BBC News"
+     ]
+    },
+    {
+     "n": 302,
+     "names": [
+      "BBC Parliament"
+     ]
+    },
+    {
+     "n": 303,
+     "names": [
+      "Sky News"
+     ]
+    },
+    {
+     "n": 304,
+     "names": [
+      "GB News"
+     ]
+    },
+    {
+     "n": 305,
+     "names": [
+      "CNN",
+      "CNN International",
+      "CNN Headlines"
+     ]
+    },
+    {
+     "n": 306,
+     "names": [
+      "France 24",
+      "France 24 English"
+     ]
+    },
+    {
+     "n": 351,
+     "names": [
+      "CBBC"
+     ]
+    },
+    {
+     "n": 352,
+     "names": [
+      "CBeebies"
+     ]
+    },
+    {
+     "n": 353,
+     "names": [
+      "POP"
+     ]
+    },
+    {
+     "n": 354,
+     "names": [
+      "Pop Max"
+     ]
+    },
+    {
+     "n": 355,
+     "names": [
+      "Pop Up"
+     ]
+    },
+    {
+     "n": 356,
+     "names": [
+      "Ketchup TV"
+     ]
+    },
+    {
+     "n": 357,
+     "names": [
+      "Ketchup Too"
+     ]
+    },
+    {
+     "n": 360,
+     "names": [
+      "Shaked!"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "GB-freeview",
+   "label": "UK · Freeview",
+   "countries": [
+    "GB",
+    "IM",
+    "JE",
+    "GG"
+   ],
+   "source": "https://rxtvinfo.com/freeview-channels-england-and-wales-isle-of-man/ (25 June 2026)",
+   "channels": [
+    {
+     "n": 101,
+     "names": [
+      "BBC One HD",
+      "BBC One",
+      "BBC 1"
+     ]
+    },
+    {
+     "n": 102,
+     "names": [
+      "BBC Two HD",
+      "BBC Two",
+      "BBC 2"
+     ]
+    },
+    {
+     "n": 103,
+     "names": [
+      "ITV1 HD",
+      "ITV1",
+      "ITV",
+      "UTV"
+     ]
+    },
+    {
+     "n": 104,
+     "names": [
+      "Channel 4 HD",
+      "Channel 4",
+      "C4",
+      "Ch4"
+     ]
+    },
+    {
+     "n": 105,
+     "names": [
+      "5 HD",
+      "Channel 5",
+      "5"
+     ]
+    },
+    {
+     "n": 6,
+     "names": [
+      "ITV2"
+     ]
+    },
+    {
+     "n": 106,
+     "names": [
+      "BBC Four HD",
+      "BBC Four",
+      "BBC 4"
+     ]
+    },
+    {
+     "n": 10,
+     "names": [
+      "ITV3"
+     ]
+    },
+    {
+     "n": 11,
+     "names": [
+      "Sky Mix"
+     ]
+    },
+    {
+     "n": 12,
+     "names": [
+      "TLC"
+     ]
+    },
+    {
+     "n": 13,
+     "names": [
+      "E4"
+     ]
+    },
+    {
+     "n": 14,
+     "names": [
+      "Film4"
+     ]
+    },
+    {
+     "n": 15,
+     "names": [
+      "Channel 4 +1",
+      "C4 +1"
+     ]
+    },
+    {
+     "n": 17,
+     "names": [
+      "Quest"
+     ]
+    },
+    {
+     "n": 18,
+     "names": [
+      "More4"
+     ]
+    },
+    {
+     "n": 19,
+     "names": [
+      "U&Dave",
+      "Dave"
+     ]
+    },
+    {
+     "n": 20,
+     "names": [
+      "U&Drama",
+      "Drama"
+     ]
+    },
+    {
+     "n": 21,
+     "names": [
+      "5USA"
+     ]
+    },
+    {
+     "n": 107,
+     "names": [
+      "BBC Three HD",
+      "BBC Three",
+      "BBC 3"
+     ]
+    },
+    {
+     "n": 25,
+     "names": [
+      "U&W",
+      "W"
+     ]
+    },
+    {
+     "n": 26,
+     "names": [
+      "ITV4"
+     ]
+    },
+    {
+     "n": 27,
+     "names": [
+      "U&Yesterday",
+      "Yesterday"
+     ]
+    },
+    {
+     "n": 28,
+     "names": [
+      "ITV Quiz",
+      "ITVBe"
+     ]
+    },
+    {
+     "n": 29,
+     "names": [
+      "ITV2 +1"
+     ]
+    },
+    {
+     "n": 30,
+     "names": [
+      "E4 +1"
+     ]
+    },
+    {
+     "n": 31,
+     "names": [
+      "E4 Extra"
+     ]
+    },
+    {
+     "n": 32,
+     "names": [
+      "5Star"
+     ]
+    },
+    {
+     "n": 33,
+     "names": [
+      "5Action"
+     ]
+    },
+    {
+     "n": 34,
+     "names": [
+      "Great! TV"
+     ]
+    },
+    {
+     "n": 35,
+     "names": [
+      "ITV1 +1",
+      "ITV +1"
+     ]
+    },
+    {
+     "n": 36,
+     "names": [
+      "Sky Arts"
+     ]
+    },
+    {
+     "n": 38,
+     "names": [
+      "5 +1",
+      "Channel 5 +1"
+     ]
+    },
+    {
+     "n": 39,
+     "names": [
+      "DMAX"
+     ]
+    },
+    {
+     "n": 40,
+     "names": [
+      "Quest Red"
+     ]
+    },
+    {
+     "n": 41,
+     "names": [
+      "Legend"
+     ]
+    },
+    {
+     "n": 42,
+     "names": [
+      "Great! Action"
+     ]
+    },
+    {
+     "n": 43,
+     "names": [
+      "Food Network"
+     ]
+    },
+    {
+     "n": 44,
+     "names": [
+      "Really"
+     ]
+    },
+    {
+     "n": 46,
+     "names": [
+      "5Select"
+     ]
+    },
+    {
+     "n": 47,
+     "names": [
+      "Film4 +1"
+     ]
+    },
+    {
+     "n": 48,
+     "names": [
+      "Challenge"
+     ]
+    },
+    {
+     "n": 49,
+     "names": [
+      "4seven"
+     ]
+    },
+    {
+     "n": 50,
+     "names": [
+      "Great! Mystery"
+     ]
+    },
+    {
+     "n": 52,
+     "names": [
+      "Great! Romance"
+     ]
+    },
+    {
+     "n": 56,
+     "names": [
+      "That's TV UK"
+     ]
+    },
+    {
+     "n": 57,
+     "names": [
+      "U&Eden",
+      "Eden"
+     ]
+    },
+    {
+     "n": 58,
+     "names": [
+      "ITV3 +1"
+     ]
+    },
+    {
+     "n": 59,
+     "names": [
+      "ITV4 +1"
+     ]
+    },
+    {
+     "n": 60,
+     "names": [
+      "Drama +1",
+      "U&Drama +1"
+     ]
+    },
+    {
+     "n": 61,
+     "names": [
+      "Great! TV +1"
+     ]
+    },
+    {
+     "n": 64,
+     "names": [
+      "Blaze"
+     ]
+    },
+    {
+     "n": 67,
+     "names": [
+      "True Crime"
+     ]
+    },
+    {
+     "n": 68,
+     "names": [
+      "True Crime Xtra"
+     ]
+    },
+    {
+     "n": 69,
+     "names": [
+      "Legend Xtra"
+     ]
+    },
+    {
+     "n": 70,
+     "names": [
+      "Quest +1"
+     ]
+    },
+    {
+     "n": 74,
+     "names": [
+      "U&Dave ja vu",
+      "Dave ja vu"
+     ]
+    },
+    {
+     "n": 82,
+     "names": [
+      "Talking Pictures",
+      "Talking Pictures TV"
+     ]
+    },
+    {
+     "n": 83,
+     "names": [
+      "Together TV",
+      "Together"
+     ]
+    },
+    {
+     "n": 84,
+     "names": [
+      "PBS America"
+     ]
+    },
+    {
+     "n": 91,
+     "names": [
+      "WildEarth"
+     ]
+    },
+    {
+     "n": 99,
+     "names": [
+      "TLC +1"
+     ]
+    },
+    {
+     "n": 201,
+     "names": [
+      "CBBC"
+     ]
+    },
+    {
+     "n": 202,
+     "names": [
+      "CBeebies"
+     ]
+    },
+    {
+     "n": 205,
+     "names": [
+      "POP"
+     ]
+    },
+    {
+     "n": 231,
+     "names": [
+      "BBC News"
+     ]
+    },
+    {
+     "n": 232,
+     "names": [
+      "BBC Parliament"
+     ]
+    },
+    {
+     "n": 233,
+     "names": [
+      "Sky News"
+     ]
+    },
+    {
+     "n": 236,
+     "names": [
+      "GB News"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "IE-saorview",
+   "label": "Ireland · Saorview",
+   "countries": [
+    "IE"
+   ],
+   "source": "https://rxtvinfo.com/saorview-channels-republic-of-ireland/ (8 January 2026); TG4+1 14 and Cúla4 18 from https://rxtvinfo.com/2023/tg4-launching-two-new-channels-on-irelands-saorview/",
+   "channels": [
+    {
+     "n": 1,
+     "names": [
+      "RTÉ One",
+      "RTE One",
+      "RTE 1",
+      "RTÉ One HD"
+     ]
+    },
+    {
+     "n": 2,
+     "names": [
+      "RTÉ2",
+      "RTE2",
+      "RTE Two",
+      "RTÉ 2"
+     ]
+    },
+    {
+     "n": 3,
+     "names": [
+      "Virgin Media One",
+      "Virgin One"
+     ]
+    },
+    {
+     "n": 4,
+     "names": [
+      "TG4"
+     ]
+    },
+    {
+     "n": 5,
+     "names": [
+      "Virgin Media Two",
+      "Virgin Two"
+     ]
+    },
+    {
+     "n": 6,
+     "names": [
+      "Virgin Media Three",
+      "Virgin Three"
+     ]
+    },
+    {
+     "n": 7,
+     "names": [
+      "Virgin Media Four",
+      "Virgin Four"
+     ]
+    },
+    {
+     "n": 8,
+     "names": [
+      "Challenge"
+     ]
+    },
+    {
+     "n": 11,
+     "names": [
+      "RTÉ One +1",
+      "RTE One +1",
+      "RTE 1 +1"
+     ]
+    },
+    {
+     "n": 12,
+     "names": [
+      "RTÉ2 +1",
+      "RTE2 +1",
+      "RTE Two +1"
+     ]
+    },
+    {
+     "n": 14,
+     "names": [
+      "TG4 +1"
+     ]
+    },
+    {
+     "n": 17,
+     "names": [
+      "RTÉ Kids jr",
+      "RTEjr",
+      "RTÉjr",
+      "RTE Junior"
+     ]
+    },
+    {
+     "n": 18,
+     "names": [
+      "Cúla4",
+      "Cula4"
+     ]
+    },
+    {
+     "n": 21,
+     "names": [
+      "RTÉ News",
+      "RTE News",
+      "RTE News Now"
+     ]
+    },
+    {
+     "n": 22,
+     "names": [
+      "Oireachtas TV",
+      "Tithe an Oireachtais"
+     ]
+    },
+    {
+     "n": 23,
+     "names": [
+      "Sky News"
+     ]
+    }
+   ]
+  }
+ ]
+}
