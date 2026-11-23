@@ -2336,17 +2336,16 @@ private fun MainScreen(
                 val paired = remember(Sync.changes) { Sync.key(context).isNotEmpty() }
                 val savedProviders = remember(Providers.changes) { Providers.all(context) }
                 val profile = remember(Profiles.changes) { Profiles.current(context) }
+                // Settings in nine parts, the most used first (Kevin, 23 November 2026: it had grown to twelve, out of order).
                 val parts = listOf(
-                    "Your things" to "History, profiles · using " + profile.picture + (if (profile.picture.isEmpty()) "" else " ") + profile.name + if (profile.kids) " (kids)" else "",
-                    "Favourites" to "Every channel, film and series you have starred",
-                    "Your provider" to "Provider details" + (if (savedProviders.size > 1) " (" + savedProviders.size + " saved)" else "") + ", reload, categories, free channel lists ($freeCount)",
-                    "Films and series" to "Add-ons (" + addOns.size + "), Stremio account",
                     "Watching" to "Subtitles, pause and rewind, sound and picture, text size",
+                    "Your channels" to "Provider details" + (if (savedProviders.size > 1) " (" + savedProviders.size + " saved)" else "") + ", favourites, categories, free channel lists ($freeCount), TV guide",
+                    "Films and series" to "Add-ons (" + addOns.size + "), Stremio account",
+                    *(if (phone) emptyArray() else arrayOf("This TV" to "Aerial TV, quick settings, the TV's own settings, storage, apps")),
                     "Looks" to UiLang.name(UiLang.code) + " · " + Looks.schemes[Looks.scheme].name + " · " + Looks.themes[Looks.theme] + " · " + Looks.accents[Looks.accent] + if (Looks.glass > 0) " · Glass look" else "",
-                    "Google Drive" to when { !drive.isSetUp -> "Not set up"; drive.signedIn -> "Signed in · backup and recordings"; else -> "Not signed in · backup and recordings" },
-                    "TV and phone" to "Copy the set-up, keep in step: " + if (paired) "on" else "off",
+                    "Your things" to "History, profiles · using " + profile.picture + (if (profile.picture.isEmpty()) "" else " ") + profile.name + if (profile.kids) " (kids)" else "",
+                    "Backup and sync" to "Google Drive: " + (when { !drive.isSetUp -> "not set up"; drive.signedIn -> "signed in"; else -> "not signed in" }) + " · TV and phone in step: " + if (paired) "on" else "off",
                     "VPN" to remember(Vpn.changes, Vpn.level) { vpnLine(context) },
-                    *(if (phone) emptyArray() else arrayOf("This TV" to "The TV's own settings: network, display, sound, apps, developer options")),
                     "Help" to "Health check" + (if (notWorking == 0) "" else ": $notWorking not working") + ", report, updates · version " + BuildConfig.VERSION_NAME,
                 )
                 Column(
@@ -2371,31 +2370,6 @@ private fun MainScreen(
                     val first: () -> Modifier = { if (given) Modifier else { given = true; Modifier.focusRequester(pageFirst) } }
                     val sub: @Composable (String) -> Unit = { Box(Modifier.padding(top = 14.dp)) { Heading(it) } }
                     when (page) {
-                        "Favourites" -> {
-                            val favChannels = library.groups.filter { g -> g.versions.any { Favourites.key(it.channel, login) in favs } }
-                                .sortedBy { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
-                            val favFilms = library.films.filter { Favourites.key(it, login) in favs }
-                            val favShows = library.shows.filter { Favourites.key(it) in favs }
-                            if (favChannels.isEmpty() && favFilms.isEmpty() && favShows.isEmpty()) Note("Nothing starred yet. Hold OK on a channel, film or series to star it.")
-                            var given = false
-                            val firstOne: () -> Modifier = { if (given) Modifier else { given = true; first() } }
-                            if (favChannels.isNotEmpty()) sub("Channels")
-                            val livePlayables = remember(favChannels) { favChannels.map { livePlayable(it, library.account, library.serverAheadSec) } }
-                            favChannels.forEachIndexed { i, g ->
-                                FocusRow(g.name, { onPlay(livePlayables, i, true, "fav:" + g.id) }, firstOne(), look = Look.OTHER, leading = { Logo(g.logo) },
-                                    below = "Hold OK to take off", onHold = { favourites.toggleAll(g.versions.map { Favourites.key(it.channel, login) }) })
-                            }
-                            if (favFilms.isNotEmpty()) sub("Films")
-                            for (f in favFilms) {
-                                FocusRow(f.name, { onPlay(listOf(Playable(f.name, f.url, find = finder("movie", f.name, null, null), poster = f.poster)), 0, false, "fav:" + f.id) }, firstOne(),
-                                    look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(f, login)) })
-                            }
-                            if (favShows.isNotEmpty()) sub("Series")
-                            for (sh in favShows) {
-                                FocusRow(sh.name, { state.openShow = sh; section = Section.SERIES }, firstOne(),
-                                    look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(sh)) })
-                            }
-                        }
                         "Your things" -> YourThingsPage(first, sub) { e ->
                             when (e.kind) {
                                 History.LIVE -> {
@@ -2407,7 +2381,7 @@ private fun MainScreen(
                                 else -> onPlay(listOf(Playable(e.name, e.key)), 0, false, "history:" + e.key)
                             }
                         }
-                        "Your provider" -> {
+                        "Your channels" -> {
                             // Other providers used before: OK switches the whole app to one.
                             val inUse = library.account ?: AccountStore.load(context)
                             if (savedProviders.size > 1) {
@@ -2488,7 +2462,7 @@ private fun MainScreen(
                             }
                             val hiddenCount = remember(Choices.changes) { listOf("live", "film", "show").sumOf { Choices.hidden(context, it).size } }
                             FocusRow("Categories: show, hide and order" + if (hiddenCount == 0) "" else " ($hiddenCount hidden)", onCategories, look = Look.OTHER)
-                            sub("Backup")
+                            sub("Free channels")
                             FocusRow("Free channel lists ($freeCount)", onFree, look = Look.OTHER, below = "Free channels, tried when your provider's won't play")
                             sub("TV guide")
                             val offset = remember(Choices.changes) { GuideOffset.minutes(context) }
@@ -2528,7 +2502,90 @@ private fun MainScreen(
                                 "Used for channels your provider has no guide for, and for free channels. " +
                                     if (FreeGuides.lastFetchedMs(context) == 0L) "Not read yet." else FreeGuides.matched.toString() + " of your channels have one.",
                             )
-                        }
+                            sub("Favourites")
+                            val favChannels = library.groups.filter { g -> g.versions.any { Favourites.key(it.channel, login) in favs } }
+                                .sortedBy { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
+                            val favFilms = library.films.filter { Favourites.key(it, login) in favs }
+                            val favShows = library.shows.filter { Favourites.key(it) in favs }
+                            if (favChannels.isEmpty() && favFilms.isEmpty() && favShows.isEmpty()) Note("Nothing starred yet. Hold OK on a channel, film or series to star it.")
+                            var given = false
+                            val firstOne: () -> Modifier = { if (given) Modifier else { given = true; first() } }
+                            if (favChannels.isNotEmpty()) sub("Channels")
+                            val livePlayables = remember(favChannels) { favChannels.map { livePlayable(it, library.account, library.serverAheadSec) } }
+                            favChannels.forEachIndexed { i, g ->
+                                FocusRow(g.name, { onPlay(livePlayables, i, true, "fav:" + g.id) }, firstOne(), look = Look.OTHER, leading = { Logo(g.logo) },
+                                    below = "Hold OK to take off", onHold = { favourites.toggleAll(g.versions.map { Favourites.key(it.channel, login) }) })
+                            }
+                            if (favFilms.isNotEmpty()) sub("Films")
+                            for (f in favFilms) {
+                                FocusRow(f.name, { onPlay(listOf(Playable(f.name, f.url, find = finder("movie", f.name, null, null), poster = f.poster)), 0, false, "fav:" + f.id) }, firstOne(),
+                                    look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(f, login)) })
+                            }
+                            if (favShows.isNotEmpty()) sub("Series")
+                            for (sh in favShows) {
+                                FocusRow(sh.name, { state.openShow = sh; section = Section.SERIES }, firstOne(),
+                                    look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(sh)) })
+                            }
+                                                }
+                        "Backup and sync" -> {
+                            sub("Google Drive")
+                            when {
+                                !drive.isSetUp -> Note("Google Drive isn't set up in this copy of the app.")
+                                drive.signedIn -> FocusRow(
+                                    "Sign out of Google Drive", { drive.signOut(); Recordings.changed() }, first(), look = Look.OTHER,
+                                    below = drive.email.ifBlank { null },
+                                )
+                                else -> FocusRow("Sign in to Google Drive", onDriveSignIn, first(), look = Look.OTHER, below = "Your backup and recordings are kept there")
+                            }
+                            if (drive.signedIn) {
+                                sub("Backup")
+                                val last = remember(Backup.changes) { Backup.lastMs(context) }
+                                val how = remember(Backup.changes) { Backup.how(context) }
+                                if (extras.driveNote.isNotEmpty()) StatusBox(
+                                    Status(
+                                        extras.driveNote,
+                                        when {
+                                            extras.driveNote.endsWith("…") -> Status.BUSY
+                                            extras.driveNote.startsWith("Couldn't") || extras.driveNote.startsWith("There is no") || extras.driveNote.startsWith("Sign in") -> Status.FAIL
+                                            else -> Status.OK
+                                        },
+                                    ),
+                                )
+                                FocusRow(
+                                    "Back up now", extras.backUp, look = Look.OTHER,
+                                    below = if (last == 0L) "Not backed up yet" else "Last backed up " + java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK).format(java.util.Date(last)),
+                                )
+                                FocusRow("Back up by itself: " + Backup.hows[how], { Backup.how(context, (how + 1) % Backup.hows.size) }, look = Look.OTHER, below = "OK to change")
+                                var sure by remember { mutableStateOf(false) }
+                                if (!sure) {
+                                    FocusRow("Restore from Google Drive", { sure = true }, look = Look.OTHER, below = "Puts back favourites, add-ons, provider details and choices from the backup")
+                                } else {
+                                    FocusRow("Yes, restore: what is here is replaced", { sure = false; extras.restore() }, look = Look.OTHER)
+                                    FocusRow("No, keep what is here", { sure = false }, look = Look.OTHER)
+                                }
+                            }
+                            sub("TV and phone · copy the set-up")
+                            FocusRow("Send this set-up to another device", onSendSetUp, first(), look = Look.OTHER, below = "Also pairs the two, so they keep in step")
+                            FocusRow("Copy set-up from another device", onTakeSetUp, look = Look.OTHER)
+                            sub("TV and phone · keep in step")
+                            val met = Sync.lastMetMs
+                            if (paired) {
+                                FocusRow(
+                                    "Keeping in step: on · press to stop",
+                                    {
+                                        Sync.setKey(context, "")
+                                        kueToast(context, "This device no longer keeps in step. To start again, send the set-up from the other device.")
+                                    },
+                                    look = Look.OTHER,
+                                    below = if (met == 0L) "Not met the other device since opening" else "Last met the other device at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(met)),
+                                )
+                                // What was last taken from the other device, so it can be seen working.
+                                Note(Sync.lastTook.ifEmpty { "Nothing taken from the other device since opening: they already matched, or haven't met." })
+                                Note("What keeps in step: provider details, favourites and their order, add-ons, free channel lists, hidden categories and their order, subtitles, the Stremio sign-in, the VPN details, Carry on watching, and reminders. Both devices need KueTV open on the same Wi-Fi.")
+                            } else {
+                                Note("Off. Send the set-up from one device to the other to turn it on.")
+                            }
+                                                }
                         "Films and series" -> {
                             // Three jobs, three screens.
                             val stremioEmail = remember(Stremio.changes) { if (Stremio.key(context).isEmpty()) "" else Stremio.email(context) }
@@ -2635,66 +2692,6 @@ private fun MainScreen(
                             FocusRow("Glass look: " + Looks.glasses[Looks.glass], { Looks.set(context, "glass", (Looks.glass + 1) % Looks.glasses.size) }, look = Look.OTHER, below = "See-through panels on a soft glow of the highlight colour")
                             FocusRow("Back to the usual look", { Looks.reset(context) }, look = Look.OTHER)
                         }
-                        "Google Drive" -> {
-                            when {
-                                !drive.isSetUp -> Note("Google Drive isn't set up in this copy of the app.")
-                                drive.signedIn -> FocusRow(
-                                    "Sign out of Google Drive", { drive.signOut(); Recordings.changed() }, first(), look = Look.OTHER,
-                                    below = drive.email.ifBlank { null },
-                                )
-                                else -> FocusRow("Sign in to Google Drive", onDriveSignIn, first(), look = Look.OTHER, below = "Your backup and recordings are kept there")
-                            }
-                            if (drive.signedIn) {
-                                sub("Backup")
-                                val last = remember(Backup.changes) { Backup.lastMs(context) }
-                                val how = remember(Backup.changes) { Backup.how(context) }
-                                if (extras.driveNote.isNotEmpty()) StatusBox(
-                                    Status(
-                                        extras.driveNote,
-                                        when {
-                                            extras.driveNote.endsWith("…") -> Status.BUSY
-                                            extras.driveNote.startsWith("Couldn't") || extras.driveNote.startsWith("There is no") || extras.driveNote.startsWith("Sign in") -> Status.FAIL
-                                            else -> Status.OK
-                                        },
-                                    ),
-                                )
-                                FocusRow(
-                                    "Back up now", extras.backUp, look = Look.OTHER,
-                                    below = if (last == 0L) "Not backed up yet" else "Last backed up " + java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK).format(java.util.Date(last)),
-                                )
-                                FocusRow("Back up by itself: " + Backup.hows[how], { Backup.how(context, (how + 1) % Backup.hows.size) }, look = Look.OTHER, below = "OK to change")
-                                var sure by remember { mutableStateOf(false) }
-                                if (!sure) {
-                                    FocusRow("Restore from Google Drive", { sure = true }, look = Look.OTHER, below = "Puts back favourites, add-ons, provider details and choices from the backup")
-                                } else {
-                                    FocusRow("Yes, restore: what is here is replaced", { sure = false; extras.restore() }, look = Look.OTHER)
-                                    FocusRow("No, keep what is here", { sure = false }, look = Look.OTHER)
-                                }
-                            }
-                        }
-                        "TV and phone" -> {
-                            sub("Copy")
-                            FocusRow("Send this set-up to another device", onSendSetUp, first(), look = Look.OTHER, below = "Also pairs the two, so they keep in step")
-                            FocusRow("Copy set-up from another device", onTakeSetUp, look = Look.OTHER)
-                            sub("Keep in step")
-                            val met = Sync.lastMetMs
-                            if (paired) {
-                                FocusRow(
-                                    "Keeping in step: on · press to stop",
-                                    {
-                                        Sync.setKey(context, "")
-                                        kueToast(context, "This device no longer keeps in step. To start again, send the set-up from the other device.")
-                                    },
-                                    look = Look.OTHER,
-                                    below = if (met == 0L) "Not met the other device since opening" else "Last met the other device at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(met)),
-                                )
-                                // What was last taken from the other device, so it can be seen working.
-                                Note(Sync.lastTook.ifEmpty { "Nothing taken from the other device since opening: they already matched, or haven't met." })
-                                Note("What keeps in step: provider details, favourites and their order, add-ons, free channel lists, hidden categories and their order, subtitles, the Stremio sign-in, the VPN details, Carry on watching, and reminders. Both devices need KueTV open on the same Wi-Fi.")
-                            } else {
-                                Note("Off. Send the set-up from one device to the other to turn it on.")
-                            }
-                        }
                         "This TV" -> {
                             // The TV's own aerial channels, when it has a tuner.
                             val aerialName = remember(Resumes.count) { Aerial.name(context) }
@@ -2728,13 +2725,23 @@ private fun MainScreen(
                                         }, look = Look.OTHER)
                                     }
                                 }
-                                sub("The TV's settings")
                             }
+                            // The TV's own quick panel (Home held) and programme guide. Picture, sound and the sleep timer
+                            // can't be opened one by one: Fire TV refuses that to other apps (tried on Kevin's TV, 23 November 2026).
+                            sub("Quick settings")
+                            FocusRow("Picture, sound and sleep timer", { if (!Launcher.openTvTool(context, "quick settings")) kueToast(context, "The TV's quick settings wouldn't open.") },
+                                if (aerialName == null) first() else Modifier, look = Look.OTHER, below = "The TV's own quick panel, as when Home is held")
+                            if (aerialName != null) FocusRow("The TV's programme guide", {
+                                HomeGuard.pause()
+                                val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+                                if (!ok) kueToast(context, "The TV's programme guide wouldn't open.")
+                            }, look = Look.OTHER, below = "Freely's guide, aerial channels included")
+                            sub("The TV's settings")
                             // The TV's own settings: each opens straight onto that screen, and Back comes back here.
                             val tvParts = remember(Resumes.count) { Launcher.tvSettings(context) }
                             tvParts.forEachIndexed { i, p ->
                                 FocusRow(p.label, { if (!Launcher.open(context, p)) kueToast(context, "That part of the TV's settings wouldn't open.") },
-                                    if (i == 0 && aerialName == null) first() else Modifier, look = Look.OTHER)
+                                    look = Look.OTHER)
                             }
                             // Fire TV's own tools, moved here from Home's Other apps row.
                             val tools = remember(Resumes.count) { Launcher.tvTools(context) }

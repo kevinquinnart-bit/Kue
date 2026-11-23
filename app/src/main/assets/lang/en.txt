@@ -1174,3 +1174,15 @@ and tap Copy there. This address works whenever KueTV is on.
 ↕ Move
 ▲ ▼ to move it, OK to put it down
 Update downloaded. Handing it to the TV's installer…
+Your channels
+Backup and sync
+Free channels
+TV and phone · copy the set-up
+TV and phone · keep in step
+Quick settings
+Picture, sound and sleep timer
+The TV's own quick panel, as when Home is held
+The TV's programme guide
+Freely's guide, aerial channels included
+The TV's quick settings wouldn't open.
+The TV's programme guide wouldn't open.
