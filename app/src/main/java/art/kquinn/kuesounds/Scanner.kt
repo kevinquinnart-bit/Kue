@@ -488,7 +488,7 @@ object Scanner {
             if (rest.isNotEmpty()) note("looked for singles for " + rest.size + " songs: " + singles + " found")
         } catch (e: TooManyFailures) {
             note("lookups stopped: " + e.message)
-            problem = "Looking up stopped: " + (e.message ?: "no reason given") + ". It tries again next time KueSounds opens."
+            problem = "Looking up stopped: " + (e.message ?: "no reason given") + ". It carries on next time KueSounds opens, or press Look for new music."
             save()
         }
     }

@@ -39,6 +39,9 @@ object Catalogue {
 
     private var lastAsked = 0L
 
+    /** A search answers in a second or two; one taking over 25 seconds is asked again rather than waited on. */
+    private val quick by lazy { Drive.http.newBuilder().readTimeout(25, java.util.concurrent.TimeUnit.SECONDS).build() }
+
     /** Writes a value into a search so its punctuation is read as words, not as search commands. */
     fun quote(text: String): String = "\"" + text.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
@@ -56,19 +59,31 @@ object Catalogue {
         if (wait > 0) Thread.sleep(wait)
         lastAsked = System.currentTimeMillis()
         val request = Request.Builder().url(url).header("User-Agent", WHO).header("Accept", "application/json").build()
-        // Busy: wait longer each time (3, 6, 12, 24 then 45 seconds), or as long as MusicBrainz says to.
-        val waits = longArrayOf(3_000, 6_000, 12_000, 24_000, 45_000)
+        // Busy or not answering: wait longer each time (3, 6, 12, 24, 45 seconds, then a minute and two), or as
+        // long as MusicBrainz says to. Not answering in time counts as busy: on 23 November 2026 eight searches
+        // in a row went unanswered for a minute each, and the looking up stopped.
+        val waits = longArrayOf(3_000, 6_000, 12_000, 24_000, 45_000, 60_000, 120_000)
+        var why = "stayed busy"
         for (attempt in waits.indices) {
             var told = 0L
-            Drive.http.newCall(request).execute().use { r ->
-                if (r.isSuccessful) return r.body.string()
-                if (r.code != 503 && r.code != 429) throw IOException("MusicBrainz answered " + r.code)
-                told = (r.header("Retry-After")?.trim()?.toLongOrNull() ?: 0L) * 1000L
+            try {
+                quick.newCall(request).execute().use { r ->
+                    if (r.isSuccessful) return r.body.string()
+                    if (r.code != 503 && r.code != 429 && r.code < 500) throw IOException("MusicBrainz answered " + r.code)
+                    why = "answered " + r.code
+                    told = (r.header("Retry-After")?.trim()?.toLongOrNull() ?: 0L) * 1000L
+                }
+            } catch (e: java.io.InterruptedIOException) {
+                why = "didn't answer in time"
+            } catch (e: java.net.ConnectException) {
+                why = "couldn't be reached"
+            } catch (e: java.net.UnknownHostException) {
+                why = "couldn't be reached"
             }
             Thread.sleep(maxOf(waits[attempt], minOf(told, 120_000L)))
             lastAsked = System.currentTimeMillis()
         }
-        throw IOException("MusicBrainz stayed busy")
+        throw IOException("MusicBrainz " + why)
     }
 
     private fun creditOf(o: JsonObject): String =
