@@ -23,6 +23,8 @@ class PhoneSetup(
     private val onStremio: ((email: String, password: String) -> Unit)? = null,
     /** Given: the page asks for a VPN's OpenVPN file (its text, or a link to it) and login instead, and they arrive here. */
     private val onVpn: ((config: String, link: String, user: String, pass: String) -> Unit)? = null,
+    /** Given: the page asks for the viewer's own aerial channel numbers (typed lines, or a link to a file of them), and they arrive here. */
+    private val onAerial: ((text: String, link: String) -> Unit)? = null,
     private val onDetails: (server: String, user: String, pass: String, playlist: String) -> Unit,
 ) {
     @Volatile private var socket: ServerSocket? = null
@@ -78,7 +80,10 @@ class PhoneSetup(
                 val at = pair.indexOf('=')
                 if (at < 0) null else URLDecoder.decode(pair.substring(0, at), "UTF-8") to URLDecoder.decode(pair.substring(at + 1), "UTF-8")
             }.toMap()
-            if (onVpn != null) {
+            if (onAerial != null) {
+                onAerial.invoke(fields["numbers"].orEmpty(), fields["link"].orEmpty())
+                send(client, page("<h1>Sent to your TV</h1><p>The TV says how many channels it could read. You can close this page.</p>"))
+            } else if (onVpn != null) {
                 onVpn.invoke(fields["config"].orEmpty(), fields["link"].orEmpty(), fields["user"].orEmpty(), fields["pass"].orEmpty())
                 send(client, page("<h1>Sent to your TV</h1><p>The TV says whether it could read the file. You can close this page.</p>"))
             } else if (onStremio != null) {
@@ -92,7 +97,7 @@ class PhoneSetup(
                 send(client, page("<h1>Sent to your TV</h1><p>You can close this page.</p>"))
             }
         } else {
-            send(client, page(if (onVpn != null) VPN_FORM else if (onStremio != null) STREMIO_FORM else if (onAddOn == null) FORM else if (freeList) FREE_FORM else ADDON_FORM))
+            send(client, page(if (onAerial != null) AERIAL_FORM else if (onVpn != null) VPN_FORM else if (onStremio != null) STREMIO_FORM else if (onAddOn == null) FORM else if (freeList) FREE_FORM else ADDON_FORM))
         }
     }
 
@@ -108,7 +113,7 @@ class PhoneSetup(
         "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>KueTV</title><style>" +
         "body{font-family:sans-serif;background:#0e1626;color:#fff;margin:0;padding:22px;font-size:18px}" +
         "h1{font-size:24px}label{display:block;margin:16px 0 6px}" +
-        "input{width:100%;box-sizing:border-box;padding:14px;font-size:18px;border-radius:10px;border:0}" +
+        "input,textarea{width:100%;box-sizing:border-box;padding:14px;font-size:18px;border-radius:10px;border:0}" +
         "button{margin-top:22px;width:100%;padding:16px;font-size:20px;border:0;border-radius:10px;background:#ffd23f;font-weight:bold}" +
         "p{color:#b9c2d3}hr{border:0;border-top:1px solid #33405a;margin:26px 0}" +
         "</style></head><body>$inner</body></html>"
@@ -146,6 +151,16 @@ class PhoneSetup(
             "<script>document.getElementById('f').onsubmit=function(e){var f=document.getElementById('file').files[0];" +
             "if(!f)return true;e.preventDefault();var r=new FileReader();r.onload=function(){" +
             "document.getElementById('config').value=r.result;document.getElementById('f').submit();};r.readAsText(f);return false;};</script>"
+
+        private const val AERIAL_FORM = "<h1>KueTV: your aerial channel numbers</h1>" +
+            "<p>For a country KueTV has no list for, or to put a number right. One channel a line: its number on your TV, then its name " +
+            "as your channel list shows it. For example:</p><p>101 BBC One<br>103 ITV1<br>104 Channel 4</p>" +
+            "<form method=\"post\" action=\"/\">" +
+            "<label>Your channels</label><textarea name=\"numbers\" rows=\"10\" autocapitalize=\"none\" autocorrect=\"off\"></textarea>" +
+            "<hr><p>Or a link to a file of them: lines like those, KueTV's own channel file, or a channel list (.m3u) with channel numbers in it. " +
+            "A link is read again every day, so whoever keeps it can keep it right.</p>" +
+            "<label>Link</label><input name=\"link\" autocapitalize=\"none\" autocorrect=\"off\">" +
+            "<button type=\"submit\">Send to TV</button></form>"
 
         private const val FREE_FORM = "<h1>KueTV: add a free channel list</h1>" +
             "<p>Paste the list's link here. It usually ends in .m3u or .m3u8. An add-on's link works here too.</p>" +

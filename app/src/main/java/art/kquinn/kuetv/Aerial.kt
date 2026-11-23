@@ -110,7 +110,7 @@ object Aerial {
             .replace(Regex("[^a-z0-9+]"), "")
 
     /** The aerial channel number for this channel in the list in use, or null when the aerial doesn't carry it. */
-    fun numberFor(name: String): Int? = AerialLists.current?.numbers?.get(key(name))
+    fun numberFor(name: String): Int? = key(name).let { k -> AerialLists.own?.numbers?.get(k) ?: AerialLists.current?.numbers?.get(k) }
 
     /**
      * Opens the aerial channel [number] (in Freely on a Freely TV), through Fire TV's own TV player (tried on Kevin's TV,
@@ -215,6 +215,7 @@ object AerialLists {
 
     /** Reads the file kept from last time (or the app's own copy), then fetches a fresh one once a day. Off the screen's thread. */
     fun load(context: Context) {
+        runCatching { loadOwn(context) }
         val kept = runCatching { cache(context).takeIf { it.exists() }?.readText() }.getOrNull()
         val text = kept ?: runCatching { context.assets.open("aerial-channels.json").bufferedReader().use { it.readText() } }.getOrNull()
         text?.let { use(context, it) }
@@ -270,6 +271,96 @@ object AerialLists {
             Plan(o.optString("id"), o.optString("label"), countries, o.optString("whenInstalled").ifBlank { null }, channels)
         }
     }.getOrDefault(emptyList())
+
+    /**
+     * The viewer's own aerial numbers, for a country with no list, or to put right a number in the list. Sent from the
+     * phone page as lines of "number name", or a link to a file of them (lines like that, KueTV's own channel file, or a
+     * channel list with tvg-chno numbers). They come before the list's numbers. A link is read again once a day.
+     */
+    @Volatile var own: Plan? = null
+        private set
+
+    /** The own-numbers screen in Settings › This TV. */
+    var ownOpen by mutableStateOf(false)
+
+    fun ownText(context: Context): String = prefs(context).getString("ownText", "").orEmpty()
+    fun ownLink(context: Context): String = prefs(context).getString("ownLink", "").orEmpty()
+
+    /** Keeps what was sent and puts it in use; a link is read now. The answer says how many channels came in. Off the screen's thread. */
+    fun keepOwn(context: Context, text: String, link: String): String {
+        val l = link.trim()
+        var fetched = ""
+        if (l.isNotEmpty()) {
+            fetched = runCatching { fetch(l) }.getOrElse { return "Couldn't read that link: " + (it.message ?: "no answer") + ". Nothing changed." }
+            if (ownChannels(fetched).isEmpty()) return "That link had no channel numbers KueTV could read. Nothing changed."
+        }
+        val t = text.trim()
+        if (t.isNotEmpty() && ownChannels(t).isEmpty()) return "No channel numbers found. Each line wants a number then the channel's name, like: 101 BBC One"
+        if (t.isEmpty() && l.isEmpty()) return "Nothing was sent."
+        prefs(context).edit().apply {
+            if (t.isNotEmpty()) putString("ownText", t)
+            if (l.isNotEmpty()) putString("ownLink", l).putString("ownFetched", fetched).putLong("ownAt", System.currentTimeMillis())
+        }.apply()
+        useOwn(context)
+        return "Added. " + (own?.channels?.map { it.number }?.distinct()?.size ?: 0) + " of your own aerial channels in use."
+    }
+
+    fun clearOwn(context: Context) {
+        prefs(context).edit().remove("ownText").remove("ownLink").remove("ownFetched").remove("ownAt").apply()
+        useOwn(context)
+    }
+
+    private fun useOwn(context: Context) {
+        val p = prefs(context)
+        val all = ownChannels(p.getString("ownFetched", "").orEmpty()) + ownChannels(p.getString("ownText", "").orEmpty())
+        // Lines typed in come after the link's, so a typed number wins over the link's for the same channel.
+        own = if (all.isEmpty()) null else Plan("own", "Your own numbers", emptyList(), null, all.reversed())
+        Aerial.bump()
+    }
+
+    private fun loadOwn(context: Context) {
+        useOwn(context)
+        val p = prefs(context)
+        val link = p.getString("ownLink", "").orEmpty()
+        if (link.isEmpty() || System.currentTimeMillis() - p.getLong("ownAt", 0L) < DAY_MS) return
+        runCatching {
+            val fresh = fetch(link)
+            if (ownChannels(fresh).isEmpty()) throw IllegalStateException("no numbers in it")
+            p.edit().putString("ownFetched", fresh).putLong("ownAt", System.currentTimeMillis()).apply()
+            useOwn(context)
+        }.onFailure { Report.note("Aerial", "your own list not fetched: " + it.message) }
+    }
+
+    private fun fetch(link: String): String =
+        Provider.http.newCall(okhttp3.Request.Builder().url(link).header("User-Agent", Provider.USER_AGENT).build()).execute().use { r ->
+            if (!r.isSuccessful) throw IllegalStateException("answered " + r.code)
+            r.body.string()
+        }
+
+    /** Numbers from lines of "number name" (or "name number"), KueTV's own channel file, or a channel list's tvg-chno. */
+    internal fun ownChannels(text: String): List<Channel> {
+        val t = text.trim()
+        if (t.isEmpty()) return emptyList()
+        if (t.startsWith("{")) return parse(t).flatMap { it.channels }
+        val out = ArrayList<Channel>()
+        if (t.startsWith("#EXTM3U")) {
+            val chno = Regex("tvg-chno=\"(\\d+)\"")
+            t.lineSequence().filter { it.startsWith("#EXTINF") }.forEach { line ->
+                val n = chno.find(line)?.groupValues?.get(1)?.toIntOrNull() ?: return@forEach
+                val name = line.substringAfterLast(',').trim()
+                if (n > 0 && name.isNotEmpty()) out += Channel(n, name)
+            }
+            return out
+        }
+        val first = Regex("^\\s*(\\d{1,4})(?![.\\-]\\d)[\\s.:,;=\\-–]+(.+?)\\s*$")
+        val last = Regex("^\\s*(.+?)[\\s.:,;=\\-–]+(\\d{1,4})\\s*$")
+        t.lineSequence().forEach { line ->
+            val m = first.find(line)
+            if (m != null) { m.groupValues[1].toIntOrNull()?.takeIf { it > 0 }?.let { out += Channel(it, m.groupValues[2]) }; return@forEach }
+            last.find(line)?.let { l -> l.groupValues[2].toIntOrNull()?.takeIf { it > 0 }?.let { out += Channel(it, l.groupValues[1]) } }
+        }
+        return out
+    }
 
     /** For the tests: use these lists as if fetched, with [id] in use. */
     internal fun setForChecks(all: List<Plan>, id: String) {

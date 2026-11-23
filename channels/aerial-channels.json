@@ -1,6 +1,6 @@
 {
- "about": "KueTV's aerial channel numbers, by TV platform. KueTV downloads this file once a day, so a change here reaches every TV without a new app. Each list gives the number to tune and the names a channel goes by.",
- "updated": "2026-11-22",
+ "about": "KueTV's aerial channel numbers, by TV platform. KueTV downloads this file once a day, so a change here reaches every TV without a new app. Each list gives the number to tune and the names a channel goes by. Countries with no national numbering (USA, Canada, Germany, Spain…) use the numbers each viewer sets in KueTV.",
+ "updated": "2026-11-23",
  "lists": [
   {
    "id": "GB-freely",
@@ -884,6 +884,790 @@
      "n": 23,
      "names": [
       "Sky News"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "FR-tnt",
+   "label": "France · TNT",
+   "countries": [
+    "FR",
+    "MC"
+   ],
+   "source": "Arcom numbering from 6 June 2025, as listed by https://www.ozap.com/actu/voici-la-nouvelle-numerotation-des-chaines-de-la-tnt/650244",
+   "channels": [
+    {
+     "n": 1,
+     "names": [
+      "TF1"
+     ]
+    },
+    {
+     "n": 2,
+     "names": [
+      "France 2"
+     ]
+    },
+    {
+     "n": 3,
+     "names": [
+      "France 3"
+     ]
+    },
+    {
+     "n": 4,
+     "names": [
+      "France 4"
+     ]
+    },
+    {
+     "n": 5,
+     "names": [
+      "France 5"
+     ]
+    },
+    {
+     "n": 6,
+     "names": [
+      "M6"
+     ]
+    },
+    {
+     "n": 7,
+     "names": [
+      "Arte"
+     ]
+    },
+    {
+     "n": 8,
+     "names": [
+      "LCP-Public Sénat",
+      "LCP",
+      "Public Sénat"
+     ]
+    },
+    {
+     "n": 9,
+     "names": [
+      "W9"
+     ]
+    },
+    {
+     "n": 10,
+     "names": [
+      "TMC"
+     ]
+    },
+    {
+     "n": 11,
+     "names": [
+      "TFX"
+     ]
+    },
+    {
+     "n": 12,
+     "names": [
+      "Gulli"
+     ]
+    },
+    {
+     "n": 13,
+     "names": [
+      "BFMTV",
+      "BFM TV"
+     ]
+    },
+    {
+     "n": 14,
+     "names": [
+      "CNews"
+     ]
+    },
+    {
+     "n": 15,
+     "names": [
+      "LCI"
+     ]
+    },
+    {
+     "n": 16,
+     "names": [
+      "Franceinfo",
+      "France Info"
+     ]
+    },
+    {
+     "n": 17,
+     "names": [
+      "CStar"
+     ]
+    },
+    {
+     "n": 18,
+     "names": [
+      "T18"
+     ]
+    },
+    {
+     "n": 19,
+     "names": [
+      "Novo19",
+      "Novo 19"
+     ]
+    },
+    {
+     "n": 20,
+     "names": [
+      "TF1 Séries Films"
+     ]
+    },
+    {
+     "n": 21,
+     "names": [
+      "L'Équipe",
+      "L'Equipe"
+     ]
+    },
+    {
+     "n": 22,
+     "names": [
+      "6ter"
+     ]
+    },
+    {
+     "n": 23,
+     "names": [
+      "RMC Story"
+     ]
+    },
+    {
+     "n": 24,
+     "names": [
+      "RMC Découverte"
+     ]
+    },
+    {
+     "n": 25,
+     "names": [
+      "Chérie 25"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "IT-dtt",
+   "label": "Italy · Digitale terrestre",
+   "countries": [
+    "IT",
+    "SM",
+    "VA"
+   ],
+   "source": "National LCN list, August 2026: https://www.telefonino.net/notizie/digitale-terrestre-agosto-2026-aggiornata-numerazione-lcn-nazionale-tutta-italia/",
+   "channels": [
+    {
+     "n": 1,
+     "names": [
+      "Rai 1",
+      "Rai 1 HD"
+     ]
+    },
+    {
+     "n": 2,
+     "names": [
+      "Rai 2",
+      "Rai 2 HD"
+     ]
+    },
+    {
+     "n": 3,
+     "names": [
+      "Rai 3"
+     ]
+    },
+    {
+     "n": 4,
+     "names": [
+      "Rete 4",
+      "Rete4"
+     ]
+    },
+    {
+     "n": 5,
+     "names": [
+      "Canale 5",
+      "Canale5"
+     ]
+    },
+    {
+     "n": 6,
+     "names": [
+      "Italia 1",
+      "Italia1"
+     ]
+    },
+    {
+     "n": 7,
+     "names": [
+      "La7"
+     ]
+    },
+    {
+     "n": 8,
+     "names": [
+      "TV8"
+     ]
+    },
+    {
+     "n": 9,
+     "names": [
+      "Nove",
+      "NOVE"
+     ]
+    },
+    {
+     "n": 20,
+     "names": [
+      "20 Mediaset",
+      "20Mediaset"
+     ]
+    },
+    {
+     "n": 21,
+     "names": [
+      "Rai 4"
+     ]
+    },
+    {
+     "n": 22,
+     "names": [
+      "Iris"
+     ]
+    },
+    {
+     "n": 23,
+     "names": [
+      "Rai 5"
+     ]
+    },
+    {
+     "n": 24,
+     "names": [
+      "Rai Movie"
+     ]
+    },
+    {
+     "n": 25,
+     "names": [
+      "Rai Premium"
+     ]
+    },
+    {
+     "n": 26,
+     "names": [
+      "Cielo"
+     ]
+    },
+    {
+     "n": 27,
+     "names": [
+      "27Twentyseven",
+      "Twentyseven"
+     ]
+    },
+    {
+     "n": 28,
+     "names": [
+      "TV2000"
+     ]
+    },
+    {
+     "n": 29,
+     "names": [
+      "La7 Cinema",
+      "LA7CINEMA"
+     ]
+    },
+    {
+     "n": 30,
+     "names": [
+      "La5"
+     ]
+    },
+    {
+     "n": 31,
+     "names": [
+      "Real Time"
+     ]
+    },
+    {
+     "n": 33,
+     "names": [
+      "Food Network"
+     ]
+    },
+    {
+     "n": 34,
+     "names": [
+      "Cine34"
+     ]
+    },
+    {
+     "n": 35,
+     "names": [
+      "Focus"
+     ]
+    },
+    {
+     "n": 37,
+     "names": [
+      "Discovery"
+     ]
+    },
+    {
+     "n": 38,
+     "names": [
+      "Giallo"
+     ]
+    },
+    {
+     "n": 39,
+     "names": [
+      "Top Crime",
+      "TOPcrime"
+     ]
+    },
+    {
+     "n": 40,
+     "names": [
+      "Boing"
+     ]
+    },
+    {
+     "n": 41,
+     "names": [
+      "K2"
+     ]
+    },
+    {
+     "n": 42,
+     "names": [
+      "Rai Gulp"
+     ]
+    },
+    {
+     "n": 43,
+     "names": [
+      "Rai Yoyo"
+     ]
+    },
+    {
+     "n": 44,
+     "names": [
+      "Frisbee"
+     ]
+    },
+    {
+     "n": 46,
+     "names": [
+      "Cartoonito"
+     ]
+    },
+    {
+     "n": 47,
+     "names": [
+      "Super!"
+     ]
+    },
+    {
+     "n": 48,
+     "names": [
+      "Rai News 24"
+     ]
+    },
+    {
+     "n": 49,
+     "names": [
+      "Mediaset Italia 2",
+      "Italia 2"
+     ]
+    },
+    {
+     "n": 50,
+     "names": [
+      "Sky TG24"
+     ]
+    },
+    {
+     "n": 51,
+     "names": [
+      "TGCOM24"
+     ]
+    },
+    {
+     "n": 52,
+     "names": [
+      "DMAX"
+     ]
+    },
+    {
+     "n": 54,
+     "names": [
+      "Rai Storia"
+     ]
+    },
+    {
+     "n": 55,
+     "names": [
+      "Mediaset Extra"
+     ]
+    },
+    {
+     "n": 56,
+     "names": [
+      "HGTV"
+     ]
+    },
+    {
+     "n": 57,
+     "names": [
+      "Rai Scuola"
+     ]
+    },
+    {
+     "n": 58,
+     "names": [
+      "Rai Sport"
+     ]
+    },
+    {
+     "n": 60,
+     "names": [
+      "Sportitalia"
+     ]
+    },
+    {
+     "n": 64,
+     "names": [
+      "SuperTennis"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "AU-freeview",
+   "label": "Australia · Freeview (capital cities)",
+   "countries": [
+    "AU"
+   ],
+   "source": "https://en.wikipedia.org/wiki/List_of_digital_television_channels_in_Australia (regional areas differ)",
+   "channels": [
+    {
+     "n": 20,
+     "names": [
+      "ABC TV HD",
+      "ABC TV",
+      "ABC",
+      "ABC1"
+     ]
+    },
+    {
+     "n": 22,
+     "names": [
+      "ABC Kids",
+      "ABC Family"
+     ]
+    },
+    {
+     "n": 23,
+     "names": [
+      "ABC Entertains",
+      "ABC ME"
+     ]
+    },
+    {
+     "n": 24,
+     "names": [
+      "ABC News"
+     ]
+    },
+    {
+     "n": 30,
+     "names": [
+      "SBS HD",
+      "SBS"
+     ]
+    },
+    {
+     "n": 31,
+     "names": [
+      "SBS Viceland"
+     ]
+    },
+    {
+     "n": 32,
+     "names": [
+      "SBS World Movies"
+     ]
+    },
+    {
+     "n": 33,
+     "names": [
+      "SBS Food"
+     ]
+    },
+    {
+     "n": 34,
+     "names": [
+      "NITV HD",
+      "NITV"
+     ]
+    },
+    {
+     "n": 35,
+     "names": [
+      "SBS WorldWatch"
+     ]
+    },
+    {
+     "n": 7,
+     "names": [
+      "Channel 7",
+      "Seven",
+      "7HD"
+     ]
+    },
+    {
+     "n": 72,
+     "names": [
+      "7two"
+     ]
+    },
+    {
+     "n": 74,
+     "names": [
+      "7mate"
+     ]
+    },
+    {
+     "n": 75,
+     "names": [
+      "7Bravo"
+     ]
+    },
+    {
+     "n": 76,
+     "names": [
+      "7flix"
+     ]
+    },
+    {
+     "n": 90,
+     "names": [
+      "9HD",
+      "Channel 9",
+      "Nine",
+      "9"
+     ]
+    },
+    {
+     "n": 95,
+     "names": [
+      "9Gem HD",
+      "9Gem"
+     ]
+    },
+    {
+     "n": 99,
+     "names": [
+      "9Go! HD",
+      "9Go!",
+      "9Go"
+     ]
+    },
+    {
+     "n": 94,
+     "names": [
+      "9Life"
+     ]
+    },
+    {
+     "n": 96,
+     "names": [
+      "9Rush"
+     ]
+    },
+    {
+     "n": 10,
+     "names": [
+      "10 HD",
+      "10",
+      "Channel 10",
+      "Network 10"
+     ]
+    },
+    {
+     "n": 11,
+     "names": [
+      "10 Comedy"
+     ]
+    },
+    {
+     "n": 12,
+     "names": [
+      "10 Drama"
+     ]
+    },
+    {
+     "n": 13,
+     "names": [
+      "Nickelodeon"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "NZ-freeview",
+   "label": "New Zealand · Freeview",
+   "countries": [
+    "NZ"
+   ],
+   "source": "https://en.wikipedia.org/wiki/List_of_free-to-air_channels_in_New_Zealand, with the 29 January 2026 moves",
+   "channels": [
+    {
+     "n": 1,
+     "names": [
+      "TVNZ 1",
+      "TVNZ1"
+     ]
+    },
+    {
+     "n": 2,
+     "names": [
+      "TVNZ 2",
+      "TVNZ2"
+     ]
+    },
+    {
+     "n": 3,
+     "names": [
+      "Three",
+      "TV3"
+     ]
+    },
+    {
+     "n": 4,
+     "names": [
+      "Bravo"
+     ]
+    },
+    {
+     "n": 5,
+     "names": [
+      "Whakaata Māori",
+      "Maori Television"
+     ]
+    },
+    {
+     "n": 6,
+     "names": [
+      "TVNZ Duke",
+      "Duke"
+     ]
+    },
+    {
+     "n": 7,
+     "names": [
+      "TVNZ 2 +1"
+     ]
+    },
+    {
+     "n": 8,
+     "names": [
+      "Sky Open",
+      "Prime"
+     ]
+    },
+    {
+     "n": 9,
+     "names": [
+      "Rush"
+     ]
+    },
+    {
+     "n": 11,
+     "names": [
+      "TVNZ 1 +1"
+     ]
+    },
+    {
+     "n": 12,
+     "names": [
+      "TVNZ Duke +1",
+      "Duke +1"
+     ]
+    },
+    {
+     "n": 13,
+     "names": [
+      "Three +1",
+      "ThreePlus1"
+     ]
+    },
+    {
+     "n": 14,
+     "names": [
+      "Bravo +1"
+     ]
+    },
+    {
+     "n": 18,
+     "names": [
+      "Eden"
+     ]
+    },
+    {
+     "n": 19,
+     "names": [
+      "HGTV"
+     ]
+    },
+    {
+     "n": 20,
+     "names": [
+      "Al Jazeera",
+      "Al Jazeera English"
+     ]
+    },
+    {
+     "n": 25,
+     "names": [
+      "Shine TV",
+      "Shine"
+     ]
+    },
+    {
+     "n": 26,
+     "names": [
+      "Firstlight"
+     ]
+    },
+    {
+     "n": 27,
+     "names": [
+      "Hope Channel"
+     ]
+    },
+    {
+     "n": 31,
+     "names": [
+      "Parliament TV"
+     ]
+    },
+    {
+     "n": 200,
+     "names": [
+      "CH200"
      ]
     }
    ]

@@ -171,6 +171,15 @@ class HomeGuard : AccessibilityService() {
                 android.provider.Settings.Secure.putString(cr, "accessibility_enabled", "1")
                 Report.note("Home", "Home button watcher started again")
             }
+            // After an update the TV has once kept the watcher off until it restarted (seen on Kevin's TV, 23 November
+            // 2026). So it is looked for again, and the viewer told the one thing that brings it back.
+            Thread.sleep(6_000)
+            if (running == null) {
+                Report.note("Home", "Home button watcher still not running 6 s after starting it again")
+                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    kueToast(context, "Home is going to Fire TV until the TV restarts. To restart: hold Select and Play together for 5 seconds.")
+                }
+            }
         }
 
         /** KueTV on screen: the cover can come down. */

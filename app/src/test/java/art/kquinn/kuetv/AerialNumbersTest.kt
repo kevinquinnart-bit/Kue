@@ -18,7 +18,7 @@ class AerialNumbersTest {
 
     @Test fun theFileOnlineIsTheOneInTheApp() {
         assertEquals(File("../channels/aerial-channels.json").readText(), File("src/main/assets/aerial-channels.json").readText())
-        assertEquals(listOf("GB-freely", "GB-freeview", "IE-saorview"), plans.map { it.id })
+        assertEquals(listOf("GB-freely", "GB-freeview", "IE-saorview", "FR-tnt", "IT-dtt", "AU-freeview", "NZ-freeview"), plans.map { it.id })
     }
 
     @Test fun namesAsProvidersWriteThem() {
@@ -51,6 +51,18 @@ class AerialNumbersTest {
         assertEquals("GB-freely", AerialLists.pickFor(plans, "GB") { it == "com.vewd.core.opapp" }?.id)
         assertEquals("GB-freeview", AerialLists.pickFor(plans, "GB") { false }?.id)
         assertEquals("IE-saorview", AerialLists.pickFor(plans, "IE") { false }?.id)
-        assertEquals(null, AerialLists.pickFor(plans, "FR") { false })
+        assertEquals("FR-tnt", AerialLists.pickFor(plans, "FR") { false }?.id)
+        assertEquals("AU-freeview", AerialLists.pickFor(plans, "AU") { false }?.id)
+        assertEquals(null, AerialLists.pickFor(plans, "US") { false })
+    }
+
+    @Test fun ownNumbersReadFromLines() {
+        val c = AerialLists.ownChannels("101 BBC One\r\n103 - ITV1\nChannel 4: 104\n\nnonsense\n4.1 NBC")
+        assertEquals(listOf(101 to "BBC One", 103 to "ITV1", 104 to "Channel 4"), c.map { it.number to it.name })
+    }
+
+    @Test fun ownNumbersReadFromAChannelList() {
+        val m3u = "#EXTM3U\n#EXTINF:-1 tvg-chno=\"7\" tvg-name=\"x\",Seven\nhttp://a/b\n#EXTINF:-1,No number\nhttp://c"
+        assertEquals(listOf(7 to "Seven"), AerialLists.ownChannels(m3u).map { it.number to it.name })
     }
 }

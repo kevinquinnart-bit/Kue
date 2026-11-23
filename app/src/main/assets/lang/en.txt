@@ -1186,3 +1186,14 @@ The TV's programme guide
 Freely's guide, aerial channels included
 The TV's quick settings wouldn't open.
 The TV's programme guide wouldn't open.
+Your own aerial numbers
+For a country with no list, or to put a number right. Sent from your phone
+For a country KueTV has no aerial list for, or to put a number right. Each channel's number on your TV and its name. Then On aerial in the player finds it, and a channel with no sound or picture moves to the aerial by itself.
+and type the channels there, one a line, like: 101 BBC One. Or paste a link to a file of them.
+Or a link to a file of them
+Add from the link
+Lines of number and name, KueTV's own channel file, or a channel list (.m3u) with channel numbers. Read again every day
+Remove your own numbers
+Removed. The list's numbers are used again.
+OK to check it on the aerial
+Home is going to Fire TV until the TV restarts. To restart: hold Select and Play together for 5 seconds.

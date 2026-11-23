@@ -878,6 +878,7 @@ private fun App() {
             driveSignIn -> DriveSignInScreen(onDone = { driveSignIn = false })
             stremioOpen -> StremioScreen(onDone = { stremioOpen = false })
             Vpn.screenOpen -> VpnScreen(onDone = { Vpn.screenOpen = false })
+            AerialLists.ownOpen -> AerialOwnScreen(onDone = { AerialLists.ownOpen = false })
             addLinkOpen -> AddLinkScreen(onDone = { addLinkOpen = false })
             addOnsOpen -> AddOnsScreen(onDone = { addOnsOpen = false })
             reportOpen -> ReportScreen(onDone = { reportOpen = false })
@@ -2715,6 +2716,10 @@ private fun MainScreen(
                                     look = Look.OTHER,
                                     below = "OK to change. Lets On aerial in the player find each channel. Kept up to date online" +
                                         (AerialLists.updated.takeIf { it.isNotBlank() }?.let { " (list of $it)" } ?: ""))
+                                val own = remember(aerialTick) { AerialLists.own }
+                                FocusRow("Your own aerial numbers" + (own?.let { " (" + it.channels.map { c -> c.number }.distinct().size + ")" } ?: ""),
+                                    { AerialLists.ownOpen = true }, look = Look.OTHER,
+                                    below = "For a country with no list, or to put a number right. Sent from your phone")
                                 var showAerial by remember { mutableStateOf(false) }
                                 if (plan != null) FocusRow((if (showAerial) "Hide" else "Check") + " the aerial channels (" + plan.channels.map { it.number }.distinct().size + ")",
                                     { showAerial = !showAerial }, look = Look.OTHER, below = "Each opens on the aerial, to check it's the right channel")
@@ -6446,6 +6451,74 @@ private fun FreeListsScreen(channelCount: Int, onDone: () -> Unit, onWatch: () -
                 else -> ""
             }
             FocusRow(health + "Remove " + FreeStore.label(list), { FreeStore.remove(context, list); said = "Removed." }, look = Look.OTHER, below = list)
+        }
+        FocusRow("Done", onDone, look = Look.OTHER)
+    }
+}
+
+// --------------------------------------------------------------------------------------------- Own aerial numbers
+
+/**
+ * The viewer's own aerial channel numbers: sent from the phone (lines of "number name", or a link to a file of them),
+ * or a link typed here. They come before the list's numbers, so On aerial works in a country KueTV has no list for.
+ */
+@Composable
+private fun AerialOwnScreen(onDone: () -> Unit) {
+    val context = LocalContext.current
+    val phone = LocalPhone.current
+    val scope = rememberCoroutineScope()
+    var link by remember { mutableStateOf(AerialLists.ownLink(context)) }
+    var said by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var phoneAddress by remember { mutableStateOf<String?>(null) }
+    val tick = Aerial.changes
+    val own = remember(tick) { AerialLists.own }
+    BackHandler { onDone() }
+    val keep: (String, String) -> Unit = { text, l ->
+        if (!busy) {
+            busy = true
+            said = null
+            scope.launch {
+                said = withContext(Dispatchers.IO) { AerialLists.keepOwn(context, text, l) }
+                busy = false
+            }
+        }
+    }
+    DisposableEffect(Unit) {
+        val main = Handler(Looper.getMainLooper())
+        val server = if (phone) null else PhoneSetup(onAerial = { t, l -> main.post { keep(t, l) } }) { _, _, _, _ -> }
+        phoneAddress = server?.start()
+        onDispose { server?.stop() }
+    }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = if (phone) 12.dp else 220.dp, vertical = if (phone) 12.dp else 36.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("Your own aerial numbers", color = Ink, fontSize = Sizes.TITLE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
+        Note("For a country KueTV has no aerial list for, or to put a number right. Each channel's number on your TV and its name. " +
+            "Then On aerial in the player finds it, and a channel with no sound or picture moves to the aerial by itself.")
+        phoneAddress?.let { address ->
+            Note("Easiest: on your phone, on the same Wi-Fi, open")
+            Text(address, color = AccentInk, fontSize = Sizes.CODE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
+            Note("and type the channels there, one a line, like: 101 BBC One. Or paste a link to a file of them.")
+        }
+        Field("Or a link to a file of them", link, onDone = { keep("", link) }) { link = it }
+        val first = remember { FocusRequester() }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            if (!phone) runCatching { first.requestFocus() }
+        }
+        FocusRow(if (busy) "Reading…" else "Add from the link", { keep("", link) }, Modifier.focusRequester(first), look = Look.MAIN,
+            below = "Lines of number and name, KueTV's own channel file, or a channel list (.m3u) with channel numbers. Read again every day")
+        said?.let { StatusBox(Status(it, if (it.startsWith("Added")) Status.OK else Status.INFO)) }
+        if (own != null) {
+            Box(Modifier.padding(top = 10.dp)) { Heading("In use (" + own.channels.map { it.number }.distinct().size + ")") }
+            FocusRow("Remove your own numbers", { AerialLists.clearOwn(context); link = ""; said = "Removed. The list's numbers are used again." }, look = Look.OTHER)
+            own.channels.distinctBy { it.number }.sortedBy { it.number }.forEach { c ->
+                FocusRow(c.number.toString() + "  " + c.name, {
+                    if (!Aerial.openChannel(context, c.number)) kueToast(context, "Aerial channel " + c.number + " wouldn't open.")
+                }, look = Look.OTHER, below = "OK to check it on the aerial")
+            }
         }
         FocusRow("Done", onDone, look = Look.OTHER)
     }
