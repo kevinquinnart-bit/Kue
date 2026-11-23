@@ -41,7 +41,8 @@ object Watched {
 
 /** How the films and series are listed: their sort, and whether those watched are hidden. Kept on this device. */
 object Listing {
-    val sorts = listOf("Provider's order", "A to Z", "Newest added")
+    /** The ways Films and Series can be sorted, Top rated first, the one used until another is picked (Kevin, 23 November 2026). */
+    val sorts = listOf("Top rated", "Newest added", "Newest released", "A to Z", "Z to A", "Provider's order")
 
     var changes by mutableIntStateOf(0)
         private set
@@ -52,9 +53,10 @@ object Listing {
 
     private fun prefs(context: Context) = context.getSharedPreferences("listing", Context.MODE_PRIVATE)
 
-    fun sort(context: Context): Int = prefs(context).getInt("sort", 0).coerceIn(0, sorts.size - 1)
+    // Kept under a new name: the old one counted from "Provider's order", and Top rated is the start now.
+    fun sort(context: Context): Int = prefs(context).getInt("sort2", 0).coerceIn(0, sorts.size - 1)
     fun sort(context: Context, value: Int) {
-        prefs(context).edit().putInt("sort", value).apply()
+        prefs(context).edit().putInt("sort2", value).apply()
         changes++
     }
 
@@ -64,10 +66,16 @@ object Listing {
         changes++
     }
 
-    /** [items] in sort [sort]: as given, by name ignoring "The" and the provider's tags, or newest first. */
-    fun <T> sorted(items: List<T>, sort: Int, name: (T) -> String, added: (T) -> Long): List<T> = when (sort) {
-        1 -> items.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { plainName(name(it)) })
-        2 -> items.sortedByDescending(added)
+    /**
+     * [items] in sort [sort] (see [sorts]): best rated first, newest added, newest by year, by name ignoring "The" and
+     * the provider's tags either way round, or as the provider lists them. Those with no rating or year go last.
+     */
+    fun <T> sorted(items: List<T>, sort: Int, name: (T) -> String, added: (T) -> Long, rating: (T) -> Float, year: (T) -> Int): List<T> = when (sort) {
+        0 -> items.sortedByDescending(rating)
+        1 -> items.sortedByDescending(added)
+        2 -> items.sortedByDescending(year)
+        3 -> items.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { plainName(name(it)) })
+        4 -> items.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { plainName(name(it)) })
         else -> items
     }
 

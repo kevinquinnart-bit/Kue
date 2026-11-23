@@ -33,7 +33,22 @@ data class Channel(
     val drm: String? = null,
 )
 
-data class Film(val id: String, val name: String, val poster: String, val categoryId: String, val url: String, val added: Long = 0)
+data class Film(
+    val id: String, val name: String, val poster: String, val categoryId: String, val url: String, val added: Long = 0,
+    /** The provider's rating out of 10; 0 when it gives none. For "Top rated" and the figure on the poster. */
+    val rating: Float = 0f,
+    /** The year it came out, from the provider or the end of its name ("Dune (2021)"); 0 when not known. */
+    val year: Int = 0,
+)
+
+/** A year at the end of a film's name: "Dune (2021)", "Dune - 2021", "Dune 2021"; 0 when there is none. */
+internal fun yearInName(name: String): Int =
+    // Only a year that has been: "Blade Runner 2049" is a name, not a year.
+    Regex("""(?:\(|\s|-)((?:19|20)\d\d)\)?\s*$""").find(name.trim())?.groupValues?.get(1)?.toIntOrNull()
+        ?.takeIf { it <= java.util.Calendar.getInstance().get(java.util.Calendar.YEAR) + 1 } ?: 0
+
+/** A rating as text ("7.1", "") as a number out of 10; 0 when there is none. */
+internal fun ratingOf(text: String): Float = text.trim().toFloatOrNull()?.takeIf { it > 0f && it <= 10f } ?: 0f
 
 data class Show(val id: String, val name: String, val poster: String, val categoryId: String, val about: About = About(), val added: Long = 0)
 
@@ -733,11 +748,15 @@ object Provider {
             }
             records(
                 api(account, "get_vod_streams"),
-                setOf("stream_id", "name", "stream_icon", "category_id", "container_extension", "added"),
+                setOf("stream_id", "name", "stream_icon", "category_id", "container_extension", "added", "rating", "rating_5based", "year", "releaseDate", "release_date"),
             ) { r ->
                 val id = r["stream_id"] ?: return@records
                 val ext = r["container_extension"].orEmpty().ifBlank { "mp4" }
-                films += Film(id, r["name"].orEmpty().trim(), r["stream_icon"].orEmpty(), r["category_id"].orEmpty(), "$base/movie/$who/$id.$ext", r["added"]?.toLongOrNull() ?: 0)
+                val name = r["name"].orEmpty().trim()
+                // Out of 10; a provider giving only the out-of-5 figure has it doubled.
+                val rating = ratingOf(r["rating"].orEmpty()).takeIf { it > 0f } ?: (ratingOf(r["rating_5based"].orEmpty()) * 2f).coerceAtMost(10f)
+                val year = (r["year"] ?: r["releaseDate"] ?: r["release_date"]).orEmpty().take(4).toIntOrNull()?.takeIf { it in 1900..2100 } ?: yearInName(name)
+                films += Film(id, name, r["stream_icon"].orEmpty(), r["category_id"].orEmpty(), "$base/movie/$who/$id.$ext", r["added"]?.toLongOrNull() ?: 0, rating, year)
             }
         }
         val showCategories = ArrayList<Category>()

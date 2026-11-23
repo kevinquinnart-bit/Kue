@@ -20,6 +20,8 @@ object LibraryCache {
     /** What is written to the file. [who] says whose lists they are, so another account's are never shown. */
     private class Kept(
         val who: String = "", val at: Long = 0, val ahead: Int = 0,
+        /** The layout of what is kept: 2 from when films carried their rating and year. Older lists are fetched again. */
+        val v: Int = 0,
         val liveCategories: List<Category>? = null, val channels: List<Channel>? = null,
         val filmCategories: List<Category>? = null, val films: List<Film>? = null,
         val showCategories: List<Category>? = null, val shows: List<Show>? = null,
@@ -39,7 +41,7 @@ object LibraryCache {
         val part = File(file.path + ".part")
         OutputStreamWriter(GZIPOutputStream(part.outputStream()), Charsets.UTF_8).use { out ->
             Gson().toJson(
-                Kept(who(account), at, library.serverAheadSec, library.liveCategories, library.channels, library.filmCategories, library.films, library.showCategories, library.shows),
+                Kept(who(account), at, library.serverAheadSec, KEPT_LAYOUT, library.liveCategories, library.channels, library.filmCategories, library.films, library.showCategories, library.shows),
                 out,
             )
         }
@@ -61,9 +63,12 @@ object LibraryCache {
                 // A playlist link has no login to ask the guide or catch-up with.
                 account.takeIf { it.isLogin }, kept.ahead,
             ),
-            kept.at,
+            // Kept before films had ratings: shown at once, but fetched again in the background straight away.
+            if (kept.v < KEPT_LAYOUT) 0L else kept.at,
         )
     }.getOrNull()
+
+    private const val KEPT_LAYOUT = 2
 
     /** Whether two sets of lists hold the same channels, films and series. */
     fun same(a: Library, b: Library): Boolean =

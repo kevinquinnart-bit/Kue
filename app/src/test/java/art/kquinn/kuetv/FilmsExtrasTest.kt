@@ -72,8 +72,22 @@ class FilmsExtrasTest {
 
     @Test fun aToZIgnoresTagsAndThe() {
         val names = listOf("|UK| Zulu", "The Abyss", "Batman", "EN - Alien")
-        assertEquals(listOf("The Abyss", "EN - Alien", "Batman", "|UK| Zulu"), Listing.sorted(names, 1, { it }, { 0L }))
-        assertEquals(listOf("b", "a"), Listing.sorted(listOf("a", "b"), 2, { it }, { if (it == "b") 2L else 1L }))
+        assertEquals(listOf("The Abyss", "EN - Alien", "Batman", "|UK| Zulu"), Listing.sorted(names, 3, { it }, { 0L }, { 0f }, { 0 }))
+        assertEquals(listOf("|UK| Zulu", "Batman", "EN - Alien", "The Abyss"), Listing.sorted(names, 4, { it }, { 0L }, { 0f }, { 0 }))
+        assertEquals(listOf("b", "a"), Listing.sorted(listOf("a", "b"), 1, { it }, { if (it == "b") 2L else 1L }, { 0f }, { 0 }))
+    }
+
+    @Test fun topRatedAndNewestReleasedComeFirst() {
+        val rating = mapOf("a" to 6.1f, "b" to 8.4f, "c" to 0f)
+        val year = mapOf("a" to 2024, "b" to 1999, "c" to 0)
+        assertEquals("Top rated is the first choice", "Top rated", Listing.sorts[0])
+        assertEquals(listOf("b", "a", "c"), Listing.sorted(listOf("a", "b", "c"), 0, { it }, { 0L }, { rating[it]!! }, { 0 }))
+        assertEquals(listOf("a", "b", "c"), Listing.sorted(listOf("a", "b", "c"), 2, { it }, { 0L }, { 0f }, { year[it]!! }))
+        assertEquals(2021, yearInName("Dune (2021)"))
+        assertEquals(1994, yearInName("EN - Leon - 1994"))
+        assertEquals(0, yearInName("Blade Runner 2049"))
+        assertEquals(7.2f, ratingOf("7.2"))
+        assertEquals(0f, ratingOf(""))
     }
 
     @Test fun trailersAreFoundInAnyAddress() {

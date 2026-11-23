@@ -1410,9 +1410,30 @@ private fun ListingChips(watchedToo: Boolean) {
     val context = LocalContext.current
     val sort = remember(Listing.changes) { Listing.sort(context) }
     val hide = remember(Listing.changes) { Listing.hideWatched(context) }
+    // OK on Sort opens the list of ways to sort, to pick one (Kevin, 23 November 2026).
+    var choosing by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(start = 12.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        GuideChip("Sort: " + Listing.sorts[sort], false) { Listing.sort(context, (sort + 1) % Listing.sorts.size) }
+        GuideChip("Sort: " + Listing.sorts[sort] + "  ▾", false) { choosing = true }
         if (watchedToo) GuideChip(if (hide) "Watched: hidden" else "Watched: shown", false) { Listing.hideWatched(context, !hide) }
+    }
+    if (choosing) {
+        val first = remember { FocusRequester() }
+        androidx.compose.ui.window.Dialog(onDismissRequest = { choosing = false }) {
+            LaunchedEffect(Unit) {
+                withFrameNanos { }
+                runCatching { first.requestFocus() }
+            }
+            Column(Modifier.width(360.dp).background(Page, RoundedCornerShape(18.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Sort by", color = Ink, fontSize = 19.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, bottom = 4.dp))
+                Listing.sorts.forEachIndexed { i, name ->
+                    FocusRow(
+                        (if (i == sort) "● " else "") + name, { Listing.sort(context, i); choosing = false },
+                        if (i == sort) Modifier.focusRequester(first) else Modifier,
+                        chosen = i == sort, look = Look.OTHER, textSize = 17.sp, padV = 8.dp,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -2254,7 +2275,7 @@ private fun MainScreen(
                         FAVOURITES -> library.films.filter { Favourites.key(it, login) in favs }
                         else -> library.films.filter { it.categoryId == filmCategory }
                     }
-                    Listing.sorted(if (hideWatched) inCategory.filter { !Watched.isWatched(context, it.url) } else inCategory, sort, { it.name }, { it.added })
+                    Listing.sorted(if (hideWatched) inCategory.filter { !Watched.isWatched(context, it.url) } else inCategory, sort, { it.name }, { it.added }, { it.rating }, { it.year })
                 }
                 // Hold OK on a film: a short list of what can be done with it.
                 var menuFilm by remember { mutableStateOf<Film?>(null) }
@@ -2317,7 +2338,8 @@ private fun MainScreen(
                 Column(fill()) {
                     Heading((if (shown.size == 1) "1 film" else "${shown.size} films") + menuHint("film"))
                     ListingChips(watchedToo = true)
-                    val onFilm = state.onFilm
+                    // Until the remote is on a film in this list, the first one is told about, so the box is never empty.
+                    val onFilm = remember(shown, state.onFilm) { state.onFilm?.takeIf { f -> shown.any { it.id == f.id } } ?: shown.firstOrNull() }
                     val account = library.account
                     if (!phone) {
                         // What the film the remote is on is about, asked for once it has been stayed on for a moment.
@@ -2346,6 +2368,7 @@ private fun MainScreen(
                                 favourite = favKey in favs,
                                 onHold = { menuFilm = film },
                                 onFocus = { state.onFilm = film },
+                                rating = film.rating,
                                 watched = watchedNow >= 0 && Watched.isWatched(context, film.url),
                                 progress = Positions.changes.let { Positions.progress(context, film.url) },
                             )
@@ -3142,6 +3165,8 @@ private fun Poster(
     watched: Boolean = false,
     /** Part way through: how far, 0 to 1, as a bar along the bottom of the picture. */
     progress: Float? = null,
+    /** The rating out of 10, shown in the bottom corner of the picture; 0 for none. */
+    rating: Float = 0f,
 ) {
     var focused by remember { mutableStateOf(false) }
     Column(
@@ -3168,6 +3193,18 @@ private fun Poster(
                     "✓", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0xFF6BD08A), RoundedCornerShape(8.dp)).padding(horizontal = 7.dp, vertical = 1.dp),
                 )
+            }
+            if (rating > 0f) {
+                // The rating, with KueTV's own star, in the bottom right of the picture (Kevin, 23 November 2026).
+                Row(
+                    Modifier.align(Alignment.BottomEnd).padding(end = 6.dp, bottom = 10.dp).background(Color(0xCC0E1626), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    KueIcon(Glyph.STAR, Color(0xFFFFC53D), Modifier.size(13.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text(String.format(java.util.Locale.UK, "%.1f", rating), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                }
             }
             if (progress != null && !watched) {
                 Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(6.dp).background(Color(0x99000000))) {
@@ -3584,7 +3621,10 @@ private fun Pane.SeriesPane(
             FAVOURITES -> library.shows.filter { Favourites.key(it) in favs }
             else -> library.shows.filter { it.categoryId == state.showCategory }
         }
-        Listing.sorted(inCategory, sort, { it.name }, { it.added })
+        // The rating and year read once each, not at every comparison.
+        val rated = inCategory.associate { it.id to ratingOf(it.about.rating) }
+        val years = inCategory.associate { it.id to (it.about.year.take(4).toIntOrNull() ?: 0) }
+        Listing.sorted(inCategory, sort, { it.name }, { it.added }, { rated[it.id] ?: 0f }, { years[it.id] ?: 0 })
     }
     // A series with an episode part way through: how far through that episode, as a bar on its poster.
     val partWay = remember(Positions.changes) {
@@ -3602,7 +3642,8 @@ private fun Pane.SeriesPane(
     Column(fill()) {
         Heading((if (shown.size == 1) "1 series" else "${shown.size} series") + holdHint())
         ListingChips(watchedToo = false)
-        if (!LocalPhone.current) state.onShow.let { sh ->
+        // Until the remote is on a series in this list, the first one is told about, so the box is never empty.
+        if (!LocalPhone.current) remember(shown, state.onShow) { state.onShow?.takeIf { s -> shown.any { it.id == s.id } } ?: shown.firstOrNull() }.let { sh ->
             AboutStrip(sh?.name, sh?.about, sh?.poster.orEmpty(), sh?.let { if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null })
         }
         LazyVerticalGrid(
@@ -3627,6 +3668,7 @@ private fun Pane.SeriesPane(
                     onHold = { favourites.toggle(Favourites.key(show)) },
                     onFocus = { state.onShow = show },
                     progress = partWay[show.name],
+                    rating = ratingOf(show.about.rating),
                 )
             }
         }
@@ -5876,7 +5918,8 @@ private fun TrendingBanner(slides: List<Trending.Slide>, clock: String, modifier
     var moved by remember { mutableIntStateOf(0) }
     LaunchedEffect(slides.size, moved) {
         while (true) {
-            delay(8_000)
+            // Long enough for words that scroll to be read to the end.
+            delay(12_000)
             at = (at + 1) % slides.size
         }
     }
@@ -5910,8 +5953,10 @@ private fun TrendingBanner(slides: List<Trending.Slide>, clock: String, modifier
                     }
                     Spacer(Modifier.height(8.dp))
                     Text("Trending · " + s.service, color = AccentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                    Text(s.title, color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (s.about.isNotBlank()) Text(s.about, color = Soft, fontSize = 15.sp, lineHeight = 20.sp, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                    // Nothing cut off (Kevin, 23 November 2026): a long name takes two lines, and words that don't fit
+                    // scroll up by themselves.
+                    Text(s.title, color = Ink, fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (s.about.isNotBlank()) Box(Modifier.padding(top = 2.dp).weight(1f, fill = false)) { AutoScrollText(s.about, Soft, 15.sp, if (s.title.length > 26) 3 else 4) }
                     Spacer(Modifier.weight(1f))
                     if (focused) Text("◀ ▶ more · OK opens the app", color = Soft, fontSize = 13.sp, maxLines = 1)
                 }
@@ -6555,6 +6600,7 @@ private fun CatalogueGrid(catalogue: Catalogue, state: BrowseState, resume: Focu
                             on = item
                             if (i >= items.size - 8) wanted = items.size
                         },
+                        rating = ratingOf(item.about.rating),
                     )
                 }
             }
