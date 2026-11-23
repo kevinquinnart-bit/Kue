@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <!-- KueTV: green: a corner flash in the app's own colour, so the Kue apps can be told apart; the K keeps its size. -->
+    <path android:pathData="M0,0H108V108H0Z" android:fillColor="#FFFFFF"/>
+    <path android:pathData="M46.08,0H108V61.92Z" android:fillColor="#1D9E75"/>
+</vector>
