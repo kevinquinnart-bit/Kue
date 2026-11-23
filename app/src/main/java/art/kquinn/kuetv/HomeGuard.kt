@@ -45,6 +45,7 @@ class HomeGuard : AccessibilityService() {
         runCatching { (getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(view, params); cover = view }
             .onFailure { Report.note("Home", "cover: " + it.message) }
         Report.note("Home", "Home button watcher on")
+        TvRemote.start()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -125,6 +126,7 @@ class HomeGuard : AccessibilityService() {
     override fun onInterrupt() {}
 
     override fun onDestroy() {
+        TvRemote.stop()
         stop()
         main.removeCallbacks(uncover)
         cover?.let { v -> runCatching { (getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(v) } }
@@ -143,6 +145,18 @@ class HomeGuard : AccessibilityService() {
 
         /** Until when Amazon's home screen is left alone: the few seconds the TV's settings (which live inside it) take to open. */
         @Volatile var pausedUntil = 0L
+
+        /**
+         * Puts the TV to sleep, as its remote's power button does: Android's lock-screen action, which on a TV is
+         * standby. Only the Home button watcher may ask for it, so false when it isn't running.
+         */
+        fun sleepTv(): Boolean {
+            val guard = running ?: return false
+            if (android.os.Build.VERSION.SDK_INT < 28) return false
+            val ok = runCatching { guard.performGlobalAction(GLOBAL_ACTION_LOCK_SCREEN) }.getOrDefault(false)
+            Report.note("Home", "put the TV to sleep: " + if (ok) "done" else "refused")
+            return ok
+        }
 
         /** Leaves Amazon's home screen alone while the TV's settings open. */
         fun pause() { pausedUntil = SystemClock.uptimeMillis() + 3_000L }

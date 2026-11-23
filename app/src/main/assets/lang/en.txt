@@ -1197,3 +1197,11 @@ Remove your own numbers
 Removed. The list's numbers are used again.
 OK to check it on the aerial
 Home is going to Fire TV until the TV restarts. To restart: hold Select and Play together for 5 seconds.
+Put the TV to sleep
+Finding the TV…
+The TV with KueTV on this Wi-Fi goes to standby
+The TV didn't go to sleep: the Home button watcher isn't running.
+Your phone isn't on Wi-Fi.
+The TV is going to sleep.
+No TV with KueTV found on this Wi-Fi. Is the TV on, and the phone on the same Wi-Fi?
+The TV didn't answer. Try again.

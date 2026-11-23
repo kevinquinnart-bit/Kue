@@ -2356,6 +2356,20 @@ private fun MainScreen(
                 ) {
                     if (page == null) {
                         Heading("Settings")
+                        // On the phone: the TV to standby, over the Wi-Fi (Kevin, 23 November 2026).
+                        if (phone) {
+                            var asleep by remember { mutableStateOf(false) }
+                            FocusRow(if (asleep) "Finding the TV…" else "Put the TV to sleep", {
+                                if (!asleep) {
+                                    asleep = true
+                                    scope.launch {
+                                        val said = withContext(Dispatchers.IO) { TvRemote.sleepFromPhone(context) }
+                                        asleep = false
+                                        kueToast(context, said)
+                                    }
+                                }
+                            }, look = Look.OTHER, below = "The TV with KueTV on this Wi-Fi goes to standby")
+                        }
                         parts.forEach { (name, summary) ->
                             FocusRow(
                                 // The VPN has a page of its own, opened straight away.
@@ -2736,6 +2750,8 @@ private fun MainScreen(
                             sub("Quick settings")
                             FocusRow("Picture, sound and sleep timer", { if (!Launcher.openTvTool(context, "quick settings")) kueToast(context, "The TV's quick settings wouldn't open.") },
                                 if (aerialName == null) first() else Modifier, look = Look.OTHER, below = "The TV's own quick panel, as when Home is held")
+                            FocusRow("Put the TV to sleep", { if (!HomeGuard.sleepTv()) kueToast(context, "The TV didn't go to sleep: the Home button watcher isn't running.") },
+                                look = Look.OTHER, below = "Also from your phone: KueTV's Settings there, or the TV's address with :" + TvRemote.PORT + " in its browser")
                             if (aerialName != null) FocusRow("The TV's programme guide", {
                                 HomeGuard.pause()
                                 val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
