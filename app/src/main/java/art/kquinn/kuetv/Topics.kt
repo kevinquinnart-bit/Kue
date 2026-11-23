@@ -10,17 +10,18 @@ object Topics {
 
     class Topic(val key: String, val label: String, val words: List<String>)
 
-    // In the order they are checked: "kids movies" is Kids, "sports news" is Sport.
+    // In the order they are checked: "kids movies" is Kids, "sports news" is Sport. Each has its own drawn
+    // picture in front (topicGlyph), in place of the emoji the names used to start with.
     private val checked = listOf(
-        Topic("kids", "🧸 Kids", listOf("kid", "child", "cartoon", "junior", "toon", "cbeebies", "cbbc", "nick", "disney", "family")),
-        Topic("sport", "⚽ Sport", listOf("sport", "football", "soccer", "racing", "golf", "f1", "formula", "boxing", "ufc", "wwe", "nfl", "nba", "nhl", "mlb", "cricket", "rugby", "tennis", "darts", "snooker", "ppv", "premier league", "laliga", "bein", "dazn", "tnt sport", "espn", "eurosport", "fight", "event", "flosport", "epl", " cup", "league", " loi", " gaa", " efl", "uefa", "fifa", "match", "hurling", "motogp", "nascar", "wrestling", "horse")),
-        Topic("news", "📰 News", listOf("news", "politic", "weather", "parliament", "business")),
-        Topic("docs", "🌍 Documentaries", listOf("doc", "history", "nature", "science", "discovery", "geographic", "nat geo", "wildlife", "travel", "knowledge", "learning", "crime", "investigation", "educat", "culture", "outdoor")),
-        Topic("music", "🎵 Music", listOf("music", "radio", "hits", "concert", "mtv", "vevo")),
-        Topic("films", "🎬 Films", listOf("movie", "film", "cinema", "box office", "vod")),
-        Topic("ent", "📺 Entertainment", listOf("entertain", "general", "drama", "comedy", "reality", "lifestyle", "variety", "series", "classic", "food", "home", "religio", "shopping", "local", "regional", "freeview", "saorview", "uk", "ireland", "irish", "bbc", "itv", "english", "united kingdom", "paramount")),
+        Topic("kids", "Kids", listOf("kid", "child", "cartoon", "junior", "toon", "cbeebies", "cbbc", "nick", "disney", "family")),
+        Topic("sport", "Sport", listOf("sport", "football", "soccer", "racing", "golf", "f1", "formula", "boxing", "ufc", "wwe", "nfl", "nba", "nhl", "mlb", "cricket", "rugby", "tennis", "darts", "snooker", "ppv", "premier league", "laliga", "bein", "dazn", "tnt sport", "espn", "eurosport", "fight", "event", "flosport", "epl", " cup", "league", " loi", " gaa", " efl", "uefa", "fifa", "match", "hurling", "motogp", "nascar", "wrestling", "horse")),
+        Topic("news", "News", listOf("news", "politic", "weather", "parliament", "business")),
+        Topic("docs", "Documentaries", listOf("doc", "history", "nature", "science", "discovery", "geographic", "nat geo", "wildlife", "travel", "knowledge", "learning", "crime", "investigation", "educat", "culture", "outdoor")),
+        Topic("music", "Music", listOf("music", "radio", "hits", "concert", "mtv", "vevo")),
+        Topic("films", "Films", listOf("movie", "film", "cinema", "box office", "vod")),
+        Topic("ent", "Entertainment", listOf("entertain", "general", "drama", "comedy", "reality", "lifestyle", "variety", "series", "classic", "food", "home", "religio", "shopping", "local", "regional", "freeview", "saorview", "uk", "ireland", "irish", "bbc", "itv", "english", "united kingdom", "paramount")),
     )
-    private val other = Topic("other", "📁 Everything else", emptyList())
+    private val other = Topic("other", "Everything else", emptyList())
 
     /** In the order they show in the categories column. */
     val shown: List<Topic> = listOf("sport", "news", "ent", "films", "kids", "docs", "music").map { k -> checked.first { it.key == k } } + other

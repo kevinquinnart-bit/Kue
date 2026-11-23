@@ -10,12 +10,16 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * The weather where the TV is, for the bar along the top: a small picture and the temperature, e.g. "🌧 8°".
+ * The weather where the TV is, for the bar along the top: one of KueTV's own pictures ([sky]) and the temperature, e.g. "8°".
  * The place comes from the internet connection's rough location (town level); the weather from Open-Meteo.
  * Neither needs an account. Fetched again every 30 minutes.
  */
 object Weather {
     var now by mutableStateOf<String?>(null)
+        private set
+
+    /** The picture for the weather now, drawn by KueTV (no emoji). */
+    var sky by mutableStateOf(Glyph.CLOUD)
         private set
 
     /** The country the TV is in, from the same rough location ("IE", "GB", …); null until known. */
@@ -41,24 +45,13 @@ object Weather {
                     j.getDouble("latitude") to j.getDouble("longitude")
                 }.also { place = it }
                 val c = get("https://api.open-meteo.com/v1/forecast?latitude=$lat&longitude=$lon&current=temperature_2m,weather_code").getJSONObject("current")
-                picture(c.getInt("weather_code")) + " " + Math.round(c.getDouble("temperature_2m")) + "°"
+                weatherGlyph(c.getInt("weather_code")) to Math.round(c.getDouble("temperature_2m")).toString() + "°"
             }.onFailure { Report.note("Weather", it.message.orEmpty()) }.getOrNull()
         }
         if (line != null) {
-            now = line
+            sky = line.first
+            now = line.second
             fetchedAt = System.currentTimeMillis()
         }
-    }
-
-    /** Open-Meteo's weather codes as a small picture. */
-    internal fun picture(code: Int): String = when (code) {
-        0 -> "☀️"
-        1, 2 -> "⛅"
-        3 -> "☁️"
-        45, 48 -> "🌫️"
-        in 51..67, in 80..82 -> "🌧️"
-        in 71..77, 85, 86 -> "❄️"
-        in 95..99 -> "⛈️"
-        else -> "☁️"
     }
 }

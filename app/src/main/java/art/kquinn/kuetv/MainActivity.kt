@@ -88,6 +88,7 @@ import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -500,6 +501,8 @@ private fun App() {
                         if (wanted.isNotEmpty()) {
                             Report.note("Keeping in step", "took from the other device: " + wanted.keys.sorted().joinToString(", "))
                             Sync.tookNote(wanted.keys)
+                            // Says what came across, so keep in step can be seen working (Kevin, 23 November 2026).
+                            kueToast(context, "Kept in step: " + Sync.words(wanted.keys) + " updated from the other device.")
                             mine = Sync.current(context, bodies())
                             Sync.published = Sync.pack(mine)
                         }
@@ -854,6 +857,12 @@ private fun App() {
                     for (kind in listOf("live", "film", "show")) Choices.hidden(context, kind, taken.hidden[kind].orEmpty())
                     editing = false
                     if (taken.account == account) reload++ else account = taken.account
+                    // Says what happened (Kevin, 23 November 2026).
+                    kueToast(
+                        context,
+                        "Copied from the other device: " + setUpWords(taken) + ". They replaced what was here." +
+                            if (taken.pair.isNotEmpty()) " Keep in step is on now." else "",
+                    )
                 },
             )
             (!account.isSet && !noProvider) || editing || addingProvider -> SetupScreen(
@@ -1051,6 +1060,8 @@ private fun FocusRow(
     padV: Dp = 12.dp,
     /** The channel playing now: edged and named in yellow, so it stands out in its list (Kevin, 23 November 2026). */
     playing: Boolean = false,
+    /** One of KueTV's own drawn pictures in front of the words, in place of an emoji (Kevin, 23 November 2026). */
+    icon: Glyph? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     val phoneRow = LocalPhone.current
@@ -1082,6 +1093,7 @@ private fun FocusRow(
         horizontalArrangement = if (button == Look.MAIN) Arrangement.Center else Arrangement.spacedBy(14.dp),
     ) {
         leading?.invoke()
+        if (icon != null) KueIcon(icon, if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else AccentInk, Modifier.size((textSize.value * 1.2f).dp))
         Column {
             Text(
                 text,
@@ -1136,19 +1148,31 @@ private fun Modifier.press(onClick: () -> Unit, onHold: (() -> Unit)?): Modifier
 
 /** A pill to tap, for the phone's menu and category strips: yellow while it is the chosen one. */
 @Composable
-private fun Chip(text: String, chosen: Boolean, onHold: (() -> Unit)? = null, onClick: () -> Unit) {
-    Text(
-        text,
-        color = if (chosen) Color.Black else Ink,
-        fontSize = 17.sp,
-        fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal,
-        maxLines = 1,
-        modifier = Modifier
+private fun Chip(text: String, chosen: Boolean, onHold: (() -> Unit)? = null, icon: Glyph? = null, section: Section? = null, onClick: () -> Unit) {
+    Row(
+        Modifier
             .clip(RoundedCornerShape(22.dp))
             .background(if (chosen) Accent else Panel)
             .then(if (onHold != null) Modifier.combinedClickable(onClick = onClick, onLongClick = onHold) else Modifier.clickable(onClick = onClick))
             .padding(horizontal = 16.dp, vertical = 11.dp),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // KueTV's own drawn picture in front, where the pill has one (Kevin, 23 November 2026).
+        if (icon != null) {
+            KueIcon(icon, if (chosen) Color.Black else AccentInk, Modifier.size(19.dp))
+            Spacer(Modifier.width(8.dp))
+        } else if (section != null) {
+            SectionIcon(section, if (chosen) Color.Black else AccentInk, Modifier.size(19.dp))
+            Spacer(Modifier.width(8.dp))
+        }
+        Text(
+            text,
+            color = if (chosen) Color.Black else Ink,
+            fontSize = 17.sp,
+            fontWeight = if (chosen) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
+        )
+    }
 }
 
 /**
@@ -1363,6 +1387,16 @@ private const val RECENT = "\u0000recent"
 // "All" and "Favourites" are known inside the app by marks that can't be written to the device's
 // storage as they are, so they are kept under these plain words instead.
 private fun keptAs(category: String) = when (category) { ALL -> "*all"; FAVOURITES -> "*favourites"; else -> category }
+
+/** The drawn picture in front of a category: All, Favourites, Recently watched, the user's own and Live TV's topics. Null for the provider's own. */
+private fun categoryGlyph(id: String): Glyph? = when {
+    id == ALL -> Glyph.ALL
+    id == FAVOURITES -> Glyph.STAR
+    id == RECENT -> Glyph.CLOCK
+    id.startsWith(MyCategories.PREFIX) -> Glyph.FOLDER
+    id.startsWith(Topics.PREFIX) -> topicGlyph(id.removePrefix(Topics.PREFIX))
+    else -> null
+}
 private fun fromKept(kept: String?) = when (kept) { null, "*all" -> ALL; "*favourites" -> FAVOURITES; else -> kept }
 @Composable
 private fun holdHint() = if (LocalPhone.current) " · press and hold for favourite" else " · hold OK for favourite"
@@ -1425,7 +1459,7 @@ private fun TitleMenu(
         ) {
             Text(name, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 8.dp, bottom = 6.dp))
             FocusRow("Play", { onClose(); onPlay() }, Modifier.focusRequester(first), look = Look.MAIN, textSize = 17.sp, padV = 8.dp)
-            FocusRow(if (favourite) "★ Remove from favourites" else "★ Add to favourites", { onFavourite(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+            FocusRow(if (favourite) "Remove from favourites" else "Add to favourites", { onFavourite(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.STAR)
             FocusRow(if (watched) "Mark as not watched" else "✓ Mark as watched", { onWatched(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
             if (onPeople != null) FocusRow("Cast and director", { onClose(); onPeople() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "Their other films")
             if (playUrl.isNotBlank()) {
@@ -1582,7 +1616,11 @@ private fun TopBar(section: Section, focus: FocusRequester, bar: BarReach, onPic
             }
         }
         LaunchedEffect(time) { Weather.refresh() }
-        Weather.now?.let { Text(it, color = Soft, fontSize = 16.sp, maxLines = 1, modifier = Modifier.padding(start = 10.dp, end = 10.dp)) }
+        Weather.now?.let {
+            // KueTV's own weather picture, then the temperature.
+            KueIcon(Weather.sky, Soft, Modifier.padding(start = 10.dp).size(18.dp))
+            Text(it, color = Soft, fontSize = 16.sp, maxLines = 1, modifier = Modifier.padding(start = 5.dp, end = 10.dp))
+        }
         Text(time, color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
@@ -1612,11 +1650,16 @@ private fun BarItem(section: Section, chosen: Boolean, picture: Boolean, modifie
             .onFocusChanged { focused = it.isFocused }
             .press(onClick, null)
             .then(if (picture) Modifier.semantics { contentDescription = name } else Modifier)
-            .padding(horizontal = if (picture) 7.dp else 8.dp, vertical = 6.dp),
+            .padding(horizontal = 7.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (picture) SectionIcon(section, ink, Modifier.size(22.dp))
-        else Text(section.label, color = ink, fontSize = 15.sp, fontWeight = if (chosen || focused) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+        else {
+            // Each section's own drawn picture in front of its name, as on Home's tiles (Kevin, 23 November 2026).
+            SectionIcon(section, if (focused || chosen) ink else AccentInk, Modifier.size(16.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(section.label, color = ink, fontSize = 14.sp, fontWeight = if (chosen || focused) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
+        }
     }
 }
 
@@ -1970,7 +2013,7 @@ private fun MainScreen(
                     }
                 }
                 Categories(
-                    listOf(Category(RECENT, "🕘 Recently watched")) + mine.map { Category(it.id, "📁 " + it.name) } + columnCats, liveCategory, state.liveCategoryList,
+                    listOf(Category(RECENT, "Recently watched")) + mine.map { Category(it.id, it.name) } + columnCats, liveCategory, state.liveCategoryList,
                     // OK on a topic opens or closes its sections, and shows the whole topic.
                     onPress = { id ->
                         if (grouped && id.startsWith(Topics.PREFIX)) {
@@ -2283,7 +2326,7 @@ private fun MainScreen(
                             delay(600)
                             value = withContext(Dispatchers.IO) { runCatching { Provider.filmAbout(account, onFilm.id) }.getOrDefault(About()) }.also { state.filmAbout[onFilm.id] = it }
                         }
-                        AboutStrip(onFilm?.name, about)
+                        AboutStrip(onFilm?.name, about, onFilm?.poster.orEmpty(), onFilm?.let { f -> if (f.id.startsWith(Catalogue.PREFIX)) "movie" to f.id.removePrefix(Catalogue.PREFIX) else null })
                     }
                     LazyVerticalGrid(
                         columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(4),
@@ -2351,7 +2394,7 @@ private fun MainScreen(
                     *(if (phone) emptyArray() else arrayOf("This TV" to "Aerial TV, quick settings, the TV's own settings, storage, apps")),
                     "Looks" to UiLang.name(UiLang.code) + " · " + Looks.schemes[Looks.scheme].name + " · " + Looks.themes[Looks.theme] + " · " + Looks.accents[Looks.accent] + if (Looks.glass > 0) " · Glass look" else "",
                     "Your things" to "History, profiles · using " + profile.picture + (if (profile.picture.isEmpty()) "" else " ") + profile.name + if (profile.kids) " (kids)" else "",
-                    "Backup and sync" to "Google Drive: " + (when { !drive.isSetUp -> "not set up"; drive.signedIn -> "signed in"; else -> "not signed in" }) + " · TV and phone in step: " + if (paired) "on" else "off",
+                    "Backup and sync" to "Google Drive: " + (when { !drive.isSetUp -> "not set up"; drive.signedIn -> "signed in"; else -> "not signed in" }) + " · Devices sync, keep in step: " + if (paired) "on" else "off",
                     "VPN" to remember(Vpn.changes, Vpn.level) { vpnLine(context) },
                     "Help" to "Health check" + (if (notWorking == 0) "" else ": $notWorking not working") + ", report, updates · version " + BuildConfig.VERSION_NAME,
                 )
@@ -2585,27 +2628,45 @@ private fun MainScreen(
                                     FocusRow("No, keep what is here", { sure = false }, look = Look.OTHER)
                                 }
                             }
-                            sub("TV and phone · copy the set-up")
-                            FocusRow("Send this set-up to another device", onSendSetUp, first(), look = Look.OTHER, below = "Also pairs the two, so they keep in step")
-                            FocusRow("Copy set-up from another device", onTakeSetUp, look = Look.OTHER)
-                            sub("TV and phone · keep in step")
+                            // Devices sync: three choices, each saying what it does (Kevin, 23 November 2026).
+                            val here = if (phone) "phone" else "TV"
+                            val other = if (phone) "TV" else "phone"
+                            sub("Devices sync")
+                            Note("Copy this $here's set-up to the $other, copy the $other's to here, or keep the two in step from now on.")
+                            FocusRow(
+                                (if (phone) "Phone to TV" else "TV to phone") + ": send this $here's set-up", onSendSetUp, first(), look = Look.OTHER,
+                                below = "The $other's provider details, favourites, add-ons and free lists are replaced by this $here's. Turns on keep in step",
+                            )
+                            FocusRow(
+                                (if (phone) "TV to phone" else "Phone to TV") + ": take the $other's set-up", onTakeSetUp, look = Look.OTHER,
+                                below = "This $here's provider details, favourites, add-ons and free lists are replaced by the $other's. Turns on keep in step",
+                            )
                             val met = Sync.lastMetMs
                             if (paired) {
                                 FocusRow(
-                                    "Keeping in step: on · press to stop",
+                                    "Keep in step: on · press to stop",
                                     {
                                         Sync.setKey(context, "")
-                                        kueToast(context, "This device no longer keeps in step. To start again, send the set-up from the other device.")
+                                        kueToast(context, "Keep in step is off on this $here. Nothing was changed on either device. To turn it on again, send or take the set-up above.")
                                     },
                                     look = Look.OTHER,
-                                    below = if (met == 0L) "Not met the other device since opening" else "Last met the other device at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(met)),
+                                    below = if (met == 0L) "Not met the $other since opening" else "Last met the $other at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(met)),
                                 )
                                 // What was last taken from the other device, so it can be seen working.
-                                Note(Sync.lastTook.ifEmpty { "Nothing taken from the other device since opening: they already matched, or haven't met." })
-                                Note("What keeps in step: provider details, favourites and their order, add-ons, free channel lists, hidden categories and their order, subtitles, the Stremio sign-in, the VPN details, Carry on watching, and reminders. Both devices need KueTV open on the same Wi-Fi.")
+                                Note(Sync.lastTook.ifEmpty { "Nothing taken from the $other since opening: the two already match, or haven't met yet." })
                             } else {
-                                Note("Off. Send the set-up from one device to the other to turn it on.")
+                                FocusRow(
+                                    "Keep in step: off", { kueToast(context, "To turn on keep in step, send or take the set-up above. That pairs the two devices.") }, look = Look.OTHER,
+                                    below = "Turns on when the set-up is sent or taken above",
+                                )
                             }
+                            Note(
+                                "How keep in step works: it goes both ways, by itself. About once a minute, while KueTV is open on both on the same Wi-Fi, " +
+                                    "each device checks the other. For each item, the one changed most recently wins and is copied across: add a favourite on the phone " +
+                                    "and an add-on on the TV, and both end up with both. Items: provider details, favourites and their order, add-ons, free channel lists, " +
+                                    "hidden categories and their order, subtitles, the Stremio sign-in, the VPN details, Carry on watching, watched marks, " +
+                                    "Recently watched, your own categories, channel names you changed, and reminders. Text size and the small TV stay each device's own.",
+                            )
                                                 }
                         "Films and series" -> {
                             // Three jobs, three screens.
@@ -2919,7 +2980,7 @@ private fun MainScreen(
             // Home has its own tiles for the sections, so the strip is left off it.
             if (section != Section.HOME) {
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Section.entries.forEach { s -> Chip(s.label, s == section) { section = s } }
+                    Section.entries.forEach { s -> Chip(s.label, s == section, section = s) { section = s } }
                 }
             }
             Pane(null, this).body()
@@ -2952,12 +3013,9 @@ private fun MainScreen(
             val guideGrid = section == Section.GUIDE && state.guide.open == null
             // A series open: what it is about goes under the small TV, in place of the channel's programme details.
             // In Search, the same for the film or series the remote is on.
-            // In Films and Series, the film or series the remote is on (Kevin, 22 November 2026), in place of the channel's programme.
+            // In Films and Series the panel is the channel's programme again, as in every other section; the film or
+            // series the remote is on is told about in the bigger strip above the posters (Kevin, 23 November 2026).
             val seriesOpen = if (section == Section.SERIES) state.openShow?.let { InfoCard(it.name, "", it.about, if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null) }
-                ?: state.onShow?.let { InfoCard(it.name, it.poster, it.about, if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null) }
-                else if (section == Section.FILMS) state.onFilm?.let { f ->
-                    InfoCard(f.name, f.poster, state.filmAbout[f.id] ?: About(), if (f.id.startsWith(Catalogue.PREFIX)) "movie" to f.id.removePrefix(Catalogue.PREFIX) else null)
-                }
                 else if (section == Section.SEARCH) state.searchInfo else null
             if ((small != null && wanted && section != Section.LIVE && !guideGrid) || seriesOpen != null) {
                 val group = remember(small?.url, library) { small?.let { s -> library.groups.firstOrNull { g -> g.versions.any { it.channel.url == s.url } } } }
@@ -2996,9 +3054,9 @@ private fun Categories(
     if (LocalPhone.current) {
         // Phone: a strip of categories that slides sideways. A tap shows that category.
         LazyRow(Modifier.fillMaxWidth(), state = list, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            item(key = ALL) { Chip("All", chosen == ALL) { onChoose(ALL) } }
-            item(key = FAVOURITES) { Chip("★ Favourites", chosen == FAVOURITES) { onChoose(FAVOURITES) } }
-            itemsIndexed(categories, key = { _, c -> c.id }) { _, c -> Chip(c.name, chosen == c.id, onHold = onHold?.let { h -> { h(c.id) } }) { press(c.id) } }
+            item(key = ALL) { Chip("All", chosen == ALL, icon = Glyph.ALL) { onChoose(ALL) } }
+            item(key = FAVOURITES) { Chip("Favourites", chosen == FAVOURITES, icon = Glyph.STAR) { onChoose(FAVOURITES) } }
+            itemsIndexed(categories, key = { _, c -> c.id }) { _, c -> Chip(c.name, chosen == c.id, onHold = onHold?.let { h -> { h(c.id) } }, icon = categoryGlyph(c.id)) { press(c.id) } }
         }
         return
     }
@@ -3043,6 +3101,7 @@ private fun Categories(
                 .focusProperties { canFocus = panels?.bar?.inside != true },
             chosen = chosen == id, onFocus = { landed = id }, textSize = 19.sp,
             onHold = onHold?.let { h -> { h(id) } },
+            icon = categoryGlyph(id),
         )
     }
     Column(
@@ -3057,7 +3116,7 @@ private fun Categories(
             state = list,
         ) {
             item(key = ALL) { row(ALL, "All") }
-            item(key = FAVOURITES) { row(FAVOURITES, "★ Favourites") }
+            item(key = FAVOURITES) { row(FAVOURITES, "Favourites") }
             itemsIndexed(categories, key = { _, c -> c.id }) { _, c -> row(c.id, c.name) }
         }
     }
@@ -3543,7 +3602,9 @@ private fun Pane.SeriesPane(
     Column(fill()) {
         Heading((if (shown.size == 1) "1 series" else "${shown.size} series") + holdHint())
         ListingChips(watchedToo = false)
-        if (!LocalPhone.current) AboutStrip(state.onShow?.name, state.onShow?.about)
+        if (!LocalPhone.current) state.onShow.let { sh ->
+            AboutStrip(sh?.name, sh?.about, sh?.poster.orEmpty(), sh?.let { if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null })
+        }
         LazyVerticalGrid(
             columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(4),
             state = state.showGrid,
@@ -4542,6 +4603,19 @@ private fun addOnsSummary(addOns: List<AddOn>): String {
 
 // --------------------------------------------------------------------------------------------- copying a set-up
 
+/** What a set-up holds, in plain words with counts: "provider details, 42 favourites, 3 add-ons and 1 free channel list". */
+private fun setUpWords(up: SetUp): String {
+    val count: (Int, String, String) -> String = { n, one, many -> "$n " + if (n == 1) one else many }
+    val parts = listOfNotNull(
+        if (up.account.isSet) "provider details" else null,
+        count(up.favourites.size, "favourite", "favourites"),
+        count(up.addOns.size, "add-on", "add-ons"),
+        count(up.free.size, "free channel list", "free channel lists"),
+        if (up.hidden.values.any { it.isNotEmpty() }) "hidden categories" else null,
+    )
+    return if (parts.size == 1) parts[0] else parts.dropLast(1).joinToString(", ") + " and " + parts.last()
+}
+
 /**
  * Sending this device's set-up: the screen shows a four-figure code, and while it is open the other
  * device, on the same Wi-Fi, can copy the provider details, favourites and add-ons by giving that code.
@@ -4553,13 +4627,22 @@ private fun SendSetUpScreen(account: Account, favourites: Favourites, onDone: ()
     val code = remember { (1000 + java.security.SecureRandom().nextInt(9000)).toString() }
     var taken by remember { mutableStateOf(false) }
     var ready by remember { mutableStateOf<Boolean?>(null) }
+    // What was sent, in plain words, for the message once the other device has it.
+    var sentNote by remember { mutableStateOf("") }
     BackHandler { onDone() }
     DisposableEffect(Unit) {
         val main = Handler(Looper.getMainLooper())
         val app = context.applicationContext
         val sender = SetUpSender(
             code,
-            { SetUp(account, favourites.keys, AddOnStore.all(app), Choices.smallTv(app), listOf("live", "film", "show").associateWith { Choices.hidden(app, it) }, FreeStore.all(app), Sync.keyOrMake(app)).pack() },
+            {
+                val up = SetUp(account, favourites.keys, AddOnStore.all(app), Choices.smallTv(app), listOf("live", "film", "show").associateWith { Choices.hidden(app, it) }, FreeStore.all(app), Sync.keyOrMake(app))
+                val other = if (phone) "TV" else "phone"
+                val note = "Sent. The $other now has this device's " + setUpWords(up) + ", in place of its own. Keep in step is on: from now on a change on either " +
+                    "goes across to the other within about a minute, while KueTV is open on both on the same Wi-Fi."
+                main.post { sentNote = note }
+                up.pack()
+            },
             { main.post { taken = true } },
         )
         ready = PhoneSetup.localAddress() != null && sender.start() != null
@@ -4574,9 +4657,9 @@ private fun SendSetUpScreen(account: Account, favourites: Favourites, onDone: ()
         Text("Send this set-up", color = Ink, fontSize = Sizes.TITLE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, bottom = 18.dp))
         when {
             ready == false -> Note("This device isn't on a home network, so it can't send its set-up. Join the Wi-Fi and try again.")
-            taken -> Note("Sent. The other device now has your provider details, favourites and add-ons. From now on the two keep in step by themselves when KueTV is open on both, on the same Wi-Fi.")
+            taken -> Note(sentNote)
             else -> {
-                Note("On the other device, on the same Wi-Fi, open KueTV and choose \"Copy set-up from another device\". Then type this code there:")
+                Note("On the other device, on the same Wi-Fi, open KueTV › Settings › Backup and sync › Devices sync and choose to take the set-up. Then type this code there:")
                 Text(code, color = AccentInk, fontSize = Sizes.CODE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, top = 10.dp, bottom = 10.dp))
                 Note("Keep this screen open until it says Sent.")
             }
@@ -4622,8 +4705,8 @@ private fun TakeSetUpScreen(onDone: () -> Unit, onTaken: (SetUp) -> Unit) {
     }
     Column(Modifier.fillMaxSize().padding(horizontal = if (phone) 12.dp else 220.dp), verticalArrangement = Arrangement.Center) {
         Text("Copy set-up from another device", color = Ink, fontSize = Sizes.TITLE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp, bottom = 18.dp))
-        Note("On the device that is already set up, open KueTV › Settings › \"Send this set-up to another device\". It shows a code. Type it here.")
-        Note("This replaces the provider details, favourites and add-ons on this device.")
+        Note("On the device that is already set up, open KueTV › Settings › Backup and sync › Devices sync and choose to send its set-up. It shows a code. Type it here.")
+        Note("This replaces the provider details, favourites, add-ons and free lists on this device, and turns on keep in step.")
         Spacer(Modifier.height(14.dp))
         OutlinedTextField(
             value = code,
@@ -4758,13 +4841,24 @@ private fun Pane.GuideGrid(
     // The channel row the remote is on: its picture plays in the top right corner.
     var onChannel by remember { mutableStateOf<ChannelGroup?>(null) }
     val nameWidth = 230.dp * scale
+    // The channel playing now: first in the guide, edged in yellow as in Live TV's list (Kevin, 23 November 2026).
+    // Until the remote moves onto something, the box along the top tells what is on it.
+    val playingItem = LastLive.item
+    val isPlaying: (ChannelGroup) -> Boolean = { g -> playingItem != null && (g.versions.any { it.channel.url == playingItem.url } || g.name == playingItem.name) }
+    val rows = remember(shown, playingItem?.url, playingItem?.name) {
+        val at = shown.indexOfFirst(isPlaying)
+        if (at <= 0) shown else listOf(shown[at]) + shown.filterIndexed { i, _ -> i != at }
+    }
+    val playingGroup = rows.firstOrNull()?.takeIf(isPlaying)
+    // On opening, and when another channel starts playing, the list starts at the top, where that channel now is.
+    LaunchedEffect(playingItem?.url) { if (playingGroup != null) runCatching { pick.channelList.scrollToItem(0) } }
     val tell: (String) -> Unit = { kueToast(context, it) }
 
     Column(fill()) {
         // The standard guide layout: what the remote is on, described along the top, with the channel's picture in
         // the top right corner. The grid runs the full width of the screen underneath.
         Row(Modifier.fillMaxWidth().height(GUIDE_PICTURE_WIDTH * 9f / 16f + 41.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            GuideDetails(about, onChannel, account, time, Modifier.weight(1f).fillMaxHeight())
+            GuideDetails(about, onChannel ?: playingGroup ?: rows.firstOrNull(), account, time, Modifier.weight(1f).fillMaxHeight())
             PreviewPicture(onChannel, Modifier.width(GUIDE_PICTURE_WIDTH).testTag("guide picture"))
         }
         Spacer(Modifier.height(8.dp))
@@ -4793,7 +4887,7 @@ private fun Pane.GuideGrid(
             }
         }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("guide grid"), state = pick.channelList) {
-            itemsIndexed(shown, key = { _, c -> c.id }) { _, channel ->
+            itemsIndexed(rows, key = { _, c -> c.id }) { _, channel ->
                 val first = channel.versions[channel.start].channel
                 // null while it is being asked for. A row asks only after staying on screen for half a second.
                 val guide by keyedState(first.id, { NowNext.cached(first.id) }) {
@@ -4814,6 +4908,7 @@ private fun Pane.GuideGrid(
                         nameWidth, false, { onOpen(channel) }, { about = null; onChannel = channel },
                         if (nameKey == state.resumeKey) Modifier.focusRequester(resume) else Modifier,
                         logo = channel.logo,
+                        playing = isPlaying(channel),
                     )
                     Box(Modifier.weight(1f).fillMaxHeight().horizontalScroll(strip)) {
                         Row(Modifier.width(total).fillMaxHeight()) {
@@ -4953,6 +5048,8 @@ private fun GuideDetails(about: Pair<String, Programme>?, channel: ChannelGroup?
 private fun GridCell(
     title: String, sub: String, width: Dp, onNow: Boolean, onClick: () -> Unit, onFocus: () -> Unit, modifier: Modifier = Modifier, logo: String? = null,
     strip: androidx.compose.foundation.ScrollState? = null, startsAt: Int = 0,
+    /** A channel's name, for the channel playing now: edged and named in yellow, as in Live TV's list. */
+    playing: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     // A channel's name: its logo beside it.
@@ -4960,7 +5057,8 @@ private fun GridCell(
         Row(
             modifier.width(width).fillMaxHeight().padding(1.dp).clip(RoundedCornerShape(8.dp))
                 .focusRing(focused, RoundedCornerShape(8.dp))
-                .background(if (focused) Accent else Panel)
+                .then(if (playing && !focused) Modifier.border(2.dp, Accent, RoundedCornerShape(8.dp)) else Modifier)
+                .background(if (focused) Accent else if (playing) Accent.copy(alpha = 0.16f) else Panel)
                 .onFocusChanged {
                     if (it.isFocused && !focused) onFocus()
                     focused = it.isFocused
@@ -4971,7 +5069,7 @@ private fun GridCell(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Logo(logo)
-            Text(title, color = if (focused) Color.Black else Ink, fontSize = 16.sp, fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(title, color = if (focused) Color.Black else if (playing) Accent else Ink, fontSize = 16.sp, fontWeight = if (focused || playing) FontWeight.Bold else FontWeight.Normal, maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
         return
     }
@@ -5097,19 +5195,38 @@ private fun ReportScreen(onDone: () -> Unit) {
 }
 
 /**
- * Above the posters on a TV: the name of the film or series the remote is on, its year, kind, rating
- * and length, and what it is about. It keeps its height whether or not there is anything to say, so
- * the posters don't jump about.
+ * Above the posters on a TV: the poster of the film or series the remote is on, its name, its year, kind,
+ * rating and length, and what it is about, four lines of it. Details the list didn't have are asked of the
+ * film index. It keeps its height whether or not there is anything to say, so the posters don't jump about.
+ * Made bigger when the panel at the side went back to the channel's programme (Kevin, 23 November 2026).
  */
 @Composable
-private fun AboutStrip(name: String?, about: About?) {
-    Column(Modifier.fillMaxWidth().height(96.dp * LocalTextScale.current).padding(horizontal = 16.dp)) {
-        if (name != null) {
-            Text(
-                name + if (about == null || about.line.isBlank()) "" else "  ·  " + about.line,
-                color = Ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-            if (about != null && about.plot.isNotBlank()) Text(about.plot, color = Soft, fontSize = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+private fun AboutStrip(name: String?, about: About?, poster: String = "", catalogue: Pair<String, String>? = null) {
+    val fetched by produceState<CatItem?>(null, name, catalogue) {
+        val (type, id) = catalogue ?: return@produceState
+        if (about != null && about.plot.isNotBlank() && poster.isNotBlank()) return@produceState
+        value = withContext(Dispatchers.IO) { runCatching { AddOns.meta(type, id) }.getOrNull() }
+    }
+    val shown = if (about == null || about.plot.isBlank()) fetched?.about ?: about else about
+    val picture = poster.ifBlank { fetched?.poster.orEmpty() }
+    val tall = 138.dp * LocalTextScale.current
+    Row(
+        Modifier.fillMaxWidth().height(tall).padding(horizontal = 4.dp, vertical = 2.dp).clip(RoundedCornerShape(14.dp))
+            .then(if (name != null) Modifier.background(Panel) else Modifier),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (name == null) return@Row
+        if (picture.isNotBlank()) {
+            Box(Modifier.fillMaxHeight().aspectRatio(2f / 3f).background(Looks.faint)) {
+                AsyncImage(model = picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+        }
+        Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 14.dp, vertical = 8.dp)) {
+            Text(name, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (shown != null && shown.line.isNotBlank()) Text(shown.line, color = AccentInk, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (shown != null && shown.plot.isNotBlank()) {
+                Text(shown.plot, color = Soft, fontSize = 15.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+            }
         }
     }
 }
@@ -5340,7 +5457,7 @@ private fun HomeScreen(
             // Until it has been fetched (or with no internet): the channel last watched, as before.
             LaunchedEffect(Unit) { Trending.load(context) }
             val slides = Trending.slides
-            if (slides.isNotEmpty()) TrendingBanner(slides, clock, Modifier.fillMaxWidth().height(184.dp))
+            if (slides.isNotEmpty()) TrendingBanner(slides, clock, Modifier.fillMaxWidth().height(216.dp))
             else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -5379,13 +5496,16 @@ private fun HomeScreen(
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 tiles.forEach { s ->
+                    // Shorter than before, the picture beside the name, so the banner above can be taller (Kevin, 23 November 2026).
                     Tile(
                         { onOpen(s) },
-                        Modifier.size(width = 150.dp, height = 76.dp).then(if (s == state.cameFrom) Modifier.focusRequester(homeFocus) else Modifier),
+                        Modifier.size(width = 150.dp, height = 54.dp).then(if (s == state.cameFrom) Modifier.focusRequester(homeFocus) else Modifier),
                     ) { focused ->
-                        SectionIcon(s, if (focused) Color.Black else AccentInk, Modifier.size(28.dp))
-                        Spacer(Modifier.height(4.dp))
-                        Text(s.label, color = if (focused) Color.Black else Ink, fontSize = 15.sp, fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            SectionIcon(s, if (focused) Color.Black else AccentInk, Modifier.size(22.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(s.label, color = if (focused) Color.Black else Ink, fontSize = 15.sp, fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
                 }
             }
@@ -5469,15 +5589,22 @@ private fun HomeScreen(
             Heading("Live in their own apps")
             LazyRow(Modifier.fillMaxWidth().focusRestorer(), contentPadding = rowPadding, horizontalArrangement = rowGap) {
                 // The TV's own aerial channels, first: they work with no internet.
+                // Each card filled with one of the Kue colour blends, in turn, so the names stand out (Kevin, 23 November 2026).
                 if (aerial) item(key = "aerial") {
+                    val look = CARD_FILLS[0]
                     HomeCard({ if (!Aerial.open(context)) kueToast(context, "The TV's aerial channels wouldn't open.") },
-                        Modifier.width(136.dp), 16f / 9f, "Aerial TV", "This TV") {
-                        Text("📡 Aerial", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Modifier.width(136.dp), 16f / 9f, "Aerial TV", "This TV", fill = look.first) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            KueIcon(Glyph.AERIAL, look.second, Modifier.size(26.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Aerial", color = look.second, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        }
                     }
                 }
-                itemsIndexed(liveHere, key = { _, c -> c.link }) { _, c ->
-                    HomeCard({ LiveInApps.open(context, c) }, Modifier.width(136.dp), 16f / 9f, c.name, c.app) {
-                        Text(c.name, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                itemsIndexed(liveHere, key = { _, c -> c.link }) { i, c ->
+                    val look = CARD_FILLS[(i + if (aerial) 1 else 0) % CARD_FILLS.size]
+                    HomeCard({ LiveInApps.open(context, c) }, Modifier.width(136.dp), 16f / 9f, c.name, c.app, fill = look.first) {
+                        Text(c.name, color = look.second, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(horizontal = 8.dp))
                     }
                 }
             }
@@ -5784,7 +5911,7 @@ private fun TrendingBanner(slides: List<Trending.Slide>, clock: String, modifier
                     Spacer(Modifier.height(8.dp))
                     Text("Trending · " + s.service, color = AccentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     Text(s.title, color = Ink, fontSize = 26.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (s.about.isNotBlank()) Text(s.about, color = Soft, fontSize = 15.sp, lineHeight = 20.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                    if (s.about.isNotBlank()) Text(s.about, color = Soft, fontSize = 15.sp, lineHeight = 20.sp, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
                     Spacer(Modifier.weight(1f))
                     if (focused) Text("◀ ▶ more · OK opens the app", color = Soft, fontSize = 13.sp, maxLines = 1)
                 }
@@ -5864,13 +5991,16 @@ private fun HomeCard(
     onHold: (() -> Unit)? = null,
     onFocus: () -> Unit = {},
     bar: Float? = null,
+    /** A colour fill in place of the plain grey, for cards with words rather than a picture. */
+    fill: Brush? = null,
     picture: @Composable BoxScope.() -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(10.dp)
     Column(modifier.onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }.press(onClick, onHold)) {
         Box(
-            Modifier.fillMaxWidth().aspectRatio(ratio).scale(if (focused) 1.05f else 1f).clip(shape).background(Looks.faint)
+            Modifier.fillMaxWidth().aspectRatio(ratio).scale(if (focused) 1.05f else 1f).clip(shape)
+                .then(if (fill != null) Modifier.background(fill) else Modifier.background(Looks.faint))
                 .then(if (focused) Modifier.border(3.dp, Accent, shape) else Modifier),
             contentAlignment = Alignment.Center,
         ) { picture() }
@@ -5947,6 +6077,18 @@ private fun EpisodePicture(url: String) {
 private fun barClock(): String = java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date())
 
 private fun homeClock(): String = java.text.SimpleDateFormat("EEEE d MMMM · HH:mm", java.util.Locale.UK).format(java.util.Date())
+
+/**
+ * The colour blends for Home's "Live in their own apps" cards, from KueTV's motion colours: sky blue, turf green
+ * and gold, each running corner to corner, with the colour its words are drawn in.
+ */
+private val CARD_FILLS: List<Pair<Brush, Color>> = listOf(
+    Brush.linearGradient(listOf(Color(0xFF2B7FD6), Color(0xFF5AB0FF))) to Color.White,
+    Brush.linearGradient(listOf(Color(0xFF0C9F5F), Color(0xFF2FCF86))) to Color.White,
+    Brush.linearGradient(listOf(Color(0xFF2B7FD6), Color(0xFF2FCF86))) to Color.White,
+    Brush.linearGradient(listOf(Color(0xFFC98A00), Color(0xFFFFC53D))) to Color(0xFF1A1300),
+    Brush.linearGradient(listOf(Color(0xFF0C9F5F), Color(0xFF5AB0FF))) to Color.White,
+)
 
 /** A tile on Home: dark until the remote lands on it, then yellow and a little bigger. */
 @Composable
@@ -7196,10 +7338,10 @@ private fun ChannelMenu(
                 null -> {
                     // Moving comes first in Favourites, where it is what holding is mostly for (Kevin, 22 November 2026).
                     if (onMove != null) FocusRow("↕ Move", { onClose(); onMove() }, Modifier.focusRequester(first), look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "▲ ▼ to move it, OK to put it down")
-                    FocusRow(if (favourite) "★ Remove from favourites" else "★ Add to favourites", { favourites.toggleAll(favKeys); onClose(); onFavourite() }, if (onMove == null) Modifier.focusRequester(first) else Modifier, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+                    FocusRow(if (favourite) "Remove from favourites" else "Add to favourites", { favourites.toggleAll(favKeys); onClose(); onFavourite() }, if (onMove == null) Modifier.focusRequester(first) else Modifier, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.STAR)
                     for (m in mine) {
                         val inIt = channel.id in m.channels
-                        FocusRow((if (inIt) "Take out of " else "Add to ") + "📁 " + m.name, { MyCategories.toggle(context, m.id, channel.id); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
+                        FocusRow((if (inIt) "Take out of " else "Add to ") + m.name, { MyCategories.toggle(context, m.id, channel.id); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.FOLDER)
                     }
                     FocusRow("New category with this channel", { typed = ""; naming = true }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
                     FocusRow("Rename this channel", { typed = channel.name; naming = false }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
@@ -7217,7 +7359,7 @@ private fun ChannelMenu(
                     FocusRow(if (forCategory) "Make the category" else "Save the name", {
                         if (forCategory) {
                             val made = MyCategories.make(context, typed, channel.id)
-                            kueToast(context, "Made 📁 " + made.name + ". It is in Live TV's categories.")
+                            kueToast(context, "Made " + made.name + ". It is in Live TV's categories.")
                         } else {
                             Renames.set(context, channel.versions.map { it.channel.id }, typed)
                         }

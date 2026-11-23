@@ -15,6 +15,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -235,9 +237,16 @@ private fun Square(item: Playable, sound: Boolean) {
             factory = { ctx -> PlayerView(ctx).apply { useController = false; isFocusable = false; descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS; keepScreenOn = true } },
             update = { it.player = player },
         )
-        Text(
-            (if (sound) "🔊 " else "") + item.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.align(Alignment.TopStart).padding(6.dp).background(Color(0xCC0E1626), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
-        )
+        Row(
+            Modifier.align(Alignment.TopStart).padding(6.dp).background(Color(0xCC0E1626), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // The one with the sound: KueTV's own speaker picture in front of its name.
+            if (sound) {
+                KueIcon(Glyph.SPEAKER, Color.White, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+            }
+            Text(item.name, color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
     }
 }

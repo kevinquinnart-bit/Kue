@@ -44,12 +44,18 @@ object Sync {
     private val partNames = mapOf(
         "account" to "provider details", "favourites" to "favourites", "favouriteOrder" to "favourites order", "addOns" to "add-ons",
         "free" to "free channel lists", "hidden" to "hidden categories", "subtitles" to "subtitles", "places" to "Carry on watching",
-        "reminders" to "reminders", "stremio" to "Stremio sign-in",
+        "reminders" to "reminders", "stremio" to "Stremio sign-in", "categoryOrder" to "category order", "vpn" to "VPN details",
+        "watched" to "watched marks", "recent" to "Recently watched", "mycategories" to "your own categories", "renames" to "channel names you changed",
     )
 
+    /** The parts in plain words: "add-ons, favourites and reminders". */
+    fun words(parts: Set<String>): String {
+        val names = parts.map { partNames[it] ?: it }.sorted()
+        return if (names.size <= 1) names.joinToString("") else names.dropLast(1).joinToString(", ") + " and " + names.last()
+    }
+
     fun tookNote(parts: Set<String>) {
-        lastTook = "Last taken from the other device at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date()) + ": " +
-            parts.map { partNames[it] ?: it }.sorted().joinToString(", ")
+        lastTook = "Last taken from the other device at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date()) + ": " + words(parts)
     }
 
     /** When this device last got an answer from another one. */
