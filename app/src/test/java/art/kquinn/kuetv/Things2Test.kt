@@ -79,7 +79,7 @@ class Things2Test {
         rule.waitForIdle()
         // Into the categories (▼ from the top bar): your own is there. Into the list (▶), then hold OK on BBC One.
         press(Key.DirectionDown)
-        assertTrue("your own category is in Live TV's categories", shown("📁 Evenings"))
+        assertTrue("your own category is in Live TV's categories", shown("Evenings"))
         press(Key.DirectionRight)
         rule.onAllNodes(isRoot()).onLast().performKeyInput {
             keyDown(Key.DirectionCenter)
@@ -88,7 +88,7 @@ class Things2Test {
         }
         rule.waitForIdle()
         assertTrue("the channel's menu", shown("New category with this channel") && shown("Rename this channel"))
-        // ▼ to "Add to 📁 Evenings", OK.
+        // ▼ to "Add to Evenings" (with the folder picture in front), OK.
         press(Key.DirectionDown)
         press(Key.DirectionCenter)
         assertEquals("BBC One is in Evenings", listOf("10"), MyCategories.all(context).single { it.id == evenings.id }.channels)

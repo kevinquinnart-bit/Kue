@@ -1,6 +1,7 @@
 package art.kquinn.kuetv
 
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -51,8 +52,10 @@ class GuideLayoutTest {
     }
 
     /** Where a piece of text (or, with [tag], a tagged part) is on the screen, in dp: left, top, right, bottom. */
-    private fun at(text: String, tag: Boolean = false): FloatArray {
-        val node = rule.onAllNodes(if (tag) hasTestTag(text) else hasText(text, substring = true)).fetchSemanticsNodes().firstOrNull()
+    private fun at(text: String, tag: Boolean = false, inGrid: Boolean = false): FloatArray {
+        // A channel's name is also in the box along the top (what is on it), so [inGrid] looks only in the grid.
+        val match = if (tag) hasTestTag(text) else hasText(text, substring = true)
+        val node = rule.onAllNodes(if (inGrid) match and hasAnyAncestor(hasTestTag("guide grid")) else match).fetchSemanticsNodes().firstOrNull()
             ?: throw AssertionError("\"$text\" isn't on the screen")
         val d = rule.density.density
         val b = node.boundsInRoot
@@ -64,7 +67,7 @@ class GuideLayoutTest {
     @Test fun thePictureIsTopRightAndTheGridRunsTheFullWidth() {
         show()
         val picture = at("guide picture", tag = true)
-        val channel = at("BBC One")
+        val channel = at("BBC One", inGrid = true)
         val grid = at("guide grid", tag = true)
         assertTrue("the picture sits at the right of the screen (its right edge at ${picture[2]} dp of 960)", picture[2] > 880f)
         assertTrue("the picture sits above the grid (picture bottom ${picture[3]} dp, first channel top ${channel[1]} dp)", picture[3] <= channel[1])
