@@ -216,4 +216,11 @@ class LibraryTest {
         assertEquals("soul ii soul", Library.mainArtist("Soul II Soul Feat. Caron Wheeler"))
         assertEquals("waylon jennings", Library.mainArtist("Waylon Jennings & Willie Nelson"))
     }
+
+    @Test
+    fun theBracketedPartOfASongNameComesOut() {
+        org.junit.Assert.assertEquals("Take My Breath Away", Library.withoutBrackets("Take My Breath Away (Love Theme From Top Gun)"))
+        org.junit.Assert.assertEquals("Relax", Library.withoutBrackets("Relax [2001 Remaster] (Single Version)"))
+        org.junit.Assert.assertEquals("(Untitled)", Library.withoutBrackets("(Untitled)"))
+    }
 }

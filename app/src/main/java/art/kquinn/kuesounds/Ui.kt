@@ -72,6 +72,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -523,14 +524,98 @@ object Ui {
 
     @Composable
     private fun SongList(songs: List<Track>) {
-        // Hold a song: add it to a playlist.
-        var adding by remember { mutableStateOf<Track?>(null) }
+        // Hold a song: add it to a playlist, or put its name right.
+        var held by remember { mutableStateOf<Track?>(null) }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
             itemsIndexed(songs, key = { _, t -> t.id }) { i, t ->
-                Row2(t.title, t.artist, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { adding = t }) { Playing.play(songs, i) }
+                Row2(t.title, t.artist, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { held = t }) { Playing.play(songs, i) }
             }
         }
-        adding?.let { t -> ListUi.AddBox("\"" + t.title + "\"", listOf(t.id)) { adding = null } }
+        held?.let { t -> SongBox(t) { held = null } }
+    }
+
+    /** What can be done with a held song: add it to a playlist, or put its name and artist right. */
+    @Composable
+    fun SongBox(t: Track, onClose: () -> Unit) {
+        var doing by remember { mutableStateOf("") }
+        when (doing) {
+            "add" -> ListUi.AddBox("\"" + t.title + "\"", listOf(t.id), onClose)
+            "edit" -> EditSong(t, onClose)
+            else -> Dialog(onDismissRequest = onClose) {
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Words(t.title, 18, bold = true, lines = 2)
+                    Words(t.artist, 14, K.Soft)
+                    Button("Add to a playlist", modifier = Modifier.fillMaxWidth()) { doing = "add" }
+                    Button("Edit name and artist", main = false, modifier = Modifier.fillMaxWidth()) { doing = "edit" }
+                    Button("Cancel", main = false, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+                }
+            }
+        }
+    }
+
+    /**
+     * Puts a song's name and artist right by hand, and writes them into its file in the Drive with everything
+     * else inside taken out (old comments, wrong album names, wrong pictures). Kevin, 23 November 2026.
+     */
+    @Composable
+    private fun EditSong(t: Track, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var title by remember { mutableStateOf(t.title) }
+        var artist by remember { mutableStateOf(t.artist) }
+        var saying by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        Dialog(onDismissRequest = { if (!busy) onClose() }) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Words("Edit the song", 18, bold = true)
+                Words("Song name", 13, K.Soft)
+                EditField(title) { title = it }
+                val plain = Library.withoutBrackets(title)
+                if (plain != title.trim()) Button("Take out the part in brackets", main = false, modifier = Modifier.fillMaxWidth()) { title = plain }
+                Words("Artist", 13, K.Soft)
+                EditField(artist) { artist = it }
+                Words(
+                    "Saving writes this into the file in your Drive and takes everything else out of it: old comments, wrong album " +
+                        "names and wrong pictures. Its album, year and the album's own cover stay. Google keeps the old version for 30 days.",
+                    13, K.Soft, lines = 6,
+                )
+                if (saying.isNotEmpty()) Words(saying, 14, K.Accent, lines = 3)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(if (busy) "Saving…" else "Save", modifier = Modifier.weight(1f)) {
+                        val name = title.trim()
+                        val who = artist.trim()
+                        if (busy) return@Button
+                        if (name.isEmpty() || who.isEmpty()) { saying = "The song needs a name and an artist."; return@Button }
+                        val go = {
+                            busy = true
+                            saying = ""
+                            scope.launch {
+                                val said = withContext(Dispatchers.IO) { Fixer.rename(context.applicationContext, t, name, who) }
+                                busy = false
+                                if (said.startsWith("Saved")) {
+                                    android.widget.Toast.makeText(context, said, android.widget.Toast.LENGTH_SHORT).show()
+                                    onClose()
+                                } else saying = said
+                            }
+                            Unit
+                        }
+                        if (Google.canEdit) go() else Fixer.askPermission { go() }
+                    }
+                    Button("Cancel", main = false, modifier = Modifier.weight(1f)) { if (!busy) onClose() }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun EditField(value: String, onChange: (String) -> Unit) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+            BasicTextField(
+                value = value, onValueChange = onChange,
+                textStyle = TextStyle(color = K.Ink, fontSize = 16.sp, fontFamily = K.Poppins),
+                cursorBrush = SolidColor(K.Accent), modifier = Modifier.fillMaxWidth(),
+            )
+        }
     }
 
     /** Songs that came out as singles, each with its single's cover and name. */
@@ -595,6 +680,9 @@ object Ui {
 
     @Composable
     private fun AlbumPage(al: Album, back: () -> Unit, go: (Screen) -> Unit) {
+        // Hold a song: add it to a playlist, or put its name right.
+        var held by remember { mutableStateOf<Track?>(null) }
+        held?.let { t -> SongBox(t) { held = null } }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
             item {
                 Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -628,7 +716,7 @@ object Ui {
                     // The song's own artist shows only when it isn't the album's (a guest, or a compilation).
                     val onPhone = if (t.id in Offline.saved) "On phone" else ""
                     val sub = listOf(t.artist.takeIf { it != al.artist }.orEmpty(), len, onPhone).filter { it.isNotEmpty() }.joinToString(" · ")
-                    Row2(t.title, sub, null, highlight = t.id == Playing.currentId, lead = if (t.trackNo > 0) t.trackNo.toString() else (i + 1).toString()) {
+                    Row2(t.title, sub, null, highlight = t.id == Playing.currentId, lead = if (t.trackNo > 0) t.trackNo.toString() else (i + 1).toString(), onHold = { held = t }) {
                         Playing.play(al.tracks, i)
                     }
                 }

@@ -37,6 +37,8 @@ data class Track(
     var ownLook: Boolean = false,
     /** True once the song has been looked up to see whether it came out as a single. */
     var singleChecked: Boolean = false,
+    /** True once Kevin has put the song's name and artist right himself: fixing the files keeps them. */
+    var named: Boolean = false,
 )
 
 /** A folder in the Drive: its name and the folder it sits in. */
@@ -200,6 +202,10 @@ object Library {
         }
         return out
     }
+
+    /** A song name without anything in brackets: "Take My Breath Away (Love Theme From Top Gun)" is "Take My Breath Away". */
+    fun withoutBrackets(title: String): String =
+        title.replace(Regex("""\s*[\[(][^\])]*[\])]"""), " ").replace(Regex("\\s+"), " ").trim().ifBlank { title }
 
     fun albumKey(artist: String, album: String): String = sortName(artist) + "\u0001" + sortName(album)
 

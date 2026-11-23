@@ -117,6 +117,40 @@ object Fixer {
         }
     }
 
+    /**
+     * A song's name and artist put right by hand, and written into its file in the Drive with the rest of what
+     * is inside taken out: only its name, artist, album, year, place and cover stay. The cover is the album's from
+     * the music catalogue, or its single's; any other picture inside is taken out. The answer is what to say.
+     */
+    suspend fun rename(context: Context, t: Track, title: String, artist: String): String {
+        if (!Tagger.canFix(t.fileName)) return "KueSounds can't change this kind of file (" + Library.ending(t.fileName) + ")."
+        val key = Library.albumKey(Library.albumArtistOf(t), t.album)
+        val cover = Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers }
+            ?: Scanner.singleArtFor(t)
+        val work = File(context.cacheDir, "fix").apply { mkdirs() }
+        val file = File(work, t.id + "." + Library.ending(t.fileName))
+        return try {
+            val token = Google.editToken() ?: throw Drive.SignedOut()
+            Drive.downloadWhole(t.id, file, token)
+            if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
+            val albumArtist = Library.albumArtistOf(t)
+            Tagger.fix(file, Tagger.Details(title, artist, t.album, albumArtist, t.year, t.trackNo, t.discNo, cover))
+            val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token)
+            Scanner.changeTracks(setOf(t.id)) {
+                it.copy(size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = artist, albumArtist = albumArtist, named = true)
+            }
+            Scanner.note("renamed by hand: " + t.fileName + " to " + artist + " / " + title)
+            "Saved in your Drive."
+        } catch (e: Drive.SignedOut) {
+            "Not saved: Google needs the edit permission. Press Fix on an album once, then try again."
+        } catch (e: Exception) {
+            Scanner.note("not renamed: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
+            "Not saved: " + (e.message ?: e.javaClass.simpleName)
+        } finally {
+            file.delete()
+        }
+    }
+
     private suspend fun fixOne(context: Context, t: Track, al: Album, cover: File, song: Catalogue.Song?): Boolean {
         val work = File(context.cacheDir, "fix").apply { mkdirs() }
         val file = File(work, t.id + "." + Library.ending(t.fileName))
@@ -126,8 +160,9 @@ object Fixer {
             if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
             val artist = t.albumArtist.ifBlank { al.artist }
             // The catalogue's name and artist for this song when the album lists it; otherwise the file's own.
-            val title = song?.title ?: t.title
-            val singer = song?.artist?.ifBlank { null } ?: t.artist
+            // A name put right by hand is kept.
+            val title = if (t.named) t.title else song?.title ?: t.title
+            val singer = if (t.named) t.artist else song?.artist?.ifBlank { null } ?: t.artist
             val trackNo = song?.position?.takeIf { it > 0 } ?: t.trackNo
             val discNo = song?.disc?.takeIf { it > 0 } ?: t.discNo
             Tagger.fix(file, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover))
