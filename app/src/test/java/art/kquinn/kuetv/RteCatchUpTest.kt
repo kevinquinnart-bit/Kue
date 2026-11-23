@@ -18,7 +18,9 @@ class RteCatchUpTest {
         {"pllisting${'$'}startTime":9000,"pllisting${'$'}program":{"plprogram${'$'}seriesId":"http://data.entertainment.tv.theplatform.eu/entertainment/data/Program/guid/2700894001/SI0000000825"}}]},
       {"plchannelschedule${'$'}listings":[
         {"pllisting${'$'}startTime":2000,"pllisting${'$'}program":{"plprogram${'$'}seriesId":"http://data.entertainment.tv.theplatform.eu/entertainment/data/Program/guid/2700894001/10001504-00-0000"}},
-        {"pllisting${'$'}startTime":2500,"pllisting${'$'}program":{}}]}]}"""
+        {"pllisting${'$'}startTime":2500,"pllisting${'$'}program":{}},
+        {"pllisting${'$'}startTime":2600,"pllisting${'$'}program":{"pl${'$'}guid":"IH10010498-00-0000","plprogram${'$'}programType":"movie","plprogram${'$'}seriesId":null}},
+        {"pllisting${'$'}startTime":2700,"pllisting${'$'}program":{"pl${'$'}guid":"IH10016324-26-0318","plprogram${'$'}programType":"episode","plprogram${'$'}seriesId":null}}]}]}"""
 
     private val catalogue = """{"entries":[
       {"guid":"SI0000000564","title":"Fair City","plprogram${'$'}programType":"series","rte${'$'}defaultThumbnail":"https://www.rte.ie/images/002075ad.jpg",
@@ -27,10 +29,12 @@ class RteCatchUpTest {
        "plprogramavailability${'$'}media":[{"plmedia${'$'}availabilityTags":["ROI","connectedtv"]}]},
       {"guid":"SI0000001694","title":"The Late Late Show","plprogram${'$'}programType":"series","plprogramavailability${'$'}media":[]},
       {"guid":"SI0000001694","title":"The Late Late Show","plprogram${'$'}programType":"series","plprogramavailability${'$'}media":[{"plmedia${'$'}availabilityTags":["WW"]}]},
+      {"id":"http://data.entertainment.tv.theplatform.eu/entertainment/data/ProgramAvailability/604975144016","guid":"IH10010498-00-0000",
+       "title":"Archbishops' Christmas Message S1 E1","plprogram${'$'}programType":"movie","plprogramavailability${'$'}media":[{"plmedia${'$'}availabilityTags":["WW"]}]},
       {"guid":"SI0000003606","title":"Weather (Nine O'Clock)","plprogram${'$'}programType":"series","plprogramavailability${'$'}media":[{"plmedia${'$'}availabilityTags":["WW"]}]}]}"""
 
     @Test fun newestFirstAndNothingStillToCome() {
-        assertEquals(listOf("SI0000000564", "10001504-00-0000", "SI0000001694"), RteCatchUp.recent(schedule, now = 5000))
+        assertEquals(listOf("SI0000000564", "IH10010498-00-0000", "10001504-00-0000", "SI0000001694"), RteCatchUp.recent(schedule, now = 5000))
     }
 
     @Test fun whereEachPlaysAndTheWeatherLeftOut() {
@@ -44,5 +48,8 @@ class RteCatchUpTest {
     @Test fun theLinkTriedOnTheTv() {
         val d = RteCatchUp.details(catalogue)
         assertEquals("https://www.rte.ie/rpng-static/ctv/androidTv/series/the-late-late-show/SI0000001694", RteCatchUp.link(d["SI0000001694"]!!))
+        val oneOff = d["IH10010498-00-0000"]!!
+        assertEquals("Archbishops' Christmas Message", oneOff.title)
+        assertEquals("https://www.rte.ie/rpng-static/ctv/androidTv/movie/archbishops-christmas-message/604975144016", RteCatchUp.link(oneOff))
     }
 }

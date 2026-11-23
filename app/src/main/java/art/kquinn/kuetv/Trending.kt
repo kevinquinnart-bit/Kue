@@ -352,7 +352,8 @@ object LiveInApps {
  * Ireland don't open in England (RTÉ Player keeps loading), so they get a row of their own, not hidden.
  */
 object RteCatchUp {
-    class Show(val guid: String, val title: String, val image: String, val anywhere: Boolean)
+    /** [movieId]: set for a one-off (a film or a single programme), which RTÉ Player opens by this number rather than by [guid]. */
+    class Show(val guid: String, val title: String, val image: String, val anywhere: Boolean, val movieId: String = "")
 
     var list by mutableStateOf<List<Show>>(emptyList())
         private set
@@ -373,12 +374,13 @@ object RteCatchUp {
                 val now = System.currentTimeMillis()
                 val schedule = get(FEEDS + "rte-prd-prd-all-schedules?form=json&schema=2.15&range=1-2&maxListings=1000&byCallSign=RTEONE%7CRTE2" +
                     "&byListingTime=" + (now - 8 * 86_400_000L) + "~" + now +
-                    "&fields=plchannelschedule\$listings.pllisting\$startTime,plchannelschedule\$listings.pllisting\$program.plprogram\$seriesId")
+                    "&fields=plchannelschedule\$listings.pllisting\$startTime,plchannelschedule\$listings.pllisting\$program.plprogram\$seriesId" +
+                    ",plchannelschedule\$listings.pllisting\$program.guid,plchannelschedule\$listings.pllisting\$program.plprogram\$programType")
                 val order = recent(schedule, now)
                 val shows = HashMap<String, Show>()
                 order.chunked(60).forEach { some ->
                     val text = get(FEEDS + "rte-prd-prd-all-movies-series?form=json&schema=2.15&byGuid=" + some.joinToString("%7C") +
-                        "&fields=guid,title,rte\$defaultThumbnail,plprogram\$programType,plprogramavailability\$media.plmedia\$availabilityTags")
+                        "&fields=id,guid,title,rte\$defaultThumbnail,plprogram\$programType,plprogramavailability\$media.plmedia\$availabilityTags")
                     shows.putAll(details(text))
                 }
                 order.mapNotNull { shows[it] }
@@ -387,7 +389,7 @@ object RteCatchUp {
         if (fresh.isNotEmpty()) { list = fresh; loadedAt = System.currentTimeMillis() }
     }
 
-    /** The series in the schedule, the one shown last first; programmes yet to start are left out. */
+    /** The series and one-offs in the schedule, the one shown last first; programmes yet to start are left out. */
     internal fun recent(text: String, now: Long): List<String> {
         val last = HashMap<String, Long>()
         val entries = JSONObject(text).optJSONArray("entries") ?: return emptyList()
@@ -396,7 +398,10 @@ object RteCatchUp {
             for (j in 0 until listings.length()) {
                 val l = listings.optJSONObject(j) ?: continue
                 val start = l.optLong("pllisting\$startTime")
-                val series = l.optJSONObject("pllisting\$program")?.optString("plprogram\$seriesId").orEmpty().substringAfterLast('/')
+                val program = l.optJSONObject("pllisting\$program")
+                // A one-off (RTÉ calls it a movie) has no series: its own guid is used instead.
+                val series = program?.optString("plprogram\$seriesId").orEmpty().substringAfterLast('/').takeIf { it.isNotBlank() && it != "null" }
+                    ?: program?.takeIf { it.optString("plprogram\$programType") == "movie" }?.let { it.optString("guid").ifBlank { it.optString("pl\$guid") } }.orEmpty()
                 if (series.isBlank() || start > now) continue
                 if (start > (last[series] ?: 0L)) last[series] = start
             }
@@ -404,7 +409,7 @@ object RteCatchUp {
         return last.entries.sortedByDescending { it.value }.map { it.key }
     }
 
-    /** Series with episodes to watch, by guid. The weather and the Angelus are left out. */
+    /** Series with episodes to watch, and one-offs, by guid. The weather and the Angelus are left out. */
     internal fun details(text: String): Map<String, Show> {
         val out = HashMap<String, Show>()
         val entries = JSONObject(text).optJSONArray("entries") ?: return out
@@ -412,7 +417,8 @@ object RteCatchUp {
             val e = entries.optJSONObject(i) ?: continue
             val guid = e.optString("guid")
             val title = e.optString("title")
-            if (guid.isBlank() || e.optString("plprogram\$programType") != "series") continue
+            val type = e.optString("plprogram\$programType")
+            if (guid.isBlank() || (type != "series" && type != "movie")) continue
             if (title.startsWith("Weather") || title.contains("Weather (") || title == "The Angelus") continue
             val places = HashSet<String>()
             val media = e.optJSONArray("plprogramavailability\$media")
@@ -422,7 +428,11 @@ object RteCatchUp {
             }
             if (places.none { it == "WW" || it == "IOI" || it == "ROI" }) continue
             val old = out[guid]
-            val show = Show(guid, title, e.optString("rte\$defaultThumbnail"), "WW" in places)
+            // A one-off's title carries " S1 E1", which isn't shown; RTÉ Player opens it by the number ending its id.
+            val movieId = if (type == "movie") e.optString("id").substringAfterLast('/').filter { it.isDigit() } else ""
+            if (type == "movie" && movieId.isEmpty()) continue
+            val shown = if (type == "movie") title.replace(Regex("\\s+S\\d+\\s*E\\d+$"), "") else title
+            val show = Show(guid, shown, e.optString("rte\$defaultThumbnail"), "WW" in places, movieId)
             if (old == null || (show.anywhere && !old.anywhere)) out[guid] = show
         }
         return out
@@ -431,6 +441,8 @@ object RteCatchUp {
     fun link(show: Show): String {
         val slug = java.text.Normalizer.normalize(show.title, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "")
             .lowercase().replace(Regex("[^a-z0-9]+"), "-").trim('-').ifBlank { "x" }
+        // Tried on Kevin's TV, 23 November 2026: a one-off opens by movie/<any slug>/<its number>, a series by series/<any slug>/<guid>.
+        if (show.movieId.isNotEmpty()) return "https://www.rte.ie/rpng-static/ctv/androidTv/movie/" + slug + "/" + show.movieId
         return "https://www.rte.ie/rpng-static/ctv/androidTv/series/" + slug + "/" + show.guid
     }
 
