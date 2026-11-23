@@ -915,7 +915,7 @@ object Ui {
             val singlesChecked = data.tracks.count { it.singleChecked }
             Step(
                 3, "Look up albums and singles",
-                "Finds each album's proper name, year and cover in an online music catalogue. Songs on compilations are given the album they first came out on. Songs that came out as singles get the single's cover, in the Singles tab.",
+                "Finds each album's proper name, year and cover in an online music catalogue. No greatest hits or compilations: each of their songs is given the album it first came out on, or failing that its single. Songs that came out as singles get the single's cover, in the Singles tab.",
                 state = if (stage == 3) NOW else if (albums > 0 && view.lookedUp >= albums && singlesChecked >= songs) DONE else WAITING,
                 progress = n(view.lookedUp) + " of " + n(albums) + " albums looked up · " + n(view.matched.size) + " matched\n" +
                     n(singlesChecked) + " of " + n(songs) + " songs checked for singles · " + n(data.singleTitles.size) + " found" +

@@ -35,7 +35,8 @@ object Catalogue {
     }
 
     /** What a lookup decided: the album's proper name, artist and year, and where its cover is. */
-    data class Match(val title: String, val artist: String, val year: Int, val releaseId: String, val groupId: String)
+    /** [compilation]: the catalogue files the record as a compilation (a greatest hits, a best of, a hits collection). */
+    data class Match(val title: String, val artist: String, val year: Int, val releaseId: String, val groupId: String, val compilation: Boolean = false)
 
     private var lastAsked = 0L
 
@@ -179,8 +180,16 @@ object Catalogue {
         val known = artist.isNotBlank() && artist != Library.UNKNOWN_ARTIST
         val query = "release:" + quote(title) + if (known) " AND artist:" + quote(if (isVarious(artist)) "Various Artists" else artist) else ""
         val r = choose(parseReleases(ask("release/", query)), artist, songs) ?: return null
-        return Match(r.title, r.artist, r.year, r.id, r.groupId)
+        return Match(r.title, r.artist, r.year, r.id, r.groupId, compilation = r.otherTypes.any { it.equals("Compilation", true) })
     }
+
+    /**
+     * Whether an album's name says it is a greatest hits or other collection, for one the catalogue doesn't file
+     * as a compilation. Kevin wants none of those: each song goes to the album it first came out on, or its single.
+     */
+    fun looksLikeHits(title: String): Boolean = Regex("\\b(greatest hits|biggest hits|hits|best of|very best|collection|anthology|the essential|essentials|definitive|number ones|no 1s|number 1s|mastermix|megamix|anthems|the ultimate|retrospective|the singles|gold)\\b").containsMatchIn(
+        title.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim(),
+    )
 
     /** Looks a loose song up, to find the album it comes from. Call off the main thread. */
     fun findSong(title: String, artist: String): Match? {

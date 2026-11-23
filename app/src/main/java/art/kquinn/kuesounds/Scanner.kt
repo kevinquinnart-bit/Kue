@@ -185,6 +185,12 @@ object Scanner {
             )
             save()
         }
+        // 23 November 2026: Kevin wants no greatest hits or collections at all. Every album is looked up again, so
+        // the ones the catalogue files as compilations are found, and their songs sent to their own albums.
+        if (data.version < 4) {
+            data = data.copy(tracks = data.tracks.map { it.copy(checked = false) }, version = 4)
+            save()
+        }
         read = data.tracks.count { it.tagged }
     }
 
@@ -431,14 +437,26 @@ object Scanner {
         var found = 0
         var covers = 0
         var notFound = 0
+        var bestOfs = 0
         try {
             todo.forEachIndexed { i, al ->
                 say("Looking up albums", i + 1, todo.size)
                 val (clean, _) = Library.cleanAlbum(al.title, al.artist)
                 val asked = lookup(al.artist + " / " + clean) { Catalogue.findAlbum(clean, al.artist, al.tracks.size) }
                 if (asked.isFailure) return@forEachIndexed
-                val m = asked.getOrNull()
-                if (m != null) found++ else {
+                val got = asked.getOrNull()
+                // A greatest hits or other collection isn't kept as an album: its songs are each looked up below.
+                val hits = got?.compilation == true || Catalogue.looksLikeHits(clean) || Catalogue.looksLikeHits(got?.title.orEmpty())
+                val m = if (hits) null else got
+                if (hits) {
+                    bestOfs++
+                    val wasCatalogue = al.key in data.catalogueCovers
+                    data = data.copy(
+                        releases = data.releases - al.key,
+                        catalogueCovers = data.catalogueCovers - al.key,
+                        art = if (wasCatalogue) data.art - al.key else data.art,
+                    )
+                } else if (m != null) found++ else {
                     notFound++
                     if (notFound <= 30) note("not in the catalogue: " + al.artist + " / " + clean)
                 }
@@ -446,15 +464,17 @@ object Scanner {
                 if (i % 10 == 9) save()
             }
             save()
-            if (todo.isNotEmpty()) note("looked up " + todo.size + " albums: " + found + " found, " + notFound + " not found, " + covers + " covers fetched")
+            if (todo.isNotEmpty()) note("looked up " + todo.size + " albums: " + found + " found, " + bestOfs + " greatest hits or collections, " + notFound + " not found, " + covers + " covers fetched")
 
-            // Songs from compilations, and songs with no album: each to its own album.
+            // Each to the album it first came out on, or failing that its single: songs from compilations and
+            // greatest hits, songs with no album, and songs on albums the catalogue doesn't know.
             val songs = Library.albums(data.tracks).flatMap { al ->
-                al.tracks.filter { !it.ownLook && (onItsOwn(al) || it.id in loose) }.map { al to it }
+                val each = onItsOwn(al) || al.key !in data.releases
+                al.tracks.filter { !it.ownLook && (it.id in loose || (each && (it.checked || onItsOwn(al)))) }.map { al to it }
             }
             var moved = 0
             songs.forEachIndexed { i, (al, t) ->
-                say("Finding the albums of songs on compilations", i + 1, songs.size)
+                say("Finding each song's own album", i + 1, songs.size)
                 val home = lookup(t.artist + " / " + t.title) { Catalogue.findSongHome(t.title, t.artist) }.getOrNull() ?: return@forEachIndexed
                 val target = home.album ?: home.single
                 if (target != null) {
@@ -466,7 +486,7 @@ object Scanner {
                 if (i % 10 == 9) save()
             }
             save()
-            if (songs.isNotEmpty()) note("looked up " + songs.size + " songs from compilations or with no album: " + moved + " given their own album")
+            if (songs.isNotEmpty()) note("looked up " + songs.size + " songs from compilations, greatest hits, unknown albums or with no album: " + moved + " given their own album or single")
 
             // Every other song: did it come out as a single? One question per song, so only on Wi-Fi.
             val rest = data.tracks.filter { !it.singleChecked }
@@ -530,12 +550,16 @@ object Scanner {
             tracks = data.tracks.map { t ->
                 if (t.id !in ids) t else {
                     val disc = if (t.discNo > 0) t.discNo else Library.cleanAlbum(t.album, al.artist).second
+                    val album = m?.title ?: cleanTitle
+                    val albumArtist = m?.artist ?: t.albumArtist
                     t.copy(
-                        album = m?.title ?: cleanTitle,
-                        albumArtist = m?.artist ?: t.albumArtist,
+                        album = album,
+                        albumArtist = albumArtist,
                         year = m?.year?.takeIf { it > 0 } ?: t.year,
                         discNo = disc,
                         checked = true,
+                        // A song given another album has its file fixed again, so the new album and cover go in.
+                        fixed = t.fixed && album == t.album && albumArtist == t.albumArtist,
                     )
                 }
             },

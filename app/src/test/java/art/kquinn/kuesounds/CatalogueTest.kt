@@ -103,6 +103,14 @@ class CatalogueTest {
     }
 
     @Test
+    fun greatestHitsAndCollectionsAreKnownByName() {
+        for (t in listOf("16 Biggest Hits", "101 80's Hits", "Greatest Hits II", "The Best of Shalamar", "The Very Best Of", "Gold", "The Singles 1992-2003", "Number Ones", "80's Alive - Mastermix"))
+            assertEquals(t, true, Catalogue.looksLikeHits(t))
+        for (t in listOf("A Night at the Opera", "Greatest Love of All", "Rumours", "Hitsville", "A Rush of Blood to the Head", "Golden Hour"))
+            assertEquals(t, false, Catalogue.looksLikeHits(t))
+    }
+
+    @Test
     fun anotherArtistsSongFindsNoHome() {
         val home = Catalogue.chooseSongHome(Catalogue.parseRecordings(first15("oasis_wonderwall_home.json")), "Wonderwall", "Ryan Adams")
         assertEquals(null, home.album)
