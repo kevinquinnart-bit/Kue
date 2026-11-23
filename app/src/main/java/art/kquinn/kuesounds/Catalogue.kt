@@ -77,7 +77,12 @@ object Catalogue {
             (c.get("name")?.asString ?: c.getAsJsonObject("artist")?.get("name")?.asString.orEmpty()) + (c.get("joinphrase")?.asString.orEmpty())
         }.orEmpty()
 
-    private fun releaseOf(o: JsonObject, score: Int): Release? {
+    /**
+     * [songArtist]: the found song's own artist. In a song search MusicBrainz leaves the artist off each of the
+     * artist's own releases (it only names one when it differs, such as Various Artists), so a release with no
+     * artist is the song's artist's (seen 23 November 2026: every Go West release of "We Close Our Eyes").
+     */
+    private fun releaseOf(o: JsonObject, score: Int, songArtist: String = ""): Release? {
         val id = o.get("id")?.asString ?: return null
         val group = o.getAsJsonObject("release-group")
         return Release(
@@ -85,7 +90,7 @@ object Catalogue {
             groupId = group?.get("id")?.asString.orEmpty(),
             score = o.get("score")?.asInt ?: score,
             title = o.get("title")?.asString.orEmpty().replace('’', '\''),
-            artist = creditOf(o).replace('’', '\''),
+            artist = creditOf(o).ifBlank { songArtist }.replace('’', '\''),
             date = o.get("date")?.asString.orEmpty(),
             trackCount = o.get("track-count")?.asInt ?: 0,
             type = group?.get("primary-type")?.asString.orEmpty(),
@@ -106,7 +111,8 @@ object Catalogue {
         return root.getAsJsonArray("recordings")?.flatMap { el ->
             val rec = el.asJsonObject
             val score = rec.get("score")?.asInt ?: 0
-            rec.getAsJsonArray("releases")?.mapNotNull { r -> releaseOf(r.asJsonObject, score)?.let { score to it } }.orEmpty()
+            val songArtist = creditOf(rec)
+            rec.getAsJsonArray("releases")?.mapNotNull { r -> releaseOf(r.asJsonObject, score, songArtist)?.let { score to it } }.orEmpty()
         }.orEmpty()
     }
 
@@ -181,7 +187,8 @@ object Catalogue {
             val rec = el.asJsonObject
             val score = rec.get("score")?.asInt ?: 0
             val title = rec.get("title")?.asString.orEmpty().replace('’', '\'')
-            rec.getAsJsonArray("releases")?.mapNotNull { r -> releaseOf(r.asJsonObject, score)?.let { Triple(score, title, it) } }.orEmpty()
+            val songArtist = creditOf(rec)
+            rec.getAsJsonArray("releases")?.mapNotNull { r -> releaseOf(r.asJsonObject, score, songArtist)?.let { Triple(score, title, it) } }.orEmpty()
         }.orEmpty()
     }
 

@@ -92,6 +92,16 @@ class CatalogueTest {
         assertEquals("Billie Jean", home.single?.title)
     }
 
+    /** MusicBrainz names no artist on the artist's own releases in a song search: they are still the artist's. */
+    @Test
+    fun weCloseOurEyesGoesHomeToGoWestNotA101HitsCompilation() {
+        val home = Catalogue.chooseSongHome(Catalogue.parseRecordings(first15("gowest_we_close_our_eyes_home.json")), "We Close Our Eyes", "Go West")
+        assertEquals("Go West", home.album?.title)
+        assertEquals("Go West", home.album?.artist)
+        assertEquals(1985, home.album?.year)
+        assertEquals("We Close Our Eyes", home.single?.title)
+    }
+
     @Test
     fun anotherArtistsSongFindsNoHome() {
         val home = Catalogue.chooseSongHome(Catalogue.parseRecordings(first15("oasis_wonderwall_home.json")), "Wonderwall", "Ryan Adams")

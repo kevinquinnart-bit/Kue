@@ -172,6 +172,19 @@ object Scanner {
             data = data.copy(tracks = data.tracks.map { it.copy(checked = false) }, version = 2)
             save()
         }
+        // Before 0.1.x of 23 November 2026 a song search read MusicBrainz wrongly (the artist's own releases carry no
+        // artist name there), so songs from compilations found no album and kept the compilation's name and cover,
+        // and few singles were found. Songs not given an album then, and songs with no single, are looked up again.
+        if (data.version < 3) {
+            data = data.copy(
+                tracks = data.tracks.map { t ->
+                    val moved = Library.albumKey(Library.albumArtistOf(t), t.album) in data.releases
+                    t.copy(ownLook = t.ownLook && moved, singleChecked = t.singleChecked && t.id in data.singleTitles)
+                },
+                version = 3,
+            )
+            save()
+        }
         read = data.tracks.count { it.tagged }
     }
 
