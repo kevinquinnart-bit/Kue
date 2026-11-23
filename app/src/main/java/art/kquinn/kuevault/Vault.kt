@@ -7,116 +7,207 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 
-/** The hub's sections. Each gets its own free accounts; [ready] says whether its screen is built yet. */
+/** The hub's sections. Each lives in one place the person owns; [ready] says whether its screen is built yet. */
 enum class Section(val title: String, val colour: Long, val ready: Boolean, val coming: String) {
-    PHOTOS("Photos", 0xFFFFD23F, false, "Photos arrive in version 3"),
-    MAIL("Mail", 0xFF5CCEFF, false, "Mail arrives in version 5"),
-    MUSIC("Music", 0xFFF28C38, false, "Music arrives in version 6"),
-    FILMS("Films", 0xFF6BD08A, false, "Films arrive in version 6"),
+    PHOTOS("Photos", 0xFFFFD23F, false, "Photos come with KuePhotos"),
+    MUSIC("Music", 0xFFF28C38, false, "Music opens in KueSounds"),
+    FILMS("Films", 0xFF6BD08A, false, "Films open in KueTV"),
     DOCUMENTS("Documents", 0xFFC9A3FF, true, ""),
-    BACKUPS("Backups", 0xFFB9C2D3, false, "Backups arrive in version 6"),
+    BACKUPS("Backups", 0xFFB9C2D3, false, "Backups arrive with the new-phone move"),
 }
 
-/** One free account given to a section. [order]: the first one fills up first. */
-data class VaultAccount(val email: String, val section: Section, val order: Int)
+/** The kinds of storage a person can connect. [ready]: KueVault can connect it in this version. */
+enum class PlaceKind(val title: String, val ready: Boolean, val coming: String) {
+    GOOGLE("Google Drive", true, ""),
+    HOME("Home computer", true, ""),
+    ONEDRIVE("OneDrive", false, "OneDrive comes once KueVault is registered with Microsoft"),
+    DROPBOX("Dropbox", false, "Dropbox comes once KueVault is registered with Dropbox"),
+}
 
-/** How much of an account is used. [limit] is null when the provider gives no limit. */
+/**
+ * One storage place the person owns and connected: a Google account, or a shared folder on their home
+ * computer. [label] is what the screen shows: the Google address, or the computer and folder.
+ * For a home computer, [host], [share] and [user] say how to reach it; the password is kept apart, locked.
+ */
+data class Place(val id: String, val kind: PlaceKind, val label: String, val host: String = "", val share: String = "", val user: String = "") {
+    /** The Google address, for a Google place. */
+    val email: String get() = if (kind == PlaceKind.GOOGLE) label else ""
+
+    companion object {
+        fun google(email: String) = Place("g:" + email.lowercase(), PlaceKind.GOOGLE, email)
+        fun home(host: String, share: String, user: String) =
+            Place("h:" + host.lowercase() + "/" + share.lowercase(), PlaceKind.HOME, share + " on " + host, host, share, user)
+    }
+}
+
+/** How much of a place is used. [limit] is null when the place gives no limit. */
 data class Quota(val used: Long, val limit: Long?) {
     val free: Long get() = if (limit == null) Long.MAX_VALUE else (limit - used).coerceAtLeast(0)
     val fraction: Float get() = if (limit == null || limit <= 0) 0f else (used.toFloat() / limit).coerceIn(0f, 1f)
 }
 
+/** Whether a section's place can take a new file. */
+enum class Room { OK, NEARLY_FULL, FULL, NO_PLACE }
+
 /**
- * The hub: which free accounts belong to which section, how full each is, and which one a new file goes to.
- * Kept on the phone; the files themselves stay in the accounts.
+ * The hub: the places the person connected, which place each section lives in, and how full each place is.
+ * Kept on the phone; the files themselves stay in the places.
+ *
+ * Each section lives in ONE place the person chose. KueVault never splits a section across several Google
+ * accounts, or spills files into another account when one fills: Google's Drive rules don't allow tools
+ * that get round storage limits that way (23 November 2026). When a place fills, the person is told, and
+ * chooses another place for that section themselves.
  */
 object Vault {
-    /** An account stops taking new files when it is this full, so the account itself never runs out. */
-    const val FULL = 0.9f
+    /** A place is "nearly full" from here, and the person is warned. */
+    const val NEARLY = 0.85f
+    /** A file that would take a place past this isn't put in; the place itself never runs out. */
+    const val FULL = 0.97f
 
     private lateinit var app: Context
-    val accounts = mutableStateListOf<VaultAccount>()
+    val places = mutableStateListOf<Place>()
+    /** Which place each section lives in, by place id. */
+    val homes = mutableStateMapOf<Section, String>()
     val quotas = mutableStateMapOf<String, Quota>()
 
     fun init(context: Context) {
         app = context.applicationContext
-        accounts.clear()
-        accounts.addAll(load())
-        for (a in accounts) readQuota(a.email)?.let { quotas[a.email] = it }
+        places.clear()
+        homes.clear()
+        val p = prefs()
+        if (p.contains("places")) {
+            places.addAll(readPlaces(p.getString("places", "[]").orEmpty()))
+            homes.putAll(readHomes(p.getString("homes", "{}").orEmpty()))
+        } else if (p.contains("accounts")) {
+            // Version 1 kept a list of Google accounts per section. Each account becomes a place; each section
+            // lives in its first account. Files in a section's other accounts stay there and still show.
+            val (ps, hs) = fromAccounts(p.getString("accounts", "[]").orEmpty())
+            places.addAll(ps)
+            homes.putAll(hs)
+            save()
+            Report.note("moved to places: " + ps.size + " places, " + hs.size + " sections given a place")
+        }
+        for (place in places) readQuota(place.id)?.let { quotas[place.id] = it }
     }
 
     private fun prefs() = app.getSharedPreferences("vault", Context.MODE_PRIVATE)
 
-    private fun load(): List<VaultAccount> = runCatching {
-        JsonParser.parseString(prefs().getString("accounts", "[]")).asJsonArray.mapNotNull { e ->
+    internal fun readPlaces(text: String): List<Place> = runCatching {
+        JsonParser.parseString(text).asJsonArray.mapNotNull { e ->
             val o = e.asJsonObject
-            val section = runCatching { Section.valueOf(o.get("section").asString) }.getOrNull() ?: return@mapNotNull null
-            VaultAccount(o.get("email").asString, section, o.get("order")?.asInt ?: 0)
+            val kind = runCatching { PlaceKind.valueOf(o.get("kind").asString) }.getOrNull() ?: return@mapNotNull null
+            Place(o.get("id").asString, kind, o.get("label").asString, o.get("host")?.asString.orEmpty(), o.get("share")?.asString.orEmpty(), o.get("user")?.asString.orEmpty())
         }
     }.getOrDefault(emptyList())
 
-    private fun save() {
-        val array = JsonArray()
-        for (a in accounts) array.add(JsonObject().apply { addProperty("email", a.email); addProperty("section", a.section.name); addProperty("order", a.order) })
-        prefs().edit().putString("accounts", array.toString()).apply()
+    internal fun readHomes(text: String): Map<Section, String> = runCatching {
+        JsonParser.parseString(text).asJsonObject.entrySet().mapNotNull { (k, v) ->
+            (runCatching { Section.valueOf(k) }.getOrNull() ?: return@mapNotNull null) to v.asString
+        }.toMap()
+    }.getOrDefault(emptyMap())
+
+    /** Version 1's accounts as places: every address once, and each section in its first account. */
+    internal fun fromAccounts(text: String): Pair<List<Place>, Map<Section, String>> {
+        data class Old(val email: String, val section: Section?, val order: Int)
+        val old = runCatching {
+            JsonParser.parseString(text).asJsonArray.map { e ->
+                val o = e.asJsonObject
+                Old(o.get("email").asString, runCatching { Section.valueOf(o.get("section").asString) }.getOrNull(), o.get("order")?.asInt ?: 0)
+            }
+        }.getOrDefault(emptyList())
+        val ps = old.map { Place.google(it.email) }.distinctBy { it.id }
+        val hs = old.filter { it.section != null }.groupBy { it.section!! }.mapValues { (_, list) -> Place.google(list.minBy { it.order }.email).id }
+        return ps to hs
     }
 
-    private fun readQuota(email: String): Quota? {
-        val used = prefs().getLong("used.$email", -1)
+    private fun save() {
+        val array = JsonArray()
+        for (p in places) array.add(JsonObject().apply {
+            addProperty("id", p.id); addProperty("kind", p.kind.name); addProperty("label", p.label)
+            if (p.host.isNotEmpty()) addProperty("host", p.host)
+            if (p.share.isNotEmpty()) addProperty("share", p.share)
+            if (p.user.isNotEmpty()) addProperty("user", p.user)
+        })
+        val h = JsonObject().apply { for ((s, id) in homes) addProperty(s.name, id) }
+        prefs().edit().putString("places", array.toString()).putString("homes", h.toString()).remove("accounts").apply()
+    }
+
+    private fun readQuota(id: String): Quota? {
+        val used = prefs().getLong("used.$id", -1)
         if (used < 0) return null
-        val limit = prefs().getLong("limit.$email", -1)
+        val limit = prefs().getLong("limit.$id", -1)
         return Quota(used, limit.takeIf { it >= 0 })
     }
 
-    fun keepQuota(email: String, quota: Quota) {
-        quotas[email] = quota
-        prefs().edit().putLong("used.$email", quota.used).putLong("limit.$email", quota.limit ?: -1).apply()
+    fun keepQuota(id: String, quota: Quota) {
+        quotas[id] = quota
+        prefs().edit().putLong("used.$id", quota.used).putLong("limit.$id", quota.limit ?: -1).apply()
     }
 
-    /** Adds an account to a section, after the ones already there; moves it if it was in another. */
-    fun add(email: String, section: Section) {
-        accounts.removeAll { it.email.equals(email, ignoreCase = true) }
-        accounts += VaultAccount(email, section, (accounts.filter { it.section == section }.maxOfOrNull { it.order } ?: -1) + 1)
+    fun place(id: String?): Place? = places.firstOrNull { it.id == id }
+
+    /** Connects a place (or keeps the one already connected with the same id) and gives back the one kept. */
+    fun connect(place: Place): Place {
+        val i = places.indexOfFirst { it.id == place.id }
+        if (i >= 0) places[i] = place else places += place
         save()
-        Report.note("account added for " + section.title + ": " + hidden(email))
+        Report.note("place connected: " + describe(place))
+        return place
     }
 
-    fun remove(email: String) {
-        accounts.removeAll { it.email.equals(email, ignoreCase = true) }
-        quotas.remove(email)
-        prefs().edit().remove("used.$email").remove("limit.$email").apply()
+    /** Takes a place out of KueVault. Its files stay where they are; sections living there have no place again. */
+    fun disconnect(id: String) {
+        val place = place(id) ?: return
+        places.removeAll { it.id == id }
+        homes.entries.removeAll { it.value == id }
+        quotas.remove(id)
+        prefs().edit().remove("used.$id").remove("limit.$id").apply()
+        if (place.kind == PlaceKind.HOME) Secrets.forget(app, id)
         save()
-        Report.note("account taken out: " + hidden(email))
+        Report.note("place taken out: " + describe(place))
     }
 
-    /** Forgets everything KueVault keeps on this phone. The files in the accounts are left as they are. */
+    /** Makes [section] live in place [id]. New files go there from now on; files already elsewhere stay put. */
+    fun setHome(section: Section, id: String) {
+        homes[section] = id
+        save()
+        Report.note(section.title + " now lives in " + (place(id)?.let { describe(it) } ?: "?"))
+    }
+
+    fun homeOf(section: Section): Place? = place(homes[section])
+
+    /** The sections living in place [id]. */
+    fun sectionsIn(id: String): List<Section> = Section.entries.filter { homes[it] == id }
+
+    /** Forgets everything KueVault keeps on this phone. The files in the places are left as they are. */
     fun forgetAll() {
-        accounts.clear()
+        for (p in places) if (p.kind == PlaceKind.HOME) Secrets.forget(app, p.id)
+        places.clear()
+        homes.clear()
         quotas.clear()
         prefs().edit().clear().apply()
         Report.note("everything on this phone forgotten")
     }
 
-    fun forSection(section: Section): List<VaultAccount> = accounts.filter { it.section == section }.sortedBy { it.order }
-
-    /** Space used and the total of a section's accounts, as far as known. */
-    fun sectionSpace(section: Section): Pair<Long, Long> {
-        val qs = forSection(section).mapNotNull { quotas[it.email] }
-        return qs.sumOf { it.used } to qs.sumOf { it.limit ?: 0L }
+    /** Whether [section]'s place can take a file of [size] bytes. */
+    fun room(section: Section, size: Long): Room {
+        val home = homeOf(section) ?: return Room.NO_PLACE
+        return room(quotas[home.id], size)
     }
 
-    /**
-     * The account a new file of [size] bytes goes to in [section]: the first, in order, that will still be
-     * under [FULL] with it added. Null when none has room.
-     */
-    fun pick(section: Section, size: Long): VaultAccount? = pick(forSection(section), quotas, size)
-
-    fun pick(candidates: List<VaultAccount>, known: Map<String, Quota>, size: Long): VaultAccount? =
-        candidates.sortedBy { it.order }.firstOrNull { a ->
-            val q = known[a.email] ?: return@firstOrNull true
-            val limit = q.limit ?: return@firstOrNull true
-            (q.used + size).toFloat() / limit < FULL
+    fun room(q: Quota?, size: Long): Room {
+        val limit = q?.limit ?: return Room.OK
+        if (limit <= 0) return Room.OK
+        val after = (q.used + size).toFloat() / limit
+        return when {
+            after >= FULL -> Room.FULL
+            after >= NEARLY -> Room.NEARLY_FULL
+            else -> Room.OK
         }
+    }
+
+    /** A place for the report, with addresses shortened: "Google Drive kq…@gmail.com". */
+    fun describe(place: Place): String = place.kind.title + " " + if (place.kind == PlaceKind.GOOGLE) hidden(place.email) else place.share + " on " + place.host
 
     /** An address shortened for the report: "kq…@gmail.com". */
     fun hidden(email: String): String {

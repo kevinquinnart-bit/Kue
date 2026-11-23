@@ -49,6 +49,12 @@ android {
         compose = true
         buildConfig = true
     }
+
+    packaging {
+        resources {
+            excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")
+        }
+    }
 }
 
 dependencies {
@@ -64,6 +70,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("com.google.code.gson:gson:2.13.1")
     implementation("androidx.core:core:1.19.0")
+    // A shared folder on the home computer, reached the way Windows shares folders (SMB 2 and 3).
+    implementation("com.hierynomus:smbj:0.14.0")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.80")
     testImplementation("junit:junit:4.13.2")
 }
 

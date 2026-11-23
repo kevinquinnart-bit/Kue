@@ -32,7 +32,7 @@ object Report {
     fun text(context: Context): String = synchronized(lines) {
         "KueVault " + BuildConfig.VERSION_NAME + " (" + BuildConfig.VERSION_CODE + ")\n" +
             "Android " + android.os.Build.VERSION.RELEASE + " · " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL + "\n" +
-            "Accounts: " + Vault.accounts.joinToString { Vault.hidden(it.email) + " for " + it.section.title } + "\n\n" +
+            "Places: " + Vault.places.joinToString { Vault.describe(it) + (Vault.sectionsIn(it.id).takeIf { s -> s.isNotEmpty() }?.joinToString(prefix = " (", postfix = ")") { s -> s.title } ?: "") } + "\n\n" +
             lines.takeLast(150).joinToString("\n")
     }
 }

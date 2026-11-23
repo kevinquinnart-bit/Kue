@@ -1,6 +1,8 @@
 # KueVault
 
-One app for your stuff across several free cloud accounts: Photos, Mail, Music, Films, Documents and Backups, each section with its own free accounts. KueVault sees only the files it puts in each account's KueVault folder.
+One safe home for your files, across the storage you own: Google Drive (any number of accounts), your home computer's shared folder, and later OneDrive and Dropbox. Each section (Photos, Music, Films, Documents, Backups) lives in one place you choose; KueVault never splits a section across accounts to get round storage limits. It sees only the files it puts in each place's KueVault folder.
+
+The home-computer test runs against a real shared folder when one is given: KUEVAULT_SMB=host/share/user/password.
 
 Every push to the `kuevault` branch builds the app and publishes it as `KueVault.apk` on the `kuevault` download:
 https://github.com/kevinquinnart-bit/Kue/releases/download/kuevault/KueVault.apk

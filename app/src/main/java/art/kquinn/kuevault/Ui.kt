@@ -73,15 +73,21 @@ object K {
 sealed class Screen {
     data object Hub : Screen()
     data object Documents : Screen()
-    data object Accounts : Screen()
+    data object Places : Screen()
     data object Settings : Screen()
     data class Coming(val section: Section) : Screen()
-    data object PickSection : Screen()
+    /** Choosing which place [section] lives in. */
+    data class ChooseHome(val section: Section) : Screen()
+    /** Choosing what kind of place to connect; [forSection] lives there once it's connected. */
+    data class AddPlace(val forSection: Section?) : Screen()
+    /** Typing in a home computer's details. */
+    data class HomeForm(val forSection: Section?) : Screen()
 }
 
 /** What the screens ask the app to do that only the app can: the phone's own pickers and Google's page. */
 class Asks(
-    val addAccount: (Section) -> Unit,
+    /** Connects a Google account; the section, when given, then lives in it. */
+    val addGoogle: (Section?) -> Unit,
     val signInAgain: (String) -> Unit,
     val pickFiles: () -> Unit,
 )
@@ -123,18 +129,45 @@ object Ui {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var screen by remember { mutableStateOf<Screen>(Screen.Hub) }
-        BackHandler(enabled = screen != Screen.Hub) { screen = if (screen == Screen.PickSection) Screen.Accounts else Screen.Hub }
-        LaunchedEffect(Vault.accounts.size) { if (Vault.accounts.isNotEmpty()) Work.readSpace(context) }
+        BackHandler(enabled = screen != Screen.Hub) {
+            screen = when (val s = screen) {
+                is Screen.HomeForm -> Screen.AddPlace(s.forSection)
+                is Screen.AddPlace -> s.forSection?.let { Screen.ChooseHome(it) } ?: Screen.Places
+                else -> Screen.Hub
+            }
+        }
+        LaunchedEffect(Vault.places.size) { if (Vault.places.isNotEmpty()) Work.readSpace(context) }
 
         Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
             Box(Modifier.weight(1f)) {
                 when (val s = screen) {
-                    Screen.Hub -> Hub(onOpen = { section -> screen = if (section.ready) Screen.Documents else if (Vault.forSection(section).isEmpty()) Screen.PickSection else Screen.Coming(section) }, onSettings = { screen = Screen.Settings })
-                    Screen.Documents -> Documents(asks) { screen = Screen.Hub }
-                    Screen.Accounts -> Accounts(asks, onAdd = { screen = Screen.PickSection })
+                    Screen.Hub -> Hub(
+                        onOpen = { section ->
+                            screen = when {
+                                Vault.homeOf(section) == null -> Screen.ChooseHome(section)
+                                section.ready -> Screen.Documents
+                                else -> Screen.Coming(section)
+                            }
+                        },
+                        onSettings = { screen = Screen.Settings },
+                    )
+                    Screen.Documents -> Documents(asks, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(Section.DOCUMENTS) })
+                    Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) })
                     Screen.Settings -> Settings { screen = Screen.Hub }
-                    is Screen.Coming -> Coming(s.section) { screen = Screen.Hub }
-                    Screen.PickSection -> PickSection(onPick = { section -> screen = Screen.Accounts; asks.addAccount(section) }, onBack = { screen = Screen.Accounts })
+                    is Screen.Coming -> Coming(s.section, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(s.section) })
+                    is Screen.ChooseHome -> ChooseHome(
+                        s.section,
+                        onPick = { id -> Vault.setHome(s.section, id); Work.doing = s.section.title + " now lives in " + (Vault.place(id)?.label ?: "") + "."; screen = Screen.Hub },
+                        onAdd = { screen = Screen.AddPlace(s.section) },
+                        onBack = { screen = Screen.Hub },
+                    )
+                    is Screen.AddPlace -> AddPlace(
+                        s.forSection,
+                        onGoogle = { screen = s.forSection?.let { Screen.Hub } ?: Screen.Places; asks.addGoogle(s.forSection) },
+                        onHome = { screen = Screen.HomeForm(s.forSection) },
+                        onBack = { screen = s.forSection?.let { Screen.ChooseHome(it) } ?: Screen.Places },
+                    )
+                    is Screen.HomeForm -> HomeForm(s.forSection, onDone = { screen = if (s.forSection != null) Screen.Hub else Screen.Places }, onBack = { screen = Screen.AddPlace(s.forSection) })
                 }
             }
             if (Work.doing.isNotEmpty()) Box(Modifier.fillMaxWidth().background(K.Raised).padding(horizontal = 20.dp, vertical = 10.dp)) { Words(Work.doing, 14) }
@@ -158,10 +191,10 @@ object Ui {
     @Composable
     private fun Nav(now: Screen, go: (Screen) -> Unit) {
         Row(Modifier.fillMaxWidth().background(K.Panel).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            val items = listOf("Hub" to Screen.Hub, "Photos" to Screen.Coming(Section.PHOTOS), "Mail" to Screen.Coming(Section.MAIL), "Accounts" to Screen.Accounts)
+            val items = listOf("Hub" to Screen.Hub, "Documents" to Screen.Documents, "Places" to Screen.Places)
             for ((label, target) in items) {
                 val on = now == target
-                Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable { go(target) }.padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable { go(if (target == Screen.Documents && Vault.homeOf(Section.DOCUMENTS) == null) Screen.ChooseHome(Section.DOCUMENTS) else target) }.padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
                     Words(label, 13, if (on) K.Accent else K.Soft, bold = on)
                 }
             }
@@ -180,16 +213,16 @@ object Ui {
                 )
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onSettings), contentAlignment = Alignment.Center) { Words("⚙", 20) }
             }
-            val known = Vault.accounts.mapNotNull { Vault.quotas[it.email] }
+            val known = Vault.places.mapNotNull { Vault.quotas[it.id] }
             val used = known.sumOf { it.used }
             val total = known.sumOf { it.limit ?: 0L }
             Column(Modifier.padding(horizontal = 20.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(K.Panel).padding(16.dp)) {
-                val n = Vault.accounts.size
-                Words(if (n == 0) "No accounts yet" else "Free space across $n account" + (if (n == 1) "" else "s"), 13, K.Soft)
-                Words(if (total > 0) Vault.size(used) + " of " + Vault.size(total) + " used" else "Add a free account to start", 20, bold = true)
+                val n = Vault.places.size
+                Words(if (n == 0) "Nothing connected yet" else "Your $n place" + (if (n == 1) "" else "s"), 13, K.Soft)
+                Words(if (total > 0) Vault.size(used) + " of " + Vault.size(total) + " used" else "Choose a section to give it a place", 20, bold = true)
                 Spacer(Modifier.height(10.dp))
                 Meter(if (total > 0) used.toFloat() / total else 0f, K.Accent, 10)
-                if (total > 0) { Spacer(Modifier.height(8.dp)); Words(Vault.size((total - used).coerceAtLeast(0)) + " left", 13, K.Soft) }
+                if (total > 0) { Spacer(Modifier.height(8.dp)); Words(Vault.size((total - used).coerceAtLeast(0)) + " free", 13, K.Soft) }
             }
             Spacer(Modifier.height(14.dp))
             LazyVerticalGrid(GridCells.Fixed(2), Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -200,69 +233,68 @@ object Ui {
 
     @Composable
     private fun Tile(section: Section, onClick: () -> Unit) {
-        val accounts = Vault.forSection(section)
-        val (used, total) = Vault.sectionSpace(section)
-        val fraction = if (total > 0) used.toFloat() / total else 0f
-        val nearlyFull = (accounts.isNotEmpty() && Vault.pick(section, 0) == null) || fraction >= 0.85f
+        val home = Vault.homeOf(section)
+        val q = home?.let { Vault.quotas[it.id] }
+        val room = Vault.room(section, 0)
+        val warn = room == Room.NEARLY_FULL || room == Room.FULL
         val colour = Color(section.colour)
         Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (accounts.isEmpty()) K.Page else K.Panel)
-                .then(if (accounts.isEmpty()) Modifier.border(2.dp, K.Raised, RoundedCornerShape(16.dp)) else if (nearlyFull) Modifier.border(2.dp, K.Warn, RoundedCornerShape(16.dp)) else Modifier)
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(if (home == null) K.Page else K.Panel)
+                .then(if (home == null) Modifier.border(2.dp, K.Raised, RoundedCornerShape(16.dp)) else if (warn) Modifier.border(2.dp, K.Warn, RoundedCornerShape(16.dp)) else Modifier)
                 .clickable(onClick = onClick).padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Box(Modifier.size(12.dp).clip(RoundedCornerShape(6.dp)).background(colour))
             Words(section.title, 17, bold = true, lines = 1)
-            when {
-                accounts.isEmpty() -> Words("+ Add an account", 13, K.Accent, bold = true)
-                total > 0 -> {
-                    Words(if (nearlyFull) (fraction * 100).toInt().toString() + "% full · add an account" else accounts.size.toString() + " account" + (if (accounts.size == 1) "" else "s") + " · " + Vault.size(used) + " of " + Vault.size(total), 12, if (nearlyFull) K.Warn else K.Soft)
-                    Meter(fraction, if (nearlyFull) K.Warn else colour)
-                }
-                else -> Words(accounts.size.toString() + " account" + (if (accounts.size == 1) "" else "s"), 12, K.Soft)
+            if (home == null) Words("+ Choose its place", 13, K.Accent, bold = true)
+            else {
+                Words(if (warn) (q!!.fraction * 100).toInt().toString() + "% full · " + home.label else home.label, 12, if (warn) K.Warn else K.Soft, lines = 1)
+                if (q?.limit != null) Meter(q.fraction, if (warn) K.Warn else colour)
             }
         }
     }
 
     @Composable
-    private fun Coming(section: Section, onBack: () -> Unit) {
+    private fun Coming(section: Section, onBack: () -> Unit, onMove: () -> Unit) {
         Column(Modifier.fillMaxSize()) {
             Title(section.title, onBack)
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Words(section.coming + ". Its accounts can be added now, in Accounts, so its space is ready.", 15, K.Soft, lines = 4)
-                for (a in Vault.forSection(section)) Words("• " + a.email, 14)
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Words(section.coming + ". Its place is ready for it.", 15, K.Soft, lines = 4)
+                Vault.homeOf(section)?.let { Words("Lives in " + it.label, 14) }
+                Button("Choose another place", modifier = Modifier.fillMaxWidth(), onClick = onMove)
             }
         }
     }
 
     @Composable
-    private fun Documents(asks: Asks, onBack: () -> Unit) {
+    private fun Documents(asks: Asks, onBack: () -> Unit, onMove: () -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        var holding by remember { mutableStateOf<Drive.Item?>(null) }
-        LaunchedEffect(Vault.forSection(Section.DOCUMENTS).size) { Work.readDocuments(context) }
+        var holding by remember { mutableStateOf<Store.Item?>(null) }
+        val home = Vault.homeOf(Section.DOCUMENTS)
+        LaunchedEffect(home?.id) { Work.readDocuments(context) }
         Column(Modifier.fillMaxSize()) {
             Title("Documents", onBack)
-            val (used, total) = Vault.sectionSpace(Section.DOCUMENTS)
             Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Words(if (total > 0) Vault.size(used) + " of " + Vault.size(total) + " used" else "", 13, K.Soft, modifier = Modifier.weight(1f))
+                Words(home?.let { "Lives in " + it.label } ?: "", 13, K.Soft, modifier = Modifier.weight(1f).clickable(onClick = onMove))
                 Button("+ Add files", main = true) { asks.pickFiles() }
             }
             Spacer(Modifier.height(10.dp))
             when {
-                Vault.forSection(Section.DOCUMENTS).isEmpty() -> Words("Documents has no account yet. Add one in Accounts.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
+                home == null -> Words("Documents has no place yet.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
                 !Work.documentsRead -> Words("Reading your documents…", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
                 Work.documents.isEmpty() -> Words("Nothing here yet. Tap Add files to put some in.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
                 else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(Work.documents, key = { it.email + it.id }) { item ->
+                    items(Work.documents, key = { it.placeId + it.id }) { item ->
                         val date = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.UK).format(java.util.Date(item.modifiedMs))
+                        val where = Vault.place(item.placeId)?.label ?: ""
                         Column(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel)
                                 .clickable { if (holding == item) holding = null else scope.launch { Work.open(context, item) } }
                                 .padding(14.dp),
                         ) {
                             Words(item.name, 15, bold = true)
-                            Words(Vault.size(item.size) + " · " + date + " · in " + item.email, 12, K.Soft, lines = 1)
+                            Words(Vault.size(item.size) + " · " + date + " · in " + where, 12, K.Soft, lines = 1)
                             if (holding == item) {
                                 Spacer(Modifier.height(8.dp))
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -279,58 +311,155 @@ object Ui {
         }
     }
 
+    /** Every place connected: how full, what lives there, and anything it needs. */
     @Composable
-    private fun Accounts(asks: Asks, onAdd: () -> Unit) {
+    private fun Places(asks: Asks, onAdd: () -> Unit, onChoose: (Section) -> Unit) {
         var confirm by remember { mutableStateOf<String?>(null) }
         Column(Modifier.fillMaxSize()) {
-            Title("Accounts")
-            val known = Vault.accounts.mapNotNull { Vault.quotas[it.email] }
-            Words(Vault.accounts.size.toString() + " free account" + (if (Vault.accounts.size == 1) "" else "s") + (if (known.isNotEmpty()) " · " + Vault.size(known.sumOf { it.limit ?: 0L }) + " in all" else ""), 13, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
+            Title("Places")
+            Words("The storage you own and connected. Each section lives in one of them.", 13, K.Soft, lines = 2, modifier = Modifier.padding(horizontal = 20.dp))
             Spacer(Modifier.height(10.dp))
             LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (section in Section.entries) {
-                    val list = Vault.forSection(section)
-                    items(list, key = { it.email }) { a ->
-                        val q = Vault.quotas[a.email]
-                        val again = a.email in Work.signInAgain
-                        val position = list.indexOf(a)
-                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).clickable { confirm = if (confirm == a.email) null else a.email }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Row {
-                                Words(a.email, 15, bold = true, lines = 1, modifier = Modifier.weight(1f))
-                                if (q?.limit != null) Words(Vault.size(q.used) + " of " + Vault.size(q.limit), 13, K.Soft, lines = 1)
-                            }
-                            Words("For " + section.title + if (position > 0) ", when the one before is full" else "", 12, K.Soft)
-                            if (q?.limit != null) Meter(q.fraction, if (q.fraction >= 0.85f) K.Warn else Color(section.colour))
-                            if (again) Button("Sign in again", main = true) { asks.signInAgain(a.email) }
-                            if (confirm == a.email) {
-                                Words("Taking it out of KueVault leaves its files where they are, in the account.", 12, K.Soft, lines = 3)
-                                Button("Take this account out") { confirm = null; Vault.remove(a.email) }
-                            }
+                items(Vault.places.toList(), key = { it.id }) { p ->
+                    val q = Vault.quotas[p.id]
+                    val sections = Vault.sectionsIn(p.id)
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).clickable { confirm = if (confirm == p.id) null else p.id }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Words(p.kind.title, 12, K.Soft, lines = 1)
+                        Row {
+                            Words(p.label, 15, bold = true, lines = 1, modifier = Modifier.weight(1f))
+                            if (q?.limit != null) Words(Vault.size(q.used) + " of " + Vault.size(q.limit), 13, K.Soft, lines = 1)
+                        }
+                        Words(if (sections.isEmpty()) "No section lives here" else sections.joinToString { it.title } + " live" + (if (sections.size == 1) "s" else "") + " here", 12, K.Soft)
+                        if (q?.limit != null) Meter(q.fraction, if (q.fraction >= Vault.NEARLY) K.Warn else K.KueBlue)
+                        if (p.id in Work.signInAgain) Button("Sign in again", main = true) { asks.signInAgain(p.email) }
+                        Work.unreachable[p.id]?.let { Words(it, 12, K.Warn, lines = 3) }
+                        if (confirm == p.id) {
+                            Words("Taking it out of KueVault leaves its files where they are." + if (sections.isNotEmpty()) " The sections living here will need a new place." else "", 12, K.Soft, lines = 3)
+                            Button("Take this place out") { confirm = null; Vault.disconnect(p.id) }
+                        }
+                    }
+                }
+                item {
+                    val homeless = Section.entries.filter { Vault.homeOf(it) == null }
+                    if (homeless.isNotEmpty() && Vault.places.isNotEmpty()) {
+                        Spacer(Modifier.height(6.dp))
+                        Words("Still to give a place", 13, K.Soft)
+                        for (s in homeless) Row(Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).clickable { onChoose(s) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(12.dp).clip(RoundedCornerShape(6.dp)).background(Color(s.colour)))
+                            Spacer(Modifier.width(12.dp))
+                            Words(s.title, 15, bold = true, modifier = Modifier.weight(1f))
+                            Words("Choose", 13, K.Accent, bold = true)
                         }
                     }
                 }
             }
-            Column(Modifier.padding(20.dp)) { Button("+ Add an account", main = true, modifier = Modifier.fillMaxWidth(), onClick = onAdd) }
+            Column(Modifier.padding(20.dp)) { Button("+ Connect a place", main = true, modifier = Modifier.fillMaxWidth(), onClick = onAdd) }
+        }
+    }
+
+    /** Which place a section lives in: one of the places already connected, or a new one. */
+    @Composable
+    private fun ChooseHome(section: Section, onPick: (String) -> Unit, onAdd: () -> Unit, onBack: () -> Unit) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Title("Where should " + section.title + " live?", onBack)
+            Words("New " + section.title.lowercase() + " go there. Anything already put somewhere else stays where it is and still shows.", 14, K.Soft, lines = 3, modifier = Modifier.padding(horizontal = 20.dp))
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val now = Vault.homes[section]
+                for (p in Vault.places) {
+                    val q = Vault.quotas[p.id]
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).then(if (p.id == now) Modifier.border(2.dp, K.Accent, RoundedCornerShape(14.dp)) else Modifier).clickable { onPick(p.id) }.padding(14.dp)) {
+                        Words(p.kind.title + if (p.id == now) " · now" else "", 12, K.Soft, lines = 1)
+                        Words(p.label, 15, bold = true, lines = 1)
+                        if (q?.limit != null) Words(Vault.size(q.free) + " free", 12, K.Soft, lines = 1)
+                    }
+                }
+                Button("+ Connect a new place", main = true, modifier = Modifier.fillMaxWidth(), onClick = onAdd)
+            }
+        }
+    }
+
+    /** What kind of place to connect. */
+    @Composable
+    private fun AddPlace(forSection: Section?, onGoogle: () -> Unit, onHome: () -> Unit, onBack: () -> Unit) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Title("Connect a place", onBack)
+            Words("Storage you own. More than one Google account is fine: each is its own place.", 14, K.Soft, lines = 3, modifier = Modifier.padding(horizontal = 20.dp))
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (kind in PlaceKind.entries) {
+                    Column(
+                        Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(if (kind.ready) K.Panel else K.Page)
+                            .then(if (kind.ready) Modifier.clickable { if (kind == PlaceKind.GOOGLE) onGoogle() else onHome() } else Modifier.border(2.dp, K.Raised, RoundedCornerShape(14.dp)))
+                            .padding(14.dp),
+                    ) {
+                        Words(kind.title, 16, if (kind.ready) K.Ink else K.Soft, bold = true)
+                        Words(
+                            when (kind) {
+                                PlaceKind.GOOGLE -> "The phone asks which Google account"
+                                PlaceKind.HOME -> "A shared folder on your computer, over the home Wi-Fi"
+                                else -> kind.coming
+                            },
+                            12, K.Soft, lines = 2,
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /** A home computer's details: its name, the shared folder, and the computer's own sign-in. */
+    @Composable
+    private fun HomeForm(forSection: Section?, onDone: () -> Unit, onBack: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var host by remember { mutableStateOf("") }
+        var share by remember { mutableStateOf("") }
+        var user by remember { mutableStateOf("") }
+        var password by remember { mutableStateOf("") }
+        var saying by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Title("Home computer", onBack)
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Words("On the computer, share a folder first (in Windows: right-click the folder › Properties › Sharing › Share). Then type in:", 13, K.Soft, lines = 4)
+                Field("Computer's name or address", host, "DESKTOP-KQ or 192.168.1.20") { host = it }
+                Field("Shared folder's name", share, "Vault") { share = it }
+                Field("The computer's sign-in name", user, "kevin") { user = it }
+                Field("The computer's password", password, "", secret = true) { password = it }
+                Words("The password stays on this phone, locked by the phone itself.", 12, K.Soft, lines = 2)
+                if (saying.isNotEmpty()) Words(saying, 14, K.Warn, lines = 4)
+                Button(if (busy) "Trying…" else "Connect", main = true, modifier = Modifier.fillMaxWidth()) {
+                    if (busy) return@Button
+                    busy = true
+                    saying = ""
+                    scope.launch {
+                        val said = Work.connectHome(context, host, share, user, password)
+                        busy = false
+                        if (said == "Connected") {
+                            val place = Vault.places.lastOrNull { it.kind == PlaceKind.HOME && it.host.equals(host.trim().removePrefix("\\\\").removePrefix("smb://").trimEnd('/', '\\'), true) }
+                            if (forSection != null && place != null) Vault.setHome(forSection, place.id)
+                            Work.doing = (place?.label ?: "The computer") + " connected." + (forSection?.let { " " + it.title + " lives there now." } ?: "")
+                            onDone()
+                        } else saying = said
+                    }
+                }
+            }
         }
     }
 
     @Composable
-    private fun PickSection(onPick: (Section) -> Unit, onBack: () -> Unit) {
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Title("Which section is it for?", onBack)
-            Words("Each free account holds one kind of thing. Next, the phone asks which Google account.", 14, K.Soft, lines = 3, modifier = Modifier.padding(horizontal = 20.dp))
-            Spacer(Modifier.height(12.dp))
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (section in Section.entries) {
-                    val n = Vault.forSection(section).size
-                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).clickable { onPick(section) }.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(12.dp).clip(RoundedCornerShape(6.dp)).background(Color(section.colour)))
-                        Spacer(Modifier.width(12.dp))
-                        Words(section.title, 16, bold = true, modifier = Modifier.weight(1f))
-                        Words(if (n == 0) "none yet" else "$n already", 13, K.Soft)
-                    }
-                }
-            }
+    private fun Field(label: String, value: String, example: String, secret: Boolean = false, onChange: (String) -> Unit) {
+        Words(label, 13, K.Soft, lines = 1)
+        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(horizontal = 16.dp, vertical = 14.dp), contentAlignment = Alignment.CenterStart) {
+            if (value.isEmpty() && example.isNotEmpty()) Words(example, 15, K.Soft.copy(alpha = 0.5f), lines = 1)
+            androidx.compose.foundation.text.BasicTextField(
+                value = value, onValueChange = onChange, singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(color = K.Ink, fontSize = 15.sp, fontFamily = K.Poppins),
+                cursorBrush = androidx.compose.ui.graphics.SolidColor(K.Accent),
+                visualTransformation = if (secret) androidx.compose.ui.text.input.PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 
@@ -351,11 +480,11 @@ object Ui {
                 }
                 Spacer(Modifier.height(6.dp))
                 Words("Privacy", 15, bold = true)
-                Words("KueVault can only see the files it puts in your accounts, in each account's KueVault folder. Your files go straight between this phone and your own accounts. There is no KueVault server, and nothing is sent anywhere else.", 13, K.Soft, lines = 8)
+                Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server, and nothing is sent anywhere else. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 8)
                 Button(if (forget) "Tap again to forget everything on this phone" else "Forget everything on this phone", modifier = Modifier.fillMaxWidth()) {
-                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Work.documents.clear(); Work.documentsRead = false; Work.doing = "Forgotten. Your files are still in your accounts." }
+                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Work.documents.clear(); Work.documentsRead = false; Work.doing = "Forgotten. Your files are still in your places." }
                 }
-                Words("Takes every account out of KueVault on this phone. The files stay in your accounts.", 12, K.Soft, lines = 3)
+                Words("Takes every place out of KueVault on this phone. The files stay where they are.", 12, K.Soft, lines = 3)
             }
         }
     }

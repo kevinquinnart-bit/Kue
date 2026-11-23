@@ -11,7 +11,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
-    /** The section an account is being added for, and the account, while the phone's and Google's pages are open. */
+    /** The section a Google account is being connected for (if any), and the account, while the phone's and Google's pages are open. */
     private var addingFor: Section? = null
     private var addingEmail: String? = null
 
@@ -46,17 +46,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Google said yes: the account goes into its section (or is back in use), with its space read. */
+    /** Google said yes: the account is a place (or back in use), with its space read, and the section lives there. */
     private fun accepted(email: String, token: String) {
-        Work.signInAgain.remove(email)
         val section = addingFor
+        val again = Vault.place(Place.google(email).id) != null
         addingFor = null
         addingEmail = null
+        val place = Vault.connect(Vault.place(Place.google(email).id) ?: Place.google(email))
+        Work.signInAgain.remove(place.id)
+        if (section != null) Vault.setHome(section, place.id)
         lifecycleScope.launch {
             val about = withContext(Dispatchers.IO) { runCatching { Drive.about(token) }.getOrNull() }
-            if (section != null) Vault.add(email, section)
-            about?.let { Vault.keepQuota(email, it.second) }
-            if (section != null) Work.doing = email + " added to " + section.title + "."
+            about?.let { Vault.keepQuota(place.id, it.second) }
+            Work.doing = email + (if (again) " is signed in again." else " connected.") + (section?.let { " " + it.title + " lives there now." } ?: "")
         }
     }
 
@@ -67,7 +69,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             Ui.App(
                 Asks(
-                    addAccount = { section -> addingFor = section; runCatching { accountChooser.launch(Google.chooser()) }.onFailure { Work.problem = "This phone has no list of Google accounts to choose from." } },
+                    addGoogle = { section -> addingFor = section; runCatching { accountChooser.launch(Google.chooser()) }.onFailure { Work.problem = "This phone has no list of Google accounts to choose from." } },
                     signInAgain = { email -> addingFor = null; addingEmail = email; ask(email) },
                     pickFiles = { filePicker.launch(arrayOf("*/*")) },
                 ),

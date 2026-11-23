@@ -33,9 +33,6 @@ object Drive {
     /** Google turned the pass down: the person needs asking again. */
     class SignedOut : IOException("Google wants this account signed in again")
 
-    /** A file in a section: where it is, its name and size, and when it last changed. */
-    data class Item(val id: String, val name: String, val size: Long, val modifiedMs: Long, val mime: String, val email: String)
-
     private fun send(request: Request): String = http.newCall(request).execute().use { r ->
         if (r.code == 401) throw SignedOut()
         if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + ": " + r.body.string().take(200))
@@ -57,12 +54,13 @@ object Drive {
 
     private fun q(text: String) = URLEncoder.encode(text, "UTF-8")
 
-    /** The folder [name] inside [parent] ("root" for the top), made if it isn't there yet. */
-    private fun folder(token: String, email: String, name: String, parent: String): String {
+    /** The folder [name] inside [parent] ("root" for the top). Made if it isn't there yet and [make]; else null. */
+    private fun folder(token: String, email: String, name: String, parent: String, make: Boolean): String? {
         val key = "$email/$parent/$name"
         synchronized(folders) { folders[key] }?.let { return it }
         val search = "mimeType='$FOLDER' and name='" + name.replace("'", "\\'") + "' and '$parent' in parents and trashed=false"
         val found = get(token, "$API/files?q=" + q(search) + "&fields=files(id)&spaces=drive").getAsJsonArray("files")
+        if (found.size() == 0 && !make) return null
         val id = if (found.size() > 0) found[0].asJsonObject.get("id").asString else {
             val body = JsonObject().apply {
                 addProperty("name", name)
@@ -76,14 +74,16 @@ object Drive {
         return id
     }
 
-    /** The section's own folder in this account: KueVault › Documents, say. */
-    fun sectionFolder(token: String, email: String, section: Section): String =
-        folder(token, email, section.title, folder(token, email, "KueVault", "root"))
+    /** The section's own folder in this account: KueVault › Documents, say. Null when it isn't there and not [make]. */
+    fun sectionFolder(token: String, email: String, section: Section, make: Boolean): String? {
+        val top = folder(token, email, "KueVault", "root", make) ?: return null
+        return folder(token, email, section.title, top, make)
+    }
 
-    /** What is in the section's folder in this account, newest first. */
-    fun list(token: String, email: String, section: Section): List<Item> {
-        val parent = sectionFolder(token, email, section)
-        val out = ArrayList<Item>()
+    /** What is in the section's folder in this account, newest first. Nothing, and no folder made, when it has none. */
+    fun list(token: String, email: String, placeId: String, section: Section): List<Store.Item> {
+        val parent = sectionFolder(token, email, section, make = false) ?: return emptyList()
+        val out = ArrayList<Store.Item>()
         var page: String? = null
         do {
             val url = "$API/files?q=" + q("'$parent' in parents and trashed=false") +
@@ -92,10 +92,10 @@ object Drive {
             val o = get(token, url)
             for (f in o.getAsJsonArray("files")) {
                 val j = f.asJsonObject
-                out += Item(
+                out += Store.Item(
                     j.get("id").asString, j.get("name").asString, j.get("size")?.asString?.toLongOrNull() ?: 0L,
                     runCatching { java.time.Instant.parse(j.get("modifiedTime").asString).toEpochMilli() }.getOrDefault(0L),
-                    j.get("mimeType")?.asString.orEmpty(), email,
+                    j.get("mimeType")?.asString.orEmpty(), placeId,
                 )
             }
             page = o.get("nextPageToken")?.asString
@@ -104,8 +104,8 @@ object Drive {
     }
 
     /** Puts a file from the phone into the section's folder, telling [progress] how far it has got, 0 to 100. */
-    fun upload(context: Context, token: String, email: String, section: Section, uri: Uri, name: String, mime: String, size: Long, progress: (Int) -> Unit): Item {
-        val parent = sectionFolder(token, email, section)
+    fun upload(context: Context, token: String, email: String, placeId: String, section: Section, uri: Uri, name: String, mime: String, size: Long, progress: (Int) -> Unit): Store.Item {
+        val parent = sectionFolder(token, email, section, make = true)!!
         val meta = JsonObject().apply {
             addProperty("name", name)
             add("parents", com.google.gson.JsonArray().apply { add(parent) })
@@ -140,15 +140,15 @@ object Drive {
             }
         }
         val j = JsonParser.parseString(send(Request.Builder().url(where).put(body).build())).asJsonObject
-        return Item(
+        return Store.Item(
             j.get("id").asString, j.get("name").asString, j.get("size")?.asString?.toLongOrNull() ?: size,
             runCatching { java.time.Instant.parse(j.get("modifiedTime").asString).toEpochMilli() }.getOrDefault(System.currentTimeMillis()),
-            j.get("mimeType")?.asString ?: mime, email,
+            j.get("mimeType")?.asString ?: mime, placeId,
         )
     }
 
     /** Downloads a file into [target], telling [progress] how far it has got, 0 to 100. */
-    fun download(token: String, item: Item, target: File, progress: (Int) -> Unit) {
+    fun download(token: String, item: Store.Item, target: File, progress: (Int) -> Unit) {
         val part = File(target.path + ".part")
         http.newCall(Request.Builder().url("$API/files/" + item.id + "?alt=media").header("Authorization", "Bearer $token").build()).execute().use { r ->
             if (r.code == 401) throw SignedOut()
@@ -174,7 +174,7 @@ object Drive {
     }
 
     /** Moves a file to the account's bin, where Google keeps it for 30 days. */
-    fun bin(token: String, item: Item) {
+    fun bin(token: String, item: Store.Item) {
         val body = """{"trashed":true}""".toRequestBody("application/json".toMediaType())
         send(Request.Builder().url("$API/files/" + item.id).header("Authorization", "Bearer $token").patch(body).build())
     }
