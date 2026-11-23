@@ -239,6 +239,9 @@ class MainActivity : ComponentActivity() {
             finishAndRemoveTask()
             return
         }
+        // Never a small picture in a corner on the TV (Kevin): leaving for Freely's aerial or a channel's own app
+        // left KueTV's player floating over it with no way to clear it (Kevin, 23 November 2026).
+        if (isTv(this)) return
         if (!Pip.wanted || !packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
         runCatching {
             enterPictureInPictureMode(android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build())
