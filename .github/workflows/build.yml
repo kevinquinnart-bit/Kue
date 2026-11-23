@@ -47,7 +47,8 @@ jobs:
       - name: Test
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest --stacktrace || {
+          # Tried twice: Robolectric's Android download from Maven sometimes fails on the first go.
+          ./gradlew :app:testDebugUnitTest --stacktrace || ./gradlew :app:testDebugUnitTest --stacktrace || {
             # Which tests failed, as notes on the run, readable without signing in.
             for f in app/build/test-results/testDebugUnitTest/*.xml; do
               grep -q "<failure" "$f" || continue
