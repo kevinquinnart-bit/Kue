@@ -67,7 +67,7 @@ class RemoteTest {
         press(Key.DirectionLeft)
 
         press(Key.DirectionDown)
-        assertTrue("▼ from the bar goes down into the section · remote on " + where(), remoteOn("All") || remoteOn("BBC One") || remoteOn("Sky Sports"))
+        assertTrue("▼ from the bar goes into the channel list, past the categories · remote on " + where(), remoteOn("BBC One") || remoteOn("Sky Sports"))
 
         // Into the categories, then ▶ into the channel list, ◀ back to the category being shown.
         repeat(3) { press(Key.DirectionLeft) }

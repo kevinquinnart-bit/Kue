@@ -1527,6 +1527,9 @@ private class Panels {
 
     /** Whether the section on screen has a categories column, so ▶ from the menu goes into it. */
     var catsShown by mutableStateOf(false)
+
+    /** The bar along the top: ▼ from it goes past the categories into the list (Kevin, 23 November 2026). */
+    var bar: BarReach? = null
 }
 
 /** The side columns on a TV; null on a phone, where nothing folds. */
@@ -1762,6 +1765,7 @@ private fun MainScreen(
     val homeFocus = remember { FocusRequester() }
     val panels = remember { Panels() }
     val bar = remember { BarReach() }
+    panels.bar = bar
     val resume = remember { FocusRequester() }
     // The section shown before this one; null until the screen has been shown once.
     val before = remember { arrayOfNulls<Section>(1) }
@@ -2978,7 +2982,9 @@ private fun Categories(
     val row: @Composable (String, String) -> Unit = { id, name ->
         FocusRow(
             name, { press(id) },
-            if (chosen == id) Modifier.focusRequester(chosenFocus) else Modifier,
+            (if (chosen == id) Modifier.focusRequester(chosenFocus) else Modifier)
+                // ▼ from the top bar lands in the list beside the categories, not on them (Kevin, 23 November 2026).
+                .focusProperties { canFocus = panels?.bar?.inside != true },
             chosen = chosen == id, onFocus = { landed = id }, textSize = 19.sp,
             onHold = onHold?.let { h -> { h(id) } },
         )
@@ -2990,7 +2996,7 @@ private fun Categories(
         Heading("Categories")
         LazyColumn(
             Modifier.fillMaxSize()
-                .focusProperties { onEnter = { runCatching { chosenFocus.requestFocus() } } }
+                .focusProperties { onEnter = { if (panels?.bar?.inside != true) runCatching { chosenFocus.requestFocus() } } }
                 .focusGroup(),
             state = list,
         ) {
