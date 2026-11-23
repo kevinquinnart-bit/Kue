@@ -239,8 +239,17 @@ object Catalogue {
     /** Looks a song up, to find the album it first came out on and the single it came out as. Call off the main thread. */
     fun findSongHome(title: String, artist: String): SongHome {
         if (artist.isBlank() || artist == Library.UNKNOWN_ARTIST || isVarious(artist)) return SongHome(null, null)
-        val query = "recording:" + quote(title) + " AND artist:" + quote(artist) + " AND status:official AND (primarytype:album OR primarytype:single)"
-        return chooseSongHome(parseRecordings(ask("recording/", query, 15)), title, artist)
+        return chooseSongHome(parseRecordings(ask("recording/", songQuery(title, artist), 15)), title, artist)
+    }
+
+    /**
+     * The song search. The name is asked for without anything in brackets: the catalogue's own name for a song
+     * often differs inside them, and then the song isn't found at all (23 November 2026: "Take My Breath Away
+     * (Love Theme From Top Gun)" by Berlin found one stray copy; "Take My Breath Away" found Count Three & Pray).
+     */
+    fun songQuery(title: String, artist: String): String {
+        val plain = title.replace(Regex("""\s*[\[(][^\])]*[\])]"""), " ").replace(Regex("\\s+"), " ").trim().ifBlank { title }
+        return "recording:" + quote(plain) + " AND artist:" + quote(artist) + " AND status:official AND (primarytype:album OR primarytype:single)"
     }
 
     /** One song on a release, as the catalogue writes it: its disc and place, its proper name and its artist. */

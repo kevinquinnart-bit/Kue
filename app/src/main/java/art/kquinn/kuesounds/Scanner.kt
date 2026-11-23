@@ -191,6 +191,18 @@ object Scanner {
             data = data.copy(tracks = data.tracks.map { it.copy(checked = false) }, version = 4)
             save()
         }
+        // 23 November 2026: songs were searched for with the bracketed part of their name, and many weren't found.
+        // Songs not given an album, and songs with no single, are looked up again.
+        if (data.version < 5) {
+            data = data.copy(
+                tracks = data.tracks.map { t ->
+                    val moved = Library.albumKey(Library.albumArtistOf(t), t.album) in data.releases
+                    t.copy(ownLook = t.ownLook && moved, singleChecked = t.singleChecked && t.id in data.singleTitles)
+                },
+                version = 5,
+            )
+            save()
+        }
         read = data.tracks.count { it.tagged }
     }
 

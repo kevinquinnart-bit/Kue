@@ -111,6 +111,15 @@ class CatalogueTest {
     }
 
     @Test
+    fun aSongIsSearchedForWithoutItsBrackets() {
+        assertEquals(
+            "recording:\"Take My Breath Away\" AND artist:\"Berlin\" AND status:official AND (primarytype:album OR primarytype:single)",
+            Catalogue.songQuery("Take My Breath Away (Love Theme From Top Gun)", "Berlin"),
+        )
+        assertEquals("recording:\"(Untitled)\"", Catalogue.songQuery("(Untitled)", "X").substringBefore(" AND"))
+    }
+
+    @Test
     fun anotherArtistsSongFindsNoHome() {
         val home = Catalogue.chooseSongHome(Catalogue.parseRecordings(first15("oasis_wonderwall_home.json")), "Wonderwall", "Ryan Adams")
         assertEquals(null, home.album)
