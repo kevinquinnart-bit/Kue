@@ -1791,7 +1791,8 @@ private fun MainScreen(
         if (before[0] != section && !(!shownOnce[0] && state.resumeKey != null)) {
             // Each section opens on Favourites when there are any (Kevin, 22 November 2026: in place of All, and of
             // Live TV opening on the category it was last in).
-            val favGroups = library.liveIndex.favourites(favs)
+            // Worked out away from the screen: done on it, it held the TV up for 9 seconds at switch-on (23 November 2026).
+            val favGroups = withContext(Dispatchers.Default) { library.liveIndex.favourites(favs) }
             val liveFavs = favGroups.isNotEmpty()
             // Catch-up only when a favourite has catch-up, so it never opens on an empty list.
             val catchUpFavs = favGroups.any { g -> g.versions.any { it.channel.catchupDays > 0 } }
@@ -6144,11 +6145,25 @@ private fun UpdateNow(latest: Updates.Latest, modifier: Modifier = Modifier) {
                 said = if (opened) "First, on the page that opened, turn on KueTV. Then come back and choose Update now again."
                 else "First allow KueTV to install apps. On a Fire TV: Settings › My Fire TV › Developer options › Install unknown apps › KueTV › On. Then choose Update now again."
             }
-            // Already downloaded in the background: straight to the installer.
+            // Already downloaded in the background: straight to the installer, once it is sure no newer one is out
+            // (23 November 2026: an offer from before the TV slept put 0.1.201 on, then 0.1.202 came straight after).
             Updates.ready?.takeIf { it.exists() && Updates.readyCode >= latest.code } != null -> {
-                said = "Choose Install on the next screen."
-                Report.note("Updates", "installing " + latest.name + " downloaded in the background")
-                Updates.install(context, Updates.ready!!)
+                busy = true
+                said = "Checking it's the newest…"
+                scope.launch {
+                    val newest = withContext(Dispatchers.IO) { runCatching { Updates.check() }.getOrNull() }
+                    busy = false
+                    if (newest != null && newest.code > Updates.readyCode) {
+                        Report.note("Updates", "offer of " + latest.name + " was out of date: " + newest.name + " is out; getting that instead")
+                        said = "A newer version is out. Getting it now…"
+                        Updates.dropOffer()
+                        withContext(Dispatchers.IO) { Updates.checkAndFetch(context) }
+                    } else {
+                        said = "Choose Install on the next screen."
+                        Report.note("Updates", "installing " + latest.name + " downloaded in the background")
+                        Updates.install(context, Updates.ready!!)
+                    }
+                }
             }
             else -> {
                 busy = true

@@ -103,6 +103,12 @@ object Updates {
             return
         }
         if (latest.code == putOff) return
+        // An update is with the installer and not on yet: nothing more until it is, so two installers never stack
+        // up (23 November 2026: 0.1.202 handed over while 0.1.201's installer was still asking).
+        if (handedOver > BuildConfig.VERSION_CODE && android.os.SystemClock.uptimeMillis() - handedAt < 10 * 60_000L) {
+            Report.note("Updates", "version " + latest.name + " is out; waiting for the installer to finish with build " + handedOver + " first")
+            return
+        }
         // Just handed to the installer: KueTV coming back to the front then must not offer it again over the
         // installer (seen on Kevin's TV with every update up to 0.1.142: the offer came back 1 second later).
         if (latest.code <= handedOver && android.os.SystemClock.uptimeMillis() - handedAt < HANDED_WAIT) {
@@ -115,6 +121,8 @@ object Updates {
         }
         if (fetching) return
         fetching = true
+        // An offer of an older download is taken down while the newer one comes.
+        if (offer != null && offer!!.code < latest.code) offer = null
         try {
             Report.note("Updates", "version " + latest.name + " found, downloading it in the background")
             val file = downloadChecked(context) {}
@@ -236,6 +244,9 @@ object Updates {
         true
     }.getOrDefault(false)
 
+    /** Takes down the offer on screen (a newer version is being fetched in its place). */
+    fun dropOffer() { offer = null }
+
     /** Hands the downloaded app to the device's installer, which asks before it installs over this one. */
     fun install(context: Context, file: File) {
         handedOver = buildInside(context, file)?.toInt() ?: readyCode
@@ -245,7 +256,7 @@ object Updates {
         HomeGuard.pauseFor(HANDED_WAIT)
         Report.note("Updates", "build " + handedOver + " handed to the installer (" + file.length() + " bytes)")
         // So KueTV opens again by itself once the installer has put the update on.
-        context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE).edit().putLong("at", System.currentTimeMillis()).apply()
+        context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE).edit().putLong("at", System.currentTimeMillis()).putInt("build", handedOver).apply()
         // KueTV writes the app into the installer itself, as KueSounds does, and the installer answers with how it
         // went, so a refusal ("App not installed") is in the Report with its reason. The old way, the installer
         // reading the file from KueTV and saying nothing back, is kept for when this one can't start.
@@ -332,7 +343,9 @@ object Reopen {
     fun afterUpdate(context: Context) {
         val prefs = context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE)
         val at = prefs.getLong("at", 0L)
-        prefs.edit().remove("at").apply()
+        // Kept until the build handed over is the one on: an older one finishing first doesn't use it up (23 November
+        // 2026: 0.1.201 went on, then 0.1.202, which then didn't open KueTV).
+        if (BuildConfig.VERSION_CODE >= prefs.getInt("build", 0)) prefs.edit().remove("at").remove("build").apply()
         val ago = if (at == 0L) -1L else (System.currentTimeMillis() - at) / 1000
         Report.note("Updates", "update on (Android said so); handed over " + (if (ago < 0) "not by KueTV" else "$ago seconds ago"))
         if (at == 0L || System.currentTimeMillis() - at > WITHIN_MS || !isTv(context)) return
