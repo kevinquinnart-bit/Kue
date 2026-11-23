@@ -1049,6 +1049,8 @@ private fun FocusRow(
     textSize: androidx.compose.ui.unit.TextUnit = Sizes.ROW,
     /** The room above and below the words. The side menu uses less, so all of it fits on the screen. */
     padV: Dp = 12.dp,
+    /** The channel playing now: edged and named in yellow, so it stands out in its list (Kevin, 23 November 2026). */
+    playing: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val phoneRow = LocalPhone.current
@@ -1058,10 +1060,12 @@ private fun FocusRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .focusRing(focused)
+            .then(if (playing && !focused) Modifier.border(2.dp, Accent, RoundedCornerShape(12.dp)) else Modifier)
             .background(
                 when {
                     focused || button == Look.MAIN -> Accent
                     chosen -> Looks.faint2
+                    playing -> Accent.copy(alpha = 0.16f)
                     button == Look.OTHER -> Panel
                     else -> Color.Transparent
                 },
@@ -1081,9 +1085,9 @@ private fun FocusRow(
         Column {
             Text(
                 text,
-                color = if (focused || button == Look.MAIN) Color.Black else Ink,
+                color = if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else Ink,
                 fontSize = textSize,
-                fontWeight = if (focused || chosen || button == Look.MAIN) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (focused || chosen || playing || button == Look.MAIN) FontWeight.Bold else FontWeight.Normal,
                 // A phone has no remote to scroll a long row along, so there the words run onto more lines instead.
                 maxLines = if (phoneRow) 3 else 1,
                 // Too long for the row: cut short with "…", and while the remote is on it, scrolls along to show the rest.
@@ -2168,6 +2172,7 @@ private fun MainScreen(
                                     onHold = if (sorting || hiding != null) null else ({ menuChannel = channel }),
                                     leading = { Logo(channel.logo) },
                                     below = nowLine(library.account, channel.versions[channel.start].channel.id, channel.name),
+                                    playing = LastLive.item.let { l -> l != null && (channel.versions.any { it.channel.url == l.url } || channel.name == l.name) },
                                 )
                             }
                         }
@@ -2752,6 +2757,25 @@ private fun MainScreen(
                                 if (aerialName == null) first() else Modifier, look = Look.OTHER, below = "The TV's own quick panel, as when Home is held")
                             FocusRow("Put the TV to sleep", { if (!HomeGuard.sleepTv()) kueToast(context, "The TV didn't go to sleep: the Home button watcher isn't running.") },
                                 look = Look.OTHER, below = "Also from your phone: KueTV's Settings there, or the TV's address with :" + TvRemote.PORT + " in its browser")
+                            // Fire TV's quick panel's own entries, one by one where Fire TV lets another app open them.
+                            FocusRow("Display mirroring", {
+                                val app = DeviceApps.list(context).firstOrNull { it.name.contains("mirror", ignoreCase = true) }
+                                Report.note("TV tools", "display mirroring: " + (app?.let { it.name + " (" + it.packageName + ")" } ?: "not found among the TV's apps"))
+                                if (app == null || !Launcher.openLeavingHome(context, app.packageName)) kueToast(context, "The TV's display mirroring wouldn't open.")
+                            }, look = Look.OTHER, below = "Show your phone's screen on the TV")
+                            var showInputs by remember { mutableStateOf(false) }
+                            val inputs = remember { TvInputsHere.list(context) }
+                            if (inputs.isNotEmpty()) FocusRow((if (showInputs) "Hide" else "Show") + " the TV's inputs (" + inputs.size + ")", { showInputs = !showInputs },
+                                look = Look.OTHER, below = inputs.joinToString(", ") { it.second })
+                            if (showInputs) inputs.forEach { (id, label) ->
+                                FocusRow(label, { if (!TvInputsHere.open(context, id)) kueToast(context, "$label wouldn't open.") }, look = Look.OTHER, below = "Switch the TV to this input")
+                            }
+                            if (aerialName == null) FocusRow("The TV's programme guide", {
+                                HomeGuard.pause()
+                                val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+                                Report.note("TV tools", "programme guide: " + if (ok) "opened" else "refused")
+                                if (!ok) kueToast(context, "The TV's programme guide wouldn't open.")
+                            }, look = Look.OTHER, below = "Fire TV's own guide")
                             if (aerialName != null) FocusRow("The TV's programme guide", {
                                 HomeGuard.pause()
                                 val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
@@ -7188,5 +7212,29 @@ private fun ChannelMenu(
                 }
             }
         }
+    }
+}
+
+/**
+ * The TV's own inputs (HDMI 1, HDMI 2, the old composite one), each opened straight to it, as Fire TV's
+ * quick panel's Inputs does.
+ */
+private object TvInputsHere {
+    fun list(context: android.content.Context): List<Pair<String, String>> = runCatching {
+        val tim = context.getSystemService(android.content.Context.TV_INPUT_SERVICE) as android.media.tv.TvInputManager
+        tim.tvInputList.filter { it.isPassthroughInput }.map { it.id to (it.loadLabel(context)?.toString().orEmpty().ifBlank { it.id }) }
+            .sortedBy { it.second }
+    }.getOrDefault(emptyList())
+
+    fun open(context: android.content.Context, id: String): Boolean {
+        HomeGuard.pauseFor(10_000)
+        val ok = runCatching {
+            context.startActivity(
+                android.content.Intent(android.content.Intent.ACTION_VIEW, android.media.tv.TvContract.buildChannelUriForPassthroughInput(id))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+        Report.note("TV tools", "input $id: " + (if (ok.isSuccess) "opened" else "refused: " + ok.exceptionOrNull()?.javaClass?.simpleName))
+        return ok.isSuccess
     }
 }
