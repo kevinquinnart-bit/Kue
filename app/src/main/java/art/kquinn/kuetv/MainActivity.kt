@@ -4320,6 +4320,11 @@ private fun Pane.RecordingsPane(
     if (deleting) BackHandler { deleting = false }
     val tell: (String) -> Unit = { kueToast(context, it) }
     val toCome = remember(TimedStore.changes, changes, Resumes.count) { TimedStore.all(context) }
+    // Clearing out in one go (Kevin, 24 November 2026): every plan to record, series included, and every recording.
+    // Each asks for a second OK, so one press never clears the lot.
+    val links = remember(SeriesLinks.changes, deleting) { SeriesLinks.all(context) }
+    var confirm by remember(deleting) { mutableStateOf("") }
+    fun many(n: Int, one: String, more: String) = n.toString() + " " + if (n == 1) one else more
     val whenText = remember { java.text.SimpleDateFormat("EEE d MMM HH:mm", java.util.Locale.getDefault()) }
     val endText = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()) }
 
@@ -4336,8 +4341,42 @@ private fun Pane.RecordingsPane(
         }
         if (deleting) Note((if (phone) "Tap a recording to delete it." else "OK on a recording deletes it.") + " Ones in Google Drive go to its bin, where Google keeps them for 30 days.")
         LazyColumn(Modifier.fillMaxSize().focusRestorer()) {
-            if (here.isNotEmpty() || saved.isNotEmpty() || toCome.isNotEmpty()) item(key = "deleting") {
+            if (here.isNotEmpty() || saved.isNotEmpty() || toCome.isNotEmpty() || links.isNotEmpty()) item(key = "deleting") {
                 FocusRow(if (deleting) "Finish deleting" else "Delete recordings", { deleting = !deleting }, look = Look.OTHER)
+            }
+            if (deleting) {
+                val plans = toCome.filter { p -> !(if (p.whole) p.id == TimedService.wholeNow else p.id in TimedService.running) }
+                if (plans.isNotEmpty() || links.isNotEmpty()) item(key = "all-plans") {
+                    val what = listOfNotNull(
+                        plans.size.takeIf { it > 0 }?.let { many(it, "planned recording", "planned recordings") },
+                        links.size.takeIf { it > 0 }?.let { many(it, "series set to record", "series set to record") },
+                    ).joinToString(" and ")
+                    FocusRow(if (confirm == "plans") "OK again to take off $what" else "Take off every plan to record ($what)", {
+                        if (confirm != "plans") confirm = "plans" else {
+                            plans.forEach { TimedStore.remove(context, it) }
+                            links.forEach { SeriesLinks.remove(context, it.channelName, it.title) }
+                            confirm = ""
+                            tell("Taken off: $what")
+                        }
+                    }, look = Look.OTHER)
+                }
+                // Not one being recorded or copied to Google Drive right now: those finish first.
+                val doneHere = here.filter { it != Recordings.recordingNow && it !in Recordings.timedNow && Recordings.copying?.first != it.name }
+                if (doneHere.isNotEmpty() || saved.isNotEmpty()) item(key = "all-recordings") {
+                    val n = doneHere.size + saved.size
+                    FocusRow(if (confirm == "recordings") "OK again to delete all " + many(n, "recording", "recordings") else "Delete all " + many(n, "recording", "recordings"), {
+                        if (confirm != "recordings") confirm = "recordings" else {
+                            confirm = ""
+                            doneHere.forEach { it.delete() }
+                            Recordings.changed()
+                            if (saved.isNotEmpty()) scope.launch {
+                                val failed = withContext(Dispatchers.IO) { saved.count { r -> runCatching { drive.bin(r.id) }.isFailure } }
+                                tell(if (failed == 0) "All deleted." else many(failed, "recording", "recordings") + " in Google Drive couldn't be deleted. Try again in a minute.")
+                                Recordings.changed()
+                            } else tell("All deleted.")
+                        }
+                    }, look = Look.OTHER)
+                }
             }
             // Programmes set to record that haven't been recorded yet. They are set from the TV Guide.
             itemsIndexed(toCome, key = { _, t -> "timed:" + t.id }) { _, plan ->

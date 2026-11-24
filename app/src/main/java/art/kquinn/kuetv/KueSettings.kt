@@ -82,19 +82,21 @@ object KueSettings {
     )
 
     /** The Kue apps, for "Your Kue apps". */
-    data class KueApp(val name: String, val pkg: String, val download: String, val colour: Color)
+    data class KueApp(val name: String, val pkg: String, val download: String, val colour: Color, val logo: Int)
 
     val apps = listOf(
-        KueApp("KueTV", "art.kquinn.kuetv", "https://github.com/kevinquinnart-bit/Kue/releases/download/kuetv/KueTV.apk", Color(0xFF1D9E75)),
-        KueApp("KueSounds", "art.kquinn.kuesounds", "https://github.com/kevinquinnart-bit/Kue/releases/download/kuesounds/KueSounds.apk", Color(0xFFEF9F27)),
-        KueApp("KueVault", "art.kquinn.kuevault", "https://github.com/kevinquinnart-bit/Kue/releases/download/kuevault/KueVault.apk", Color(0xFF9B4DDB)),
+        KueApp("KueTV", "art.kquinn.kuetv", "https://github.com/kevinquinnart-bit/Kue/releases/download/kuetv/KueTV.apk", Color(0xFF1D9E75), R.drawable.kue_app_tv),
+        KueApp("KueSounds", "art.kquinn.kuesounds", "https://github.com/kevinquinnart-bit/Kue/releases/download/kuesounds/KueSounds.apk", Color(0xFFEF9F27), R.drawable.kue_app_sounds),
+        KueApp("KueVault", "art.kquinn.kuevault", "https://github.com/kevinquinnart-bit/Kue/releases/download/kuevault/KueVault.apk", Color(0xFF9B4DDB), R.drawable.kue_app_vault),
     )
 
     /** The eight groups' drawn icons, as lines on a 24 by 24 grid. Drawn for Kue, never stock icons. */
     object Icons {
         const val ACCOUNT = "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"
         const val APP = "M5 4h14v16H5zM9.5 9v6M9.5 12l4-3M11 12l3 3"
-        const val LOOK = "M12 3a9 9 0 1 0 0 18zM12 3a9 9 0 0 1 0 18"
+        /** Look and feel: a picture in a wavy frame, from Kevin's drawing (24 November 2026). */
+        const val LOOK = "M3 3C5 5 9 2.3 12 2.3S19 5 21 3C19 5 21.7 9 21.7 12S19 19 21 21C19 19 15 21.7 12 21.7S5 19 3 21C5 19 2.3 15 2.3 12S5 5 3 3z" +
+            "M7.5 7.5h9v9h-9zM14.6 10a1.3 1.3 0 1 1-2.6 0 1.3 1.3 0 1 1 2.6 0M7.5 14.6c1.4-1.8 3-2 4.5-.6s3 1.3 4.5-.3"
         const val NOTICES = "M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15zM10 21h4"
         const val BACKUP = "M7 18a4.5 4.5 0 0 1-.5-9A6 6 0 0 1 18 8.5a4.5 4.5 0 0 1-.5 9.5M12 12v8M9 15l3-3 3 3"
         const val PRIVACY = "M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6zM9.5 12l2 2 3.5-4"
@@ -108,6 +110,32 @@ object KueSettings {
         const val CROSS = "M6.5 6.5l11 11M17.5 6.5l-11 11"
         const val BOX = "M5 5h14v14H5z"
         const val BOX_TICK = "M5 5h14v14H5zM8 12.5l3 3 5-6"
+
+        // Drawn for every screen of the Kue apps, in place of text signs and stock pictures (Kevin, 24 November 2026:
+        // "Kue icons required in Sounds and Vault throughout"). MORE, DOT and PLAY are drawn filled.
+        const val BACK = "M15 5l-7 7 7 7"
+        const val MORE = "M6 10.6a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8zM12 10.6a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8zM18 10.6a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8z"
+        const val SEARCH = "M10.5 17a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM15.2 15.2L20 20"
+        const val HUB = "M4 11l8-7 8 7M6 9.5V20h12V9.5M10 20v-5h4v5"
+        const val PLACES = "M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"
+        const val THINGS = "M4 8l8-4 8 4v8l-8 4-8-4zM4 8l8 4 8-4M12 12v8"
+        const val PHOTO = "M4 6h16v13H4zM8.5 11a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM4 16.5l5-4.5 4 3.5 3-2.5 4 3.5"
+        const val MUSIC = "M9 18V5.5l10-2.5v13M9 18a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM19 16a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"
+        const val FILM = "M4 5h16v14H4zM8 5v14M16 5v14M4 9.5h4M4 14.5h4M16 9.5h4M16 14.5h4"
+        const val DOCUMENT = "M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6"
+        const val PLUS = "M12 5v14M5 12h14"
+        const val DOT = "M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"
+        const val PLAY_NEXT = "M4 6h11M4 11h11M4 16h6M14 13.5l6 3.5-6 3.5z"
+        const val QUEUE = "M4 6h14M4 11h14M4 16h7M17 13.5v7M13.5 17h7"
+        const val PLAYLIST = "M10 17V5.5l8-2M10 17a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM17.5 11v8M13.5 15h8"
+        const val EDIT = "M4 20l1-4.5L15.5 5a2.1 2.1 0 0 1 3 3L8 18.5zM13.5 7l3 3"
+        const val BIN = "M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13M10.5 11v5.5M13.5 11v5.5"
+        const val PHONE = "M7 3h10v18H7zM12 7v6.5M9.3 10.8L12 13.5l2.7-2.7M10.5 17.5h3"
+        const val FIX = "M4 20L15 9M13 5.5l1-2.5 1 2.5 2.5 1-2.5 1-1 2.5-1-2.5-2.5-1zM18.5 12l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"
+        const val OPEN = "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"
+        const val DISC = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
+        const val PLAY = "M8 5l11 7-11 7z"
+        const val SHUFFLE = "M4 7h3c4 0 6 10 10 10h3M17.5 14l2.5 3-2.5 3M4 17h3c1.5 0 2.6-1.3 3.6-3M13.4 10c1-1.7 2.1-3 3.6-3h3M17.5 4l2.5 3-2.5 3"
 
         /** Profile pictures, drawn (they were emoji). Kept by the emoji each profile already has saved. */
         val pictures = linkedMapOf(
@@ -365,12 +393,10 @@ object KueSettings {
                     }.padding(horizontal = 14.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // The app's own corner colour and its K, small.
-                Box(Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(app.colour), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(22.dp).clip(RoundedCornerShape(5.dp)).background(Color.White), contentAlignment = Alignment.Center) {
-                        Say("K", 13, Color(0xFF0E1626), look, bold = true)
-                    }
-                }
+                // The app's own logo, as on its icon (Kevin, 24 November 2026: the proper logo, not a plain K).
+                androidx.compose.foundation.Image(
+                    painter = androidx.compose.ui.res.painterResource(app.logo), contentDescription = null, modifier = Modifier.size(38.dp),
+                )
                 Spacer(Modifier.width(14.dp))
                 Say(app.name, 16, look.ink, look, bold = true, modifier = Modifier.weight(1f))
                 Box(
