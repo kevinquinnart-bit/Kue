@@ -120,12 +120,12 @@ object KueSettings {
         contrast = p.getBoolean("contrast", false)
     }
 
-    fun setTextStep(step: Int) {
+    fun chooseTextStep(step: Int) {
         textStep = step.coerceIn(0, 4)
         prefs?.edit()?.putInt("textStep", textStep)?.apply()
     }
 
-    fun setContrast(on: Boolean) {
+    fun chooseContrast(on: Boolean) {
         contrast = on
         prefs?.edit()?.putBoolean("contrast", on)?.apply()
     }

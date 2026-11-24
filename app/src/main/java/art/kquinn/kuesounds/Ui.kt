@@ -1128,8 +1128,8 @@ object Ui {
                 "Text size " + (KueSettings.textStep + 1) + " of 5" + if (KueSettings.contrast) " · stronger contrast" else "",
                 open == "look", look, { toggle("look") },
             ) {
-                KueSettings.Scale("Text size", 5, KueSettings.textStep, look) { KueSettings.setTextStep(it) }
-                KueSettings.Toggle("Stronger contrast", "Grey writing drawn nearly white, easier to read.", KueSettings.contrast, look) { KueSettings.setContrast(it) }
+                KueSettings.Scale("Text size", 5, KueSettings.textStep, look) { KueSettings.chooseTextStep(it) }
+                KueSettings.Toggle("Stronger contrast", "Grey writing drawn nearly white, easier to read.", KueSettings.contrast, look) { KueSettings.chooseContrast(it) }
             }
 
             // 4. Notifications
