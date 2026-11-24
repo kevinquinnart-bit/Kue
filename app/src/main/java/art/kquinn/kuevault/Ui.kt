@@ -397,7 +397,7 @@ object Ui {
                         Words(
                             when (kind) {
                                 PlaceKind.GOOGLE -> "The phone asks which Google account"
-                                PlaceKind.HOME -> "A shared folder on your computer, over the home Wi-Fi"
+                                PlaceKind.HOME -> "A shared folder on your computer or network drive, over the home Wi-Fi"
                                 else -> kind.coming
                             },
                             12, K.Soft, lines = 2,
@@ -420,9 +420,9 @@ object Ui {
         var saying by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
-            Title("Home computer", onBack)
+            Title("Home computer or network drive", onBack)
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Words("On the computer, share a folder first (in Windows: right-click the folder › Properties › Sharing › Share). Then type in:", 13, K.Soft, lines = 4)
+                Words("Share a folder first. On Windows: right-click the folder › Properties › Sharing › Share. On a network drive: its own settings page, under shared folders. Then type in:", 13, K.Soft, lines = 4)
                 Field("Computer's name or address", host, "DESKTOP-KQ or 192.168.1.20") { host = it }
                 Field("Shared folder's name", share, "Vault") { share = it }
                 Field("The computer's sign-in name", user, "kevin") { user = it }

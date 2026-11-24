@@ -19,7 +19,7 @@ enum class Section(val title: String, val colour: Long, val ready: Boolean, val 
 /** The kinds of storage a person can connect. [ready]: KueVault can connect it in this version. */
 enum class PlaceKind(val title: String, val ready: Boolean, val coming: String) {
     GOOGLE("Google Drive", true, ""),
-    HOME("Home computer", true, ""),
+    HOME("Home computer or network drive", true, ""),
     ONEDRIVE("OneDrive", false, "OneDrive comes once KueVault is registered with Microsoft"),
     DROPBOX("Dropbox", false, "Dropbox comes once KueVault is registered with Dropbox"),
 }
