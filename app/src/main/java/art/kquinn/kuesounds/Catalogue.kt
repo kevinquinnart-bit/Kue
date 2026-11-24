@@ -194,8 +194,20 @@ object Catalogue {
      * Whether an album's name says it is a greatest hits or other collection, for one the catalogue doesn't file
      * as a compilation. Kevin wants none of those: each song goes to the album it first came out on, or its single.
      */
-    fun looksLikeHits(title: String): Boolean = Regex("\\b(greatest hits|biggest hits|hits|best of|very best|collection|anthology|the essential|essentials|definitive|number ones|no 1s|number 1s|mastermix|megamix|anthems|the ultimate|retrospective|the singles|gold)\\b").containsMatchIn(
+    fun looksLikeHits(title: String): Boolean = hitsWords.containsMatchIn(
         title.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim(),
+    )
+
+    /**
+     * The words that mark a greatest hits or collection. 24 November 2026: more added from the albums on Kevin's
+     * report that stayed as collections ("20 Golden Irish Ballads", "25th Ann. Coll.", "Super Top 50",
+     * "Welcome to My World [16 CD Set]", "As 20 Mais" and others). "Golden Hour" and "The Best Damn Thing" are albums.
+     */
+    private val hitsWords = Regex(
+        """\b(greatest hits|biggest hits|hits|best of|very best|the best (vol|volume)|collection|coll|anthology|the essential|essentials|""" +
+            """definitive|number ones|no 1s|number 1s|mastermix|megamix|anthems|the ultimate|retrospective|the singles|gold|classics|""" +
+            """box set|\d+ cd set|top \d+|\d+th anniversary|\d+th ann|tribute to|absolute|love songs|select mix|now that s what i call|""" +
+            """\d{2,3} (mais|melhores|great|greatest|golden|best|top|rebel|irish|songs|ballads|classic|classics|memories|favourites|favorites|biggest))\b""",
     )
 
     /** Looks a loose song up, to find the album it comes from. Call off the main thread. */

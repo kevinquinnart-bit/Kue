@@ -223,4 +223,18 @@ class LibraryTest {
         org.junit.Assert.assertEquals("Relax", Library.withoutBrackets("Relax [2001 Remaster] (Single Version)"))
         org.junit.Assert.assertEquals("(Untitled)", Library.withoutBrackets("(Untitled)"))
     }
+
+    /** A song off a compilation with no album or single in the catalogue becomes a single of its own, and is fixed again. */
+    @Test
+    fun aSongWithNoHomeBecomesItsOwnSingle() {
+        val t = track("1", "Take My Breath Away (Love Theme From Top Gun)", "Berlin", "80's Alive - Red", 7, albumArtist = "Various Artists").copy(fixed = true, fixedFully = true)
+        val s = Library.asOwnSingle(t)
+        assertEquals("Take My Breath Away", s.album)
+        assertEquals("Berlin", s.albumArtist)
+        assertEquals("Take My Breath Away (Love Theme From Top Gun)", s.title)
+        assertEquals(1, s.trackNo)
+        assertTrue(s.checked)
+        assertFalse(s.fixed)
+        assertEquals(Library.albumKey("Berlin", "Take My Breath Away"), Library.albumKey(Library.albumArtistOf(s), s.album))
+    }
 }

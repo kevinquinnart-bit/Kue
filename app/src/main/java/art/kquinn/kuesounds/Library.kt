@@ -69,6 +69,13 @@ data class LibraryData(
     val singleTitles: Map<String, String> = emptyMap(),
     /** Song id to the file holding its single's cover on this phone. */
     val singleArt: Map<String, String> = emptyMap(),
+    /** Album keys the catalogue files as a greatest hits, best of or other compilation. */
+    val collections: Set<String> = emptySet(),
+    /**
+     * Album keys of songs made a single of their own: songs off a greatest hits or compilation for which the
+     * catalogue has neither an album nor a single (Kevin, 24 November 2026).
+     */
+    val ownSingles: Set<String> = emptySet(),
 )
 
 object Library {
@@ -207,6 +214,19 @@ object Library {
     fun withoutBrackets(title: String): String =
         title.replace(Regex("""\s*[\[(][^\])]*[\])]"""), " ").replace(Regex("\\s+"), " ").trim().ifBlank { title }
 
+    /**
+     * A song off a greatest hits or compilation that the catalogue has no album or single for, filed as a single
+     * of its own: the song's name (without the bracketed part) as the album, its own artist as the album artist.
+     * Kevin, 24 November 2026: "Every song has come from a particular named album or if that fails a single in
+     * its own right." A song whose album changes is fixed again, so the compilation's name and cover come out of the file.
+     */
+    fun asOwnSingle(t: Track): Track {
+        val title = withoutBrackets(t.title)
+        val artist = t.artist.ifBlank { UNKNOWN_ARTIST }
+        val same = title == t.album && artist == t.albumArtist
+        return t.copy(album = title, albumArtist = artist, trackNo = 1, discNo = 0, checked = true, fixed = t.fixed && same)
+    }
+
     fun albumKey(artist: String, album: String): String = sortName(artist) + "\u0001" + sortName(album)
 
     /** The artist an album belongs to: the album artist when the songs name one. */
@@ -329,7 +349,7 @@ object Library {
         return LibraryData(
             tracks, d.folders ?: emptyList(), d.art ?: emptyMap(), d.folderCovers ?: emptyMap(), d.scannedAt,
             d.releases ?: emptyMap(), d.catalogueCovers ?: emptySet(), d.version,
-            d.singleTitles ?: emptyMap(), d.singleArt ?: emptyMap(),
+            d.singleTitles ?: emptyMap(), d.singleArt ?: emptyMap(), d.collections ?: emptySet(), d.ownSingles ?: emptySet(),
         )
     }
 

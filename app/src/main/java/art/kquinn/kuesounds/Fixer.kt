@@ -60,9 +60,12 @@ object Fixer {
         if (Google.canEdit) start(app, albums) else askPermission { start(app, albums) }
     }
 
-    /** Whether an album can be fixed: the catalogue matched it and gave it a cover. */
-    fun canFix(al: Album, d: LibraryData = Scanner.data): Boolean = al.key in d.releases && al.key in d.catalogueCovers &&
-        al.tracks.any { Tagger.canFix(it.fileName) }
+    /**
+     * Whether an album can be fixed: the catalogue matched it and gave it a cover, or it is a song made a single of
+     * its own (written with no cover, so the compilation's picture comes out of the file).
+     */
+    fun canFix(al: Album, d: LibraryData = Scanner.data): Boolean =
+        ((al.key in d.releases && al.key in d.catalogueCovers) || al.key in d.ownSingles) && al.tracks.any { Tagger.canFix(it.fileName) }
 
     /** Fixed the full way (song name and artist put right, the rest taken out, album and cover written). */
     fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(it.fileName) }.all { it.fixed && it.fixedFully }
@@ -91,13 +94,15 @@ object Fixer {
             while (true) {
                 val key = next() ?: break
                 val al = Library.albums(Scanner.data.tracks).firstOrNull { it.key == key } ?: continue  // fresh, not the screens' copy
-                val cover = Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers } ?: continue
+                // A single of its own has no catalogue record: no list of songs, and no cover (the compilation's comes out).
+                val own = key in Scanner.data.ownSingles && key !in Scanner.data.releases
+                val cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers } ?: continue
                 val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) }
                 // 1 and 2: the album's own list of songs, with each one's proper name and artist.
                 status = "Fixing files · " + al.title + " · finding its songs' proper names"
                 progress(status)
                 val releaseId = Scanner.data.releases[key]?.substringBefore('|').orEmpty()
-                val listed = if (releaseId.isEmpty()) null else runCatching { Catalogue.releaseSongs(releaseId) }
+                val listed = if (own) emptyList() else if (releaseId.isEmpty()) null else runCatching { Catalogue.releaseSongs(releaseId) }
                     .onFailure { Scanner.note("couldn't list the songs of " + al.artist + " / " + al.title + ": " + it.javaClass.simpleName + " " + it.message) }
                     .getOrNull()
                 if (listed == null) { notLookedUp++; continue }  // left to fix, for the next Fix
@@ -157,7 +162,7 @@ object Fixer {
      * still counted its pass as fresh. A refusal now drops that pass and the song is tried once more with a new one;
      * only a second refusal stops the fixing, which is when Google really does want the permission asked for again.
      */
-    private suspend fun fixOne(context: Context, t: Track, al: Album, cover: File, song: Catalogue.Song?): Boolean {
+    private suspend fun fixOne(context: Context, t: Track, al: Album, cover: File?, song: Catalogue.Song?): Boolean {
         try {
             return fixOnce(context, t, al, cover, song)
         } catch (e: Drive.SignedOut) {
@@ -173,7 +178,7 @@ object Fixer {
     }
 
     /** One try at one song. Throws [Drive.SignedOut] when Google refuses the pass; any other failure is noted. */
-    private suspend fun fixOnce(context: Context, t: Track, al: Album, cover: File, song: Catalogue.Song?): Boolean {
+    private suspend fun fixOnce(context: Context, t: Track, al: Album, cover: File?, song: Catalogue.Song?): Boolean {
         val work = File(context.cacheDir, "fix").apply { mkdirs() }
         val file = File(work, t.id + "." + Library.ending(t.fileName))
         return try {

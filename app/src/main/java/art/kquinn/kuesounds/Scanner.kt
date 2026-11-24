@@ -144,6 +144,7 @@ object Scanner {
             "Albums: " + albums.size,
             "Albums looked up: " + albums.count { al -> al.tracks.all { it.checked } },
             "Albums with a cover: " + albums.count { artFor(it) != null },
+            "Songs made singles of their own: " + d.tracks.count { keyOf(it) in d.ownSingles },
             "Folders: " + d.folders.size + ", folder cover pictures: " + d.folderCovers.size,
             "Now: " + status.ifEmpty { "idle" } + (if (problem.isNotEmpty()) " / problem: $problem" else ""),
             "",
@@ -203,8 +204,21 @@ object Scanner {
             )
             save()
         }
+        // 24 November 2026: songs off greatest hits and compilations that the catalogue had no album or single for
+        // stayed on the collection (761 of 1,645 on Kevin's phone). Kevin: every song goes to its named album or,
+        // failing that, a single in its own right. Their albums are looked up once more, so the ones the catalogue
+        // files as collections are known; the songs themselves aren't asked about again.
+        if (data.version < 6) {
+            data = data.copy(
+                tracks = data.tracks.map { t -> if (t.ownLook && keyOf(t) !in data.releases) t.copy(checked = false) else t },
+                version = 6,
+            )
+            save()
+        }
         read = data.tracks.count { it.tagged }
     }
+
+    private fun keyOf(t: Track): String = Library.albumKey(Library.albumArtistOf(t), t.album)
 
     /** Whether a scan is going on. Kept as screen state, so the screens change the moment it starts and ends. */
     var running by mutableStateOf(false)
@@ -474,7 +488,10 @@ object Scanner {
                     notFound++
                     if (notFound <= 30) note("not in the catalogue: " + al.artist + " / " + clean)
                 }
-                if (apply(al.tracks.map { it.id }.toSet(), al, m, clean)) covers++
+                val ids = al.tracks.map { it.id }.toSet()
+                if (apply(ids, al, m, clean)) covers++
+                // Kept as a collection, so a song off it that the catalogue can't place becomes a single of its own.
+                if (hits) data = data.copy(collections = data.collections + data.tracks.filter { it.id in ids }.map { keyOf(it) })
                 if (i % 10 == 9) save()
             }
             save()
@@ -501,6 +518,21 @@ object Scanner {
             }
             save()
             if (songs.isNotEmpty()) note("looked up " + songs.size + " songs from compilations, greatest hits, unknown albums or with no album: " + moved + " given their own album or single")
+
+            // Songs off a greatest hits or compilation that the catalogue has neither an album nor a single for: each
+            // becomes a single of its own, so no collection is left (Kevin, 24 November 2026). Songs on an ordinary
+            // album the catalogue doesn't know ("Big Bam Boom") stay on that album. A song whose lookup failed
+            // hasn't been looked up yet, so it waits for next time.
+            val left = Library.albums(data.tracks).flatMap { al ->
+                al.tracks.filter { t -> t.ownLook && keyOf(t) !in data.releases && keyOf(t) !in data.ownSingles && fromCollection(t, al, loose) }
+            }
+            if (left.isNotEmpty()) {
+                val ids = left.map { it.id }.toSet()
+                data = data.copy(tracks = data.tracks.map { if (it.id in ids) Library.asOwnSingle(it) else it })
+                data = data.copy(ownSingles = data.ownSingles + data.tracks.filter { it.id in ids }.map { keyOf(it) })
+                save()
+                note(left.size.toString() + " songs off greatest hits or compilations had no album or single in the catalogue: each is now a single of its own")
+            }
 
             // Every other song: did it come out as a single? One question per song, so only on Wi-Fi.
             val rest = data.tracks.filter { !it.singleChecked }
@@ -530,6 +562,13 @@ object Scanner {
     /** True when the last scan stopped looking for singles because the phone wasn't on Wi-Fi. */
     var waitingForWifi by mutableStateOf(false)
         private set
+
+    /**
+     * Whether a song sits on a greatest hits or other collection: one of a compilation's songs, on an album of mixed
+     * artists or with no album, on an album the catalogue files as a collection, or on one whose name says so.
+     */
+    private fun fromCollection(t: Track, al: Album, loose: Set<String>): Boolean =
+        t.id in loose || onItsOwn(al) || keyOf(t) in data.collections || Catalogue.looksLikeHits(t.album)
 
     /** Albums whose songs are looked up one by one: compilations of mixed artists, and songs with no album. */
     private fun onItsOwn(al: Album): Boolean =

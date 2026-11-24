@@ -110,6 +110,18 @@ class CatalogueTest {
             assertEquals(t, false, Catalogue.looksLikeHits(t))
     }
 
+    /** Collections from Kevin's report of 24 November 2026 that the catalogue didn't know, and albums that must stay albums. */
+    @Test
+    fun moreCollectionsAreKnownByName() {
+        for (t in listOf(
+            "20 Golden Irish Ballads, Vol.2", "25 Rebel Songs Of Ireland", "25th Ann. Coll.", "Absolute Christmas", "As 20 Mais",
+            "Back Home Again - 20 Memories Of Home & Family", "The Best, Vol 2", "The Box Set 1964-2004: Blue",
+            "Rock Instrumental Classics Vol.2 : The Sixties", "Super Top 50", "Welcome to My World [16 CD Set]", "A Tribute To The Ladies",
+        )) assertEquals(t, true, Catalogue.looksLikeHits(t))
+        for (t in listOf("The Best Damn Thing", "Big Bam Boom", "X & Y", "So", "Be Yourself Tonight", "Count Three & Pray", "Revolver", "Labour of Love II", "Talk On Corners (Special Edition)"))
+            assertEquals(t, false, Catalogue.looksLikeHits(t))
+    }
+
     @Test
     fun aSongIsSearchedForWithoutItsBrackets() {
         assertEquals(
