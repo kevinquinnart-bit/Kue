@@ -33,6 +33,8 @@ interface Store {
     fun download(item: Item, target: File, progress: (Int) -> Unit)
     /** Puts a file where it can still be got back: Google's bin, or KueVault › Bin on a home computer. */
     fun bin(item: Item)
+    /** Removes a file for good. Only used once the file is safely in two other places. */
+    fun delete(item: Item)
 }
 
 /** A Google account, through the pass Google gave for it. */
@@ -43,6 +45,7 @@ class GoogleStore(private val place: Place, private val token: String) : Store {
         Drive.upload(context, token, place.email, place.id, section, uri, name, mime, size, progress)
     override fun download(item: Store.Item, target: File, progress: (Int) -> Unit) = Drive.download(token, item, target, progress)
     override fun bin(item: Store.Item) = Drive.bin(token, item)
+    override fun delete(item: Store.Item) = Drive.delete(token, item)
 }
 
 /**
@@ -191,6 +194,8 @@ class HomeStore(private val place: Place, private val password: String) : Store 
         )
         file.use { it.rename(to) }
     }
+
+    override fun delete(item: Store.Item) = onShare { share -> share.rm(item.id) }
 
     companion object {
         /** The kind of file, from its name, for the phone's "open with". */

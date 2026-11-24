@@ -46,4 +46,22 @@ class VaultTest {
         assertEquals("kevin", places[0].user)
         assertEquals(mapOf(Section.FILMS to "h:pc/vault"), Vault.readHomes("""{"FILMS":"h:pc/vault","GONE":"x"}"""))
     }
+
+    private fun file(name: String, ms: Long, size: Long) = Store.Item(name, name, size, ms, "", "g:a", Section.PHOTOS)
+
+    @Test
+    fun archiveTakesTheOldestUntilBackToSeventyPercent() {
+        val files = listOf(file("new", 30, 3 * gb), file("oldest", 10, 2 * gb), file("middle", 20, 2 * gb), file("newer", 25, 2 * gb))
+        // 13.5 of 15 GB used: 90% full; 70% is 10.5 GB, so 3 GB must go: the oldest (2) and the next (2).
+        assertEquals(listOf("oldest", "middle"), Vault.toArchive(files, Quota(13_500_000_000L, 15 * gb)).map { it.name })
+    }
+
+    @Test
+    fun archiveWaitsUntilEightyPercentUnlessAskedNow() {
+        val files = listOf(file("a", 1, 1 * gb), file("b", 2, 1 * gb))
+        val q = Quota(11_250_000_000L, 15 * gb) // 75% full
+        assertEquals(emptyList<Store.Item>(), Vault.toArchive(files, q))
+        assertEquals(listOf("a"), Vault.toArchive(files, q, force = true).map { it.name })
+        assertEquals(emptyList<Store.Item>(), Vault.toArchive(files, Quota(1, null), force = true))
+    }
 }

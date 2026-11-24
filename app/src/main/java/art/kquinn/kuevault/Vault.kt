@@ -61,6 +61,10 @@ enum class Room { OK, NEARLY_FULL, FULL, NO_PLACE }
 object Vault {
     /** A place is "nearly full" from here, and the person is warned. */
     const val NEARLY = 0.85f
+    /** A section with an archive starts moving its oldest files there when its place is this full... */
+    const val ARCHIVE_FROM = 0.80f
+    /** ...and stops when it is back down to this. */
+    const val ARCHIVE_TO = 0.70f
     /** A file that would take a place past this isn't put in; the place itself never runs out. */
     const val FULL = 0.97f
 
@@ -68,16 +72,24 @@ object Vault {
     val places = mutableStateListOf<Place>()
     /** Which place each section lives in, by place id. */
     val homes = mutableStateMapOf<Section, String>()
+    /** Where each section keeps a full backup copy of its files, by place id. */
+    val copies = mutableStateMapOf<Section, String>()
+    /** Where each section's older files go when its place gets full, by place id. Only with a backup copy too. */
+    val archives = mutableStateMapOf<Section, String>()
     val quotas = mutableStateMapOf<String, Quota>()
 
     fun init(context: Context) {
         app = context.applicationContext
         places.clear()
         homes.clear()
+        copies.clear()
+        archives.clear()
         val p = prefs()
         if (p.contains("places")) {
             places.addAll(readPlaces(p.getString("places", "[]").orEmpty()))
             homes.putAll(readHomes(p.getString("homes", "{}").orEmpty()))
+            copies.putAll(readHomes(p.getString("copies", "{}").orEmpty()))
+            archives.putAll(readHomes(p.getString("archives", "{}").orEmpty()))
         } else if (p.contains("accounts")) {
             // Version 1 kept a list of Google accounts per section. Each account becomes a place; each section
             // lives in its first account. Files in a section's other accounts stay there and still show.
@@ -128,8 +140,9 @@ object Vault {
             if (p.share.isNotEmpty()) addProperty("share", p.share)
             if (p.user.isNotEmpty()) addProperty("user", p.user)
         })
-        val h = JsonObject().apply { for ((s, id) in homes) addProperty(s.name, id) }
-        prefs().edit().putString("places", array.toString()).putString("homes", h.toString()).remove("accounts").apply()
+        fun map(m: Map<Section, String>) = JsonObject().apply { for ((s, id) in m) addProperty(s.name, id) }.toString()
+        prefs().edit().putString("places", array.toString()).putString("homes", map(homes)).putString("copies", map(copies))
+            .putString("archives", map(archives)).remove("accounts").apply()
     }
 
     private fun readQuota(id: String): Quota? {
@@ -160,6 +173,8 @@ object Vault {
         val place = place(id) ?: return
         places.removeAll { it.id == id }
         homes.entries.removeAll { it.value == id }
+        copies.entries.removeAll { it.value == id }
+        archives.entries.removeAll { it.value == id }
         quotas.remove(id)
         prefs().edit().remove("used.$id").remove("limit.$id").apply()
         if (place.kind == PlaceKind.HOME) Secrets.forget(app, id)
@@ -171,11 +186,35 @@ object Vault {
     /** Makes [section] live in place [id]. New files go there from now on; files already elsewhere stay put. */
     fun setHome(section: Section, id: String) {
         homes[section] = id
+        if (copies[section] == id) { copies.remove(section); archives.remove(section) }
+        if (archives[section] == id) archives.remove(section)
         save()
         Report.note(section.title + " now lives in " + (place(id)?.let { describe(it) } ?: "?"))
     }
 
     fun homeOf(section: Section): Place? = place(homes[section])
+    fun copyOf(section: Section): Place? = place(copies[section])
+    fun archiveOf(section: Section): Place? = place(archives[section])
+
+    /** Sets or clears ([id] null) where [section] keeps its backup copy. Clearing it clears the archive too. */
+    fun setCopy(section: Section, id: String?) {
+        if (id == null) { copies.remove(section); archives.remove(section) } else copies[section] = id
+        if (archives[section] != null && archives[section] == copies[section]) archives.remove(section)
+        save()
+        Report.note(section.title + " backup copy: " + (place(id)?.let { describe(it) } ?: "none"))
+    }
+
+    /**
+     * Sets or clears where [section]'s older files go. Refused (false) without a backup copy in another place:
+     * an archived file must always be in two places, so one lost or stolen drive never loses it.
+     */
+    fun setArchive(section: Section, id: String?): Boolean {
+        if (id != null && (copies[section] == null || copies[section] == id || homes[section] == id)) return false
+        if (id == null) archives.remove(section) else archives[section] = id
+        save()
+        Report.note(section.title + " archive: " + (place(id)?.let { describe(it) } ?: "none"))
+        return true
+    }
 
     /** The sections living in place [id]. */
     fun sectionsIn(id: String): List<Section> = Section.entries.filter { homes[it] == id }
@@ -185,6 +224,8 @@ object Vault {
         for (p in places) if (p.kind == PlaceKind.HOME) Secrets.forget(app, p.id)
         places.clear()
         homes.clear()
+        copies.clear()
+        archives.clear()
         quotas.clear()
         prefs().edit().clear().apply()
         Report.note("everything on this phone forgotten")
@@ -205,6 +246,25 @@ object Vault {
             after >= NEARLY -> Room.NEARLY_FULL
             else -> Room.OK
         }
+    }
+
+    /**
+     * Which files to archive so a place at [quota] comes back down to [ARCHIVE_TO]: the oldest first.
+     * Nothing when the place isn't past [ARCHIVE_FROM] (or [force], for "Archive now": past [ARCHIVE_TO]).
+     */
+    fun toArchive(files: List<Store.Item>, quota: Quota?, force: Boolean = false): List<Store.Item> {
+        val limit = quota?.limit ?: return emptyList()
+        if (limit <= 0) return emptyList()
+        val start = if (force) ARCHIVE_TO else ARCHIVE_FROM
+        if (quota.used.toFloat() / limit < start) return emptyList()
+        var over = quota.used - (limit * ARCHIVE_TO).toLong()
+        val out = ArrayList<Store.Item>()
+        for (f in files.sortedBy { it.modifiedMs }) {
+            if (over <= 0) break
+            out += f
+            over -= f.size
+        }
+        return out
     }
 
     /** A place for the report, with addresses shortened: "Google Drive kq…@gmail.com". */

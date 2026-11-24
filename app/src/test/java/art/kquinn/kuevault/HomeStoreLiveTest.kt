@@ -33,6 +33,11 @@ class HomeStoreLiveTest {
         store.bin(items[0])
         assertEquals(emptyList<Store.Item>(), store.list(Section.DOCUMENTS))
         assertTrue(store.onShare { it.fileExists("KueVault\\Bin\\Report.pdf") })
+        // Removing for good, as the archive does once a file is safely in two places.
+        store.onShare { s -> store.copyUp(s, "KueVault\\Documents\\Gone.txt", "bye".byteInputStream(), 3) {} }
+        val gone = store.list(Section.DOCUMENTS).single()
+        store.delete(gone)
+        assertTrue(store.list(Section.DOCUMENTS).isEmpty())
     }
 
     @Test

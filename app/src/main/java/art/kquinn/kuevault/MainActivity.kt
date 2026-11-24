@@ -62,7 +62,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val about = withContext(Dispatchers.IO) { runCatching { Drive.about(token) }.getOrNull() }
             about?.let { Vault.keepQuota(place.id, it.second) }
-            Work.doing = email + (if (again) " is signed in again." else " connected.") + (section?.let { " " + it.title + " lives there now." } ?: "")
+            Work.told = email + (if (again) " is signed in again." else " connected.") + (section?.let { " " + it.title + " lives there now." } ?: "")
         }
     }
 

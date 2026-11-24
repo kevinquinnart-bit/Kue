@@ -19,6 +19,8 @@ import java.io.File
 object Work {
     /** What is being done now, for the screen: "Uploading Report.pdf · 42%". Empty when nothing is. */
     var doing by mutableStateOf("")
+    /** The last thing finished, said plainly, until it is closed. */
+    var told by mutableStateOf("")
     /** The last thing that went wrong, until it is closed. */
     var problem by mutableStateOf("")
     /** Google places that want signing in again before they can be used, by place id. */
@@ -185,5 +187,138 @@ object Work {
         unreachable.remove(place.id)
         result.getOrNull()?.let { Vault.keepQuota(place.id, it) }
         return "Connected"
+    }
+
+    // ------------------------------------------------------------------ Moving, backup copies and the archive
+
+    /** Whether the phone is on Wi-Fi (or another connection that isn't charged by the amount). */
+    fun onWifi(context: Context): Boolean {
+        val cm = context.getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
+    /** The same file already in a list: same name and same size. */
+    private fun sameIn(list: List<Store.Item>, item: Store.Item): Store.Item? = list.firstOrNull { it.name == item.name && it.size == item.size }
+
+    /**
+     * Copies [item] from its place into the same section's folder in [to]. Nothing is copied when the same
+     * file is already there. Gives back the copy, or null with the reason noted.
+     */
+    private suspend fun copy(context: Context, item: Store.Item, from: Store, to: Store, toPlace: Place, there: MutableList<Store.Item>): Store.Item? {
+        sameIn(there, item)?.let { return it }
+        val folder = File(context.cacheDir, "moving").apply { mkdirs() }
+        val file = File(folder, "f" + System.nanoTime())
+        return try {
+            withContext(Dispatchers.IO) {
+                from.download(item, file) {}
+                if (item.size > 0 && file.length() != item.size) throw java.io.IOException("the copy came back the wrong size")
+                val made = to.upload(context, item.section, Uri.fromFile(file), item.name, item.mime, file.length()) {}
+                if (made.size != file.length()) throw java.io.IOException("the new copy is the wrong size")
+                there += made
+                made
+            }
+        } catch (e: Exception) {
+            failed(toPlace, e, "copying " + item.section.title)
+            null
+        } finally {
+            file.delete()
+        }
+    }
+
+    /**
+     * Moves [section]'s files from [from] into [to], the section's new place. Each original goes to its
+     * place's bin only once its copy is safely in. The answer is what to tell the person.
+     */
+    suspend fun moveSection(context: Context, section: Section, from: Place, to: Place): String {
+        val a = store(context, from) ?: return signInWords(from)
+        val b = store(context, to) ?: return signInWords(to)
+        val files = withContext(Dispatchers.IO) { runCatching { a.list(section) }.getOrNull() } ?: return from.label + " couldn't be read."
+        val there = withContext(Dispatchers.IO) { runCatching { b.list(section) }.getOrNull() }?.toMutableList() ?: return to.label + " couldn't be read."
+        var moved = 0
+        for ((i, item) in files.withIndex()) {
+            doing = "Moving " + section.title + " · " + (i + 1) + " of " + files.size + " · " + item.name
+            copy(context, item, a, b, to, there) ?: break
+            withContext(Dispatchers.IO) { runCatching { a.bin(item) }.onFailure { failed(from, it, "binning a moved file") } }
+            moved++
+        }
+        doing = ""
+        readLibrary(context)
+        readSpace(context)
+        Report.note("moved " + moved + " of " + files.size + " " + section.title + " files")
+        return if (moved == files.size) "Moved all " + moved + " " + section.title.lowercase() + " files to " + to.label + "."
+        else "Moved " + moved + " of " + files.size + ". " + (unreachable[to.id] ?: "The rest stay where they were; try again later.")
+    }
+
+    /** Makes sure every file of [section] in its place also has a copy in its backup place. Gives back how many were copied, or null. */
+    suspend fun backupNow(context: Context, section: Section): Int? {
+        val home = Vault.homeOf(section) ?: return null
+        val copyPlace = Vault.copyOf(section) ?: return null
+        val a = store(context, home) ?: return null
+        val b = store(context, copyPlace) ?: return null
+        val files = withContext(Dispatchers.IO) { runCatching { a.list(section) }.onFailure { failed(home, it, "reading for the backup") }.getOrNull() } ?: return null
+        val there = withContext(Dispatchers.IO) { runCatching { b.list(section) }.onFailure { failed(copyPlace, it, "reading the backup") }.getOrNull() }?.toMutableList() ?: return null
+        val missing = files.filter { sameIn(there, it) == null }
+        var done = 0
+        for ((i, item) in missing.withIndex()) {
+            doing = "Backup copy of " + section.title + " · " + (i + 1) + " of " + missing.size + " · " + item.name
+            copy(context, item, a, b, copyPlace, there) ?: break
+            done++
+        }
+        doing = ""
+        if (done > 0) Report.note("backup copy: " + done + " " + section.title + " files copied to " + Vault.describe(copyPlace))
+        return done
+    }
+
+    /**
+     * Moves [section]'s oldest files out of its place to its archive, until the place is back to 70% full.
+     * A file leaves its place only once it is safely both in the archive and in the backup copy, so it is
+     * always in two places. [force]: "Archive now", from 70% full instead of 80%. The answer is what to say.
+     */
+    suspend fun archiveNow(context: Context, section: Section, force: Boolean): String {
+        val home = Vault.homeOf(section) ?: return section.title + " has no place."
+        val copyPlace = Vault.copyOf(section) ?: return "Set a backup copy first: archived files are always kept in two places."
+        val archivePlace = Vault.archiveOf(section) ?: return "Choose where the archive goes first."
+        val a = store(context, home) ?: return signInWords(home)
+        val b = store(context, copyPlace) ?: return signInWords(copyPlace)
+        val c = store(context, archivePlace) ?: return signInWords(archivePlace)
+        readSpace(context)
+        val files = withContext(Dispatchers.IO) { runCatching { a.list(section) }.getOrNull() } ?: return home.label + " couldn't be read."
+        val plan = Vault.toArchive(files, Vault.quotas[home.id], force)
+        if (plan.isEmpty()) return home.label + " has plenty of room: nothing needs archiving."
+        val inCopy = withContext(Dispatchers.IO) { runCatching { b.list(section) }.getOrNull() }?.toMutableList() ?: return unreachable[copyPlace.id] ?: (copyPlace.label + " couldn't be read.")
+        val inArchive = withContext(Dispatchers.IO) { runCatching { c.list(section) }.getOrNull() }?.toMutableList() ?: return unreachable[archivePlace.id] ?: (archivePlace.label + " couldn't be read.")
+        var done = 0
+        var freed = 0L
+        for ((i, item) in plan.withIndex()) {
+            doing = "Archiving " + section.title + " · " + (i + 1) + " of " + plan.size + " · " + item.name
+            copy(context, item, a, b, copyPlace, inCopy) ?: break
+            copy(context, item, a, c, archivePlace, inArchive) ?: break
+            // Both copies are in and the right size: only now does the original go, for good, freeing its space.
+            val gone = withContext(Dispatchers.IO) { runCatching { a.delete(item) }.onFailure { failed(home, it, "removing an archived file") }.isSuccess }
+            if (!gone) break
+            Library.remove(item)
+            done++
+            freed += item.size
+        }
+        doing = ""
+        readLibrary(context)
+        readSpace(context)
+        Report.note("archived " + done + " of " + plan.size + " " + section.title + " files, " + Vault.size(freed) + " freed")
+        return if (done == plan.size) "Archived " + done + " older " + section.title.lowercase() + " files and freed " + Vault.size(freed) + ". Each is in " + archivePlace.label + " and " + copyPlace.label + "."
+        else "Archived " + done + " of " + plan.size + ". " + (unreachable[archivePlace.id] ?: unreachable[copyPlace.id] ?: "The rest stay where they are; try again later.")
+    }
+
+    /** On opening, on Wi-Fi: tops up backup copies and archives any section whose place is past 80%. */
+    suspend fun keepUp(context: Context) {
+        if (!onWifi(context) || doing.isNotEmpty()) return
+        for (section in Section.entries) {
+            if (Vault.copyOf(section) != null) backupNow(context, section)
+            if (Vault.archiveOf(section) != null) {
+                val home = Vault.homeOf(section) ?: continue
+                val q = Vault.quotas[home.id] ?: continue
+                if (q.limit != null && q.fraction >= Vault.ARCHIVE_FROM) archiveNow(context, section, force = false)
+            }
+        }
     }
 }

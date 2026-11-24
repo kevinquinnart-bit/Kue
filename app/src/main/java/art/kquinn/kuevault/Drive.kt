@@ -173,6 +173,14 @@ object Drive {
         if (!part.renameTo(target)) throw IOException("the downloaded file couldn't be kept")
     }
 
+    /** Removes a file for good, straight away, freeing its space. */
+    fun delete(token: String, item: Store.Item) {
+        http.newCall(Request.Builder().url("$API/files/" + item.id).header("Authorization", "Bearer $token").delete().build()).execute().use { r ->
+            if (r.code == 401) throw SignedOut()
+            if (!r.isSuccessful && r.code != 404) throw IOException("Google Drive answered " + r.code + " to removing a file")
+        }
+    }
+
     /** Moves a file to the account's bin, where Google keeps it for 30 days. */
     fun bin(token: String, item: Store.Item) {
         val body = """{"trashed":true}""".toRequestBody("application/json".toMediaType())

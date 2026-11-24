@@ -81,6 +81,8 @@ sealed class Screen {
     data class Files(val section: Section) : Screen()
     /** Choosing which place [section] lives in. */
     data class ChooseHome(val section: Section) : Screen()
+    /** Choosing where [section] keeps its backup copy ([archive] false) or its archive ([archive] true). */
+    data class ChooseKeep(val section: Section, val archive: Boolean) : Screen()
     /** Choosing what kind of place to connect; [forSection] lives there once it's connected. */
     data class AddPlace(val forSection: Section?) : Screen()
     /** Typing in a home computer's details. */
@@ -140,7 +142,7 @@ object Ui {
                 else -> Screen.Hub
             }
         }
-        LaunchedEffect(Vault.places.size) { if (Vault.places.isNotEmpty()) { Work.readSpace(context); Work.readLibrary(context) } }
+        LaunchedEffect(Vault.places.size) { if (Vault.places.isNotEmpty()) { Work.readSpace(context); Work.readLibrary(context); Work.keepUp(context) } }
 
         Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
             Box(Modifier.weight(1f)) {
@@ -157,10 +159,18 @@ object Ui {
                     Screen.Library -> LibraryScreen()
                     Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) })
                     Screen.Settings -> Settings { screen = Screen.Hub }
-                    is Screen.Files -> Files(s.section, asks, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(s.section) })
+                    is Screen.Files -> Files(s.section, asks, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(s.section) }, onKeep = { archive -> screen = Screen.ChooseKeep(s.section, archive) })
+                    is Screen.ChooseKeep -> ChooseKeep(s.section, s.archive, onDone = { screen = Screen.Files(s.section) })
                     is Screen.ChooseHome -> ChooseHome(
                         s.section,
-                        onPick = { id -> Vault.setHome(s.section, id); Work.doing = s.section.title + " now lives in " + (Vault.place(id)?.label ?: "") + "."; screen = Screen.Hub },
+                        onPick = { id, move ->
+                            val before = Vault.homeOf(s.section)
+                            Vault.setHome(s.section, id)
+                            val to = Vault.place(id)
+                            Work.told = s.section.title + " now lives in " + (to?.label ?: "") + "."
+                            if (move && before != null && to != null && before.id != to.id) scope.launch { Work.told = Work.moveSection(context, s.section, before, to) }
+                            screen = Screen.Files(s.section)
+                        },
                         onAdd = { screen = Screen.AddPlace(s.section) },
                         onBack = { screen = Screen.Hub },
                     )
@@ -174,6 +184,11 @@ object Ui {
                 }
             }
             if (Work.doing.isNotEmpty()) Box(Modifier.fillMaxWidth().background(K.Raised).padding(horizontal = 20.dp, vertical = 10.dp)) { Words(Work.doing, 14) }
+            if (Work.told.isNotEmpty()) {
+                Row(Modifier.fillMaxWidth().background(K.Raised).clickable { Work.told = "" }.padding(horizontal = 20.dp, vertical = 10.dp)) {
+                    Words(Work.told + "  ·  tap to close", 14, lines = 4)
+                }
+            }
             if (Work.problem.isNotEmpty()) {
                 Row(Modifier.fillMaxWidth().background(Color(0xFF5A2A1A)).clickable { Work.problem = "" }.padding(horizontal = 20.dp, vertical = 10.dp)) {
                     Words(Work.problem + "  ·  tap to close", 14, lines = 4)
@@ -182,7 +197,7 @@ object Ui {
             Updates.offer?.let { latest ->
                 Row(Modifier.fillMaxWidth().background(K.Panel).padding(horizontal = 20.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Words("KueVault " + latest.name + " is ready", 14, modifier = Modifier.weight(1f))
-                    Button("Update", main = true) { Updates.offer = null; scope.launch { Work.doing = Updates.updateByHand(context) { Work.doing = it } } }
+                    Button("Update", main = true) { Updates.offer = null; scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
                     Spacer(Modifier.width(8.dp))
                     Button("Not now") { Updates.putOff = latest.code; Updates.offer = null }
                 }
@@ -259,9 +274,13 @@ object Ui {
 
     /** One section's files, from every place, newest first; new ones go to the section's own place. */
     @Composable
-    private fun Files(section: Section, asks: Asks, onBack: () -> Unit, onMove: () -> Unit) {
+    private fun Files(section: Section, asks: Asks, onBack: () -> Unit, onMove: () -> Unit, onKeep: (Boolean) -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
         val home = Vault.homeOf(section)
         val files = Library.of(section)
+        val copyPlace = Vault.copyOf(section)
+        val archivePlace = Vault.archiveOf(section)
         Column(Modifier.fillMaxSize()) {
             Title(section.title, onBack)
             Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -270,6 +289,20 @@ object Ui {
                     Words("Change", 12, K.Accent, bold = true, lines = 1)
                 }
                 if (home != null) Button("+ Add files", main = true) { asks.pickFiles(section) }
+            }
+            if (home != null) Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.fillMaxWidth().clickable { onKeep(false) }, verticalAlignment = Alignment.CenterVertically) {
+                    Words("Backup copy", 13, K.Soft, lines = 1, modifier = Modifier.weight(1f))
+                    Words(copyPlace?.label ?: "None · set one", 13, if (copyPlace == null) K.Accent else K.Ink, bold = copyPlace == null, lines = 1)
+                }
+                Row(Modifier.fillMaxWidth().clickable { if (copyPlace == null) Work.problem = "Set a backup copy first: archived files are always kept in two places." else onKeep(true) }, verticalAlignment = Alignment.CenterVertically) {
+                    Words("Archive for older files", 13, K.Soft, lines = 1, modifier = Modifier.weight(1f))
+                    Words(archivePlace?.label ?: if (copyPlace == null) "Needs a backup copy" else "None · set one", 13, if (archivePlace == null) K.Accent else K.Ink, bold = archivePlace == null, lines = 1)
+                }
+                if (copyPlace != null && Work.doing.isEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button("Copy now") { scope.launch { val n = Work.backupNow(context, section); if (n != null) Work.told = if (n == 0) "The backup copy is up to date." else "$n files copied to " + copyPlace.label + "."; if (n == null) Work.problem = Work.unreachable[copyPlace.id] ?: "The backup copy couldn't be reached." } }
+                    if (archivePlace != null) Button("Archive now") { scope.launch { Work.told = Work.archiveNow(context, section, force = true) } }
+                }
             }
             if (section.coming.isNotEmpty()) Words(section.coming + ".", 12, K.Soft, lines = 2, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
             Spacer(Modifier.height(8.dp))
@@ -402,24 +435,72 @@ object Ui {
         }
     }
 
-    /** Which place a section lives in: one of the places already connected, or a new one. */
+    /**
+     * Which place a section lives in: one of the places already connected, or a new one. When the section
+     * already has files somewhere, the person is asked whether they move too.
+     */
     @Composable
-    private fun ChooseHome(section: Section, onPick: (String) -> Unit, onAdd: () -> Unit, onBack: () -> Unit) {
+    private fun ChooseHome(section: Section, onPick: (String, Boolean) -> Unit, onAdd: () -> Unit, onBack: () -> Unit) {
+        var asking by remember { mutableStateOf<String?>(null) }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Title("Where should " + section.title + " live?", onBack)
-            Words("New " + section.title.lowercase() + " go there. Anything already put somewhere else stays where it is and still shows.", 14, K.Soft, lines = 3, modifier = Modifier.padding(horizontal = 20.dp))
+            Words("New " + section.title.lowercase() + " go there.", 14, K.Soft, lines = 3, modifier = Modifier.padding(horizontal = 20.dp))
             Spacer(Modifier.height(12.dp))
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val now = Vault.homes[section]
+                val already = now?.let { id -> Library.of(section).filter { it.placeId == id } }.orEmpty()
                 for (p in Vault.places) {
                     val q = Vault.quotas[p.id]
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).then(if (p.id == now) Modifier.border(2.dp, K.Accent, RoundedCornerShape(14.dp)) else Modifier).clickable { onPick(p.id) }.padding(14.dp)) {
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).then(if (p.id == now) Modifier.border(2.dp, K.Accent, RoundedCornerShape(14.dp)) else Modifier)
+                        .clickable { if (p.id == now) onPick(p.id, false) else if (already.isEmpty()) onPick(p.id, false) else asking = p.id }.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Words(p.kind.title + if (p.id == now) " · now" else "", 12, K.Soft, lines = 1)
                         Words(p.label, 15, bold = true, lines = 1)
                         if (q?.limit != null) Words(Vault.size(q.free) + " free", 12, K.Soft, lines = 1)
+                        if (asking == p.id) {
+                            Words("Move the " + already.size + " " + section.title.lowercase() + " files (" + Vault.size(already.sumOf { it.size }) + ") already in " + (Vault.place(now)?.label ?: "") + " here too? Each original goes to its bin once its copy is safely in.", 13, K.Ink, lines = 5)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button("Move them too", main = true) { onPick(p.id, true) }
+                                Button("Leave them") { onPick(p.id, false) }
+                            }
+                        }
                     }
                 }
                 Button("+ Connect a new place", main = true, modifier = Modifier.fillMaxWidth(), onClick = onAdd)
+            }
+        }
+    }
+
+    /** Where a section keeps its backup copy, or its archive. The archive needs a backup copy elsewhere. */
+    @Composable
+    private fun ChooseKeep(section: Section, archive: Boolean, onDone: () -> Unit) {
+        BackHandler { onDone() }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Title(if (archive) section.title + ": archive" else section.title + ": backup copy", onDone)
+            Words(
+                if (archive) "When " + (Vault.homeOf(section)?.label ?: "its place") + " is 80% full, the oldest " + section.title.lowercase() + " go here until it is back to 70%. Each one leaves only once it is safely here and in the backup copy, so it is always in two places."
+                else "A full second copy of every " + section.title.lowercase().removeSuffix("s") + " file, kept up to date whenever KueVault opens on Wi-Fi.",
+                14, K.Soft, lines = 5, modifier = Modifier.padding(horizontal = 20.dp),
+            )
+            Spacer(Modifier.height(12.dp))
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                val now = if (archive) Vault.archives[section] else Vault.copies[section]
+                val taken = setOfNotNull(Vault.homes[section], if (archive) Vault.copies[section] else null)
+                val choices = Vault.places.filter { it.id !in taken && !(archive && it.kind == PlaceKind.GOOGLE) }
+                if (choices.isEmpty()) Words(if (archive) "Connect your own drive first (Places › Connect a place › Home computer or network drive). Archives never go to another Google account." else "Connect another place first, in Places.", 14, K.Soft, lines = 4)
+                for (p in choices) {
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).then(if (p.id == now) Modifier.border(2.dp, K.Accent, RoundedCornerShape(14.dp)) else Modifier)
+                        .clickable {
+                            if (archive) { if (!Vault.setArchive(section, p.id)) Work.problem = "Set a backup copy in another place first." } else Vault.setCopy(section, p.id)
+                            onDone()
+                        }.padding(14.dp)) {
+                        Words(p.kind.title + if (p.id == now) " · now" else "", 12, K.Soft, lines = 1)
+                        Words(p.label, 15, bold = true, lines = 1)
+                    }
+                }
+                if (now != null) Button(if (archive) "No archive" else "No backup copy", modifier = Modifier.fillMaxWidth()) {
+                    if (archive) Vault.setArchive(section, null) else Vault.setCopy(section, null)
+                    onDone()
+                }
             }
         }
     }
@@ -484,7 +565,7 @@ object Ui {
                         if (said == "Connected") {
                             val place = Vault.places.lastOrNull { it.kind == PlaceKind.HOME && it.host.equals(host.trim().removePrefix("\\\\").removePrefix("smb://").trimEnd('/', '\\'), true) }
                             if (forSection != null && place != null) Vault.setHome(forSection, place.id)
-                            Work.doing = (place?.label ?: "The computer") + " connected." + (forSection?.let { " " + it.title + " lives there now." } ?: "")
+                            Work.told = (place?.label ?: "The computer") + " connected." + (forSection?.let { " " + it.title + " lives there now." } ?: "")
                             onDone()
                         } else saying = said
                     }
@@ -517,17 +598,17 @@ object Ui {
             Title("Settings", onBack)
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Words("KueVault " + BuildConfig.VERSION_NAME, 15, bold = true)
-                Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.doing = Updates.updateByHand(context) { Work.doing = it } } }
+                Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
                 Button("Copy report for Claude", modifier = Modifier.fillMaxWidth()) {
                     val clip = context.getSystemService(android.content.ClipboardManager::class.java)
                     clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault report", Report.text(context)))
-                    Work.doing = "Report copied. Paste it into the chat."
+                    Work.told = "Report copied. Paste it into the chat."
                 }
                 Spacer(Modifier.height(6.dp))
                 Words("Privacy", 15, bold = true)
                 Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server, and nothing is sent anywhere else. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 8)
                 Button(if (forget) "Tap again to forget everything on this phone" else "Forget everything on this phone", modifier = Modifier.fillMaxWidth()) {
-                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Work.doing = "Forgotten. Your files are still in your places." }
+                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Work.told = "Forgotten. Your files are still in your places." }
                 }
                 Words("Takes every place out of KueVault on this phone. The files stay where they are.", 12, K.Soft, lines = 3)
             }
