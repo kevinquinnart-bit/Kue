@@ -1046,7 +1046,7 @@ object Ui {
                     .background(if (state == WAITING) K.Page else K.Accent),
                 contentAlignment = Alignment.Center,
             ) {
-                Words(if (state == DONE) "✓" else number.toString(), 14, if (state == WAITING) K.Soft else K.Page, bold = true)
+                if (state == DONE) KueSettings.Icon(KueSettings.Icons.TICK, 16.dp, K.Page, 2.6f) else Words(number.toString(), 14, if (state == WAITING) K.Soft else K.Page, bold = true)
             }
             Column(Modifier.weight(1f)) {
                 Words(name + when (state) { DONE -> " · done"; NOW -> " · now"; else -> "" }, 16, if (state == NOW) K.Accent else K.Ink, bold = true)

@@ -101,6 +101,10 @@ object KueSettings {
         const val KUE = "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"
         const val HELP = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.5"
         const val CHEVRON = "M9 5l7 7-7 7"
+        const val GEAR = "M12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5zM12 2.5v3.5M12 18v3.5M2.5 12H6M18 12h3.5M5.3 5.3l2.5 2.5M16.2 16.2l2.5 2.5M5.3 18.7l2.5-2.5M16.2 7.8l2.5-2.5"
+        const val TICK = "M5 12.5l4.5 4.5L19 7.5"
+        const val STAR = "M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 17l-5.2 2.7 1-5.9-4.3-4.1 5.9-.8z"
+        const val MIC = "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"
     }
 
     // ---- Look and feel, kept on this phone and in Android's backup ----------------------------------------------
@@ -136,11 +140,12 @@ object KueSettings {
     // ---- The parts -------------------------------------------------------------------------------------------------
 
     @Composable
-    fun Icon(path: String, size: Dp, colour: Color, width: Float = 1.8f) {
+    fun Icon(path: String, size: Dp, colour: Color, width: Float = 1.8f, filled: Boolean = false) {
         val drawn = androidx.compose.runtime.remember(path) { PathParser().parsePathString(path).toPath() }
         Canvas(Modifier.size(size)) {
             val s = this.size.minDimension / 24f
             withTransform({ scale(s, s, pivot = Offset.Zero) }) {
+                if (filled) drawPath(drawn, colour)
                 drawPath(drawn, colour, style = Stroke(width = width, cap = StrokeCap.Round, join = StrokeJoin.Round))
             }
         }

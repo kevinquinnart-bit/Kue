@@ -152,7 +152,7 @@ object OnlineUi {
                 Ui.Words(listOf(s.tags, if (s.bitrate > 0) s.bitrate.toString() + " kbps" else "").filter { it.isNotBlank() }.joinToString(" · "), 13, K.Soft)
             }
             Box(Modifier.size(44.dp).clickable(onClickLabel = if (fav) "Take out of favourites" else "Add to favourites") { Radio.flipFavourite(s) }, contentAlignment = Alignment.Center) {
-                Ui.Words(if (fav) "★" else "☆", 24, if (fav) K.Accent else K.Soft)
+                KueSettings.Icon(KueSettings.Icons.STAR, 24.dp, if (fav) K.Accent else K.Soft, filled = fav)
             }
         }
     }
