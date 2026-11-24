@@ -30,6 +30,21 @@ android {
         }
     }
 
+    // Two ways out: "direct" is the download from GitHub (updates itself, backs up every photo on the phone);
+    // "play" is for the Google Play store, which updates apps itself and allows broad photo access only to some
+    // apps, so there the person picks which photos and videos to back up.
+    flavorDimensions += "where"
+    productFlavors {
+        create("direct") {
+            dimension = "where"
+            buildConfigField("boolean", "STORE", "false")
+        }
+        create("play") {
+            dimension = "where"
+            buildConfigField("boolean", "STORE", "true")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

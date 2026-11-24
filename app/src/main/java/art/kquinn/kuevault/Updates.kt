@@ -177,6 +177,8 @@ object Updates {
      * the main thread.
      */
     fun checkAndFetch(context: Context) {
+        // The Play store version: the store puts updates on.
+        if (BuildConfig.STORE) return
         val latest = runCatching { check() }.getOrNull() ?: return
         if (!isNewer(latest, BuildConfig.VERSION_CODE)) {
             tidy(context)
@@ -197,6 +199,7 @@ object Updates {
      * the one already downloaded) and puts it on now. [say] is told how it is going. Gives back the last word.
      */
     suspend fun updateByHand(context: Context, say: (String) -> Unit): String {
+        if (BuildConfig.STORE) return "Google Play keeps KueVault up to date."
         say("Checking…")
         val latest = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { check() }.getOrNull() }
             ?: return "Couldn't reach the download. Check the internet and try again."
@@ -219,6 +222,7 @@ object Updates {
 
     /** KueVault has been left: a downloaded update goes on now, when nothing is being moved. */
     fun installIfReady(context: Context) {
+        if (BuildConfig.STORE) return
         val file = ready ?: return
         if (!quiet(context)) return
         ready = null

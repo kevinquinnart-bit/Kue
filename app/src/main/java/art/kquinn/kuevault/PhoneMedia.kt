@@ -20,9 +20,30 @@ object PhoneMedia {
 
     /** The permissions to ask for before reading the phone's photos and videos. */
     val permissions: Array<String> =
-        if (Build.VERSION.SDK_INT >= 33) arrayOf(android.Manifest.permission.READ_MEDIA_IMAGES, android.Manifest.permission.READ_MEDIA_VIDEO)
+        if (Build.VERSION.SDK_INT >= 33 && BuildConfig.STORE) emptyArray()
+        else if (Build.VERSION.SDK_INT >= 33) arrayOf(android.Manifest.permission.READ_MEDIA_IMAGES, android.Manifest.permission.READ_MEDIA_VIDEO)
         else if (Build.VERSION.SDK_INT >= 29) arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE)
         else arrayOf(android.Manifest.permission.READ_EXTERNAL_STORAGE, android.Manifest.permission.WRITE_EXTERNAL_STORAGE)
+
+    /**
+     * The Play store version on Android 13 and later: the person picks the photos and videos to back up, as
+     * Google Play allows seeing all of them only to some apps. The direct version backs up every one.
+     */
+    val picking: Boolean get() = BuildConfig.STORE && Build.VERSION.SDK_INT >= 33
+
+    /** How many can be picked at once. */
+    const val PICK_MOST = 100
+
+    /** The picked photos and videos, with their names and sizes. */
+    suspend fun describe(context: Context, uris: List<Uri>): List<Media> = withContext(Dispatchers.IO) {
+        uris.mapNotNull { u ->
+            runCatching {
+                context.contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)?.use { c ->
+                    if (!c.moveToFirst()) null else Media(u, c.getString(0) ?: "Photo", c.getLong(1), context.contentResolver.getType(u) ?: "image/jpeg")
+                }
+            }.getOrNull()
+        }
+    }
 
     /** Every photo and video on the phone. Off the main thread. */
     fun list(context: Context): List<Media> {
@@ -53,13 +74,13 @@ object PhoneMedia {
     }
 
     /** Copies every photo and video not yet there into Backups' place. The answer is what to tell the person. */
-    suspend fun backUp(context: Context): String {
+    suspend fun backUp(context: Context, picked: List<Media>? = null): String {
         blocked()?.let { return it }
         val place = Vault.homeOf(Section.BACKUPS)!!
         val store = Work.store(context, place) ?: return Work.unreachable[place.id] ?: (place.label + " couldn't be reached.")
         val there = withContext(Dispatchers.IO) { runCatching { store.list(Section.BACKUPS) }.getOrNull() }?.toMutableList()
             ?: return Work.unreachable[place.id] ?: (place.label + " couldn't be read.")
-        val mine = withContext(Dispatchers.IO) { list(context) }
+        val mine = picked ?: withContext(Dispatchers.IO) { list(context) }
         val missing = mine.filter { m -> there.none { it.name == m.name && it.size == m.size } }
         var done = 0
         for ((i, m) in missing.withIndex()) {
@@ -75,7 +96,7 @@ object PhoneMedia {
         Work.doing = ""
         Report.note("phone backup: " + done + " of " + missing.size + " new photos and videos to " + Vault.describe(place))
         return when {
-            missing.isEmpty() -> "All " + mine.size + " photos and videos on this phone are already backed up in " + place.label + "."
+            missing.isEmpty() -> "All " + mine.size + " photos and videos " + (if (picked != null) "picked" else "on this phone") + " are already backed up in " + place.label + "."
             done == missing.size -> "Backed up " + done + " photos and videos to " + place.label + "."
             else -> "Backed up " + done + " of " + missing.size + ". " + (Work.unreachable[place.id] ?: "Try again to carry on.")
         }

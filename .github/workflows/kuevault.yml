@@ -48,9 +48,9 @@ jobs:
         run: |
           chmod +x ./gradlew
           # Tried twice: a download from Maven sometimes fails on the first go.
-          ./gradlew :app:testDebugUnitTest --stacktrace || ./gradlew :app:testDebugUnitTest --stacktrace || {
+          ./gradlew :app:testDirectDebugUnitTest --stacktrace || ./gradlew :app:testDirectDebugUnitTest --stacktrace || {
             # Which tests failed, as notes on the run, readable without signing in.
-            for f in app/build/test-results/testDebugUnitTest/*.xml; do
+            for f in app/build/test-results/testDirectDebugUnitTest/*.xml; do
               grep -q "<failure" "$f" || continue
               python3 - "$f" <<'PY'
           import sys, xml.etree.ElementTree as ET
@@ -66,9 +66,11 @@ jobs:
 
       - name: Build
         run: |
-          ./gradlew :app:assembleRelease --stacktrace
+          # The download (updates itself), and the Google Play version as the bundle the store takes.
+          ./gradlew :app:assembleDirectRelease :app:bundlePlayRelease --stacktrace
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/KueVault.apk
+          cp app/build/outputs/apk/direct/release/app-direct-release.apk dist/KueVault.apk
+          cp app/build/outputs/bundle/playRelease/app-play-release.aab dist/KueVault-play.aab
           printf 'KueVault, version %s\n' "$VERSION_NAME" > dist/NOTES.md
           # What the app reads each time it opens, to know whether a newer version is waiting.
           printf 'code=%s\nname=%s\n' "$VERSION_CODE" "$VERSION_NAME" > dist/version.txt
@@ -83,7 +85,9 @@ jobs:
           tag_name: kuevault
           target_commitish: ${{ github.sha }}
           name: KueVault (${{ env.VERSION_NAME }})
-          files: dist/KueVault.apk
+          files: |
+            dist/KueVault.apk
+            dist/KueVault-play.aab
           body_path: dist/NOTES.md
           prerelease: false
           make_latest: false

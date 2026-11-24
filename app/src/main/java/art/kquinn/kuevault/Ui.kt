@@ -628,7 +628,7 @@ object Ui {
             Title("Settings", onBack)
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Words("KueVault " + BuildConfig.VERSION_NAME, 15, bold = true)
-                Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
+                if (!BuildConfig.STORE) Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
                 Button("Moving to a new phone", modifier = Modifier.fillMaxWidth(), onClick = onNewPhone)
                 Spacer(Modifier.height(6.dp))
                 Words("Make films smaller first", 15, bold = true)
@@ -664,7 +664,11 @@ object Ui {
             if (granted.values.any { it }) then?.invoke() else Work.problem = "KueVault needs to see your photos and videos for this. Allow it, then try again."
             then = null
         }
-        fun withMedia(work: () -> Unit) { then = work; ask.launch(PhoneMedia.permissions) }
+        fun withMedia(work: () -> Unit) { if (PhoneMedia.permissions.isEmpty()) work() else { then = work; ask.launch(PhoneMedia.permissions) } }
+        // The Play store version picks which photos and videos to back up (Google Play allows seeing them all only to some apps).
+        val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickMultipleVisualMedia(PhoneMedia.PICK_MOST)) { uris ->
+            if (uris.isNotEmpty()) scope.launch { Work.told = PhoneMedia.backUp(context, PhoneMedia.describe(context, uris)) }
+        }
         BackHandler { onBack() }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Title("Moving to a new phone", onBack)
@@ -676,7 +680,12 @@ object Ui {
                 val blocked = PhoneMedia.blocked()
                 Words(blocked ?: ("They go to Backups, in " + (Vault.homeOf(Section.BACKUPS)?.label ?: "") + ". Only ones not already there are copied."), 13, if (blocked == null) K.Soft else K.Warn, lines = 4)
                 if (blocked == null && Work.doing.isEmpty()) {
-                    Button("Back up this phone's photos and videos", main = true, modifier = Modifier.fillMaxWidth()) {
+                    if (PhoneMedia.picking) {
+                        Button("Choose photos and videos to back up", main = true, modifier = Modifier.fillMaxWidth()) {
+                            pick.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                        }
+                        Words("Up to " + PhoneMedia.PICK_MOST + " at a time. Ones already in Backups are skipped.", 12, K.Soft, lines = 2)
+                    } else Button("Back up this phone's photos and videos", main = true, modifier = Modifier.fillMaxWidth()) {
                         withMedia { scope.launch { Work.told = PhoneMedia.backUp(context) } }
                     }
                     Button("Bring them back to this phone", modifier = Modifier.fillMaxWidth()) {
