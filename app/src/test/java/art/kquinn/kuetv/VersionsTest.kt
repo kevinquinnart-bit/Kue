@@ -26,6 +26,14 @@ class VersionsTest {
         assertEquals(0, Versions.group(listOf(channel("Insight 4K"))).single().start)
     }
 
+    @Test fun spacesInANameDontKeepTheSameChannelApart() {
+        // The provider's "4 Seven" and an add-on's free "4seven" are one channel, so the free one is its next version.
+        val groups = Versions.group(listOf(channel("4 Seven"), Channel(Library.FREE + "1", "4seven", "", "free", "http://free/4seven.m3u8", 0), channel("ITV 1 HD"), channel("ITV1")))
+        assertEquals(listOf("4 Seven", "ITV 1"), groups.map { it.name })
+        assertEquals(listOf("Standard", "Free Standard"), groups[0].versions.map { it.label })
+        assertEquals(2, groups[1].versions.size)
+    }
+
     @Test fun differentChannelsStayApart() {
         val groups = Versions.group(
             listOf(channel("Channel 4 HD"), channel("Channel 4 +1"), channel("Channel 4 +1 HD"), channel("IE: Channel 4 HD"), channel("HDNet Movies"), channel("E4 HD"), channel("E4 Extra HD")),

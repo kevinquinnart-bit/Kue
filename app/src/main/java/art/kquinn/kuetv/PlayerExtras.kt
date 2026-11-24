@@ -235,3 +235,26 @@ object PlaySpeed {
         return speeds[(i + 1) % speeds.size]
     }
 }
+
+/**
+ * KueTV asks the TV for the sound each time it comes on screen, so another app still playing behind it (Fire TV's
+ * aerial player, a channel's own app) is told to stop. Without this the two played over each other (Kevin, 23 November
+ * 2026: Freely's sound carried on over KueTV). Held while KueTV is in front; let go when it leaves.
+ */
+object SoundFocus {
+    private var request: android.media.AudioFocusRequest? = null
+
+    fun take(context: Context) {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+        val r = request ?: android.media.AudioFocusRequest.Builder(android.media.AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_MOVIE).build())
+            .setOnAudioFocusChangeListener { }
+            .build().also { request = it }
+        runCatching { am.requestAudioFocus(r) }
+    }
+
+    fun drop(context: Context) {
+        val am = context.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager ?: return
+        request?.let { r -> runCatching { am.abandonAudioFocusRequest(r) } }
+    }
+}

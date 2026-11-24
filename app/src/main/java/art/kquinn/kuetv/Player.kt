@@ -479,6 +479,18 @@ fun PlayerScreen(
 
     // Channels already handed to their own app in this sitting: once each, so coming Back doesn't send it off again.
     val sentToApp = remember { HashSet<String>() }
+    // True from handing a channel to the aerial or its own app until KueTV is on screen again: nothing here starts
+    // playing by itself meanwhile. It used to: the aerial took the TV's picture decoder, KueTV's player failed,
+    // reconnected and played its sound over the aerial's (Kevin's report, 23 November 2026, 20:53 and 21:07).
+    val handedOff = remember { booleanArrayOf(false) }
+    // Stops KueTV's picture and sound entirely, and the pause-and-rewind copy, so the TV's decoder and the
+    // provider's one screen are free for whatever plays instead.
+    val letGo: () -> Unit = {
+        handedOff[0] = true
+        player.stop()
+        shiftHolder[0]?.close()
+        shiftHolder[0] = null
+    }
     // Whether this TV has an aerial tuner to hand a channel to.
     val aerialHere = remember { !phone && Aerial.available(context) }
     /**
@@ -488,26 +500,28 @@ fun PlayerScreen(
     val toOwnApp: (String) -> Boolean = handOff@{ why ->
         val name = items.getOrNull(index)?.name ?: return@handOff false
         if (name in sentToApp) return@handOff false
-        // First the TV's aerial, free and with no internet needed (Kevin, 22 November 2026), then the channel's own app.
-        val aerial = Aerial.numberFor(name)?.takeIf { !phone && Aerial.available(context) }
-        if (aerial != null) {
+        // The order once every version here has been tried (the provider's, then the add-ons' free ones): the channel's
+        // own app first, and the aerial only as the last resort (Kevin, 23 November 2026: Freely's picture is poor
+        // and it is hard to get out of).
+        val ch = LiveInApps.forChannel(name)?.takeIf { c -> runCatching { context.packageManager.getPackageInfo(c.pkg, 0) }.isSuccess }
+        if (ch != null) {
             sentToApp += name
-            Report.note("Player", "$name: $why Opening it on the aerial ($aerial).")
-            player.pause()
-            moved = "$why Opening it on the aerial."
-            note = "Playing on the aerial. Pick another channel, or press Play to try here again."
-            if (Aerial.openChannel(context, aerial)) return@handOff true
+            Report.note("Player", "$name: $why Opening it in ${ch.app}.")
+            letGo()
+            moved = "$why Opening it in ${ch.app}."
+            note = "Playing in ${ch.app}. Pick another channel, or press Play to try here again."
+            LiveInApps.open(context, ch)
+            return@handOff true
         }
-        val ch = LiveInApps.forChannel(name) ?: return@handOff false
-        val onTv = runCatching { context.packageManager.getPackageInfo(ch.pkg, 0) }.isSuccess
-        if (!onTv) return@handOff false
+        val aerial = Aerial.numberFor(name)?.takeIf { !phone && Aerial.available(context) } ?: return@handOff false
         sentToApp += name
-        Report.note("Player", "$name: $why Opening it in ${ch.app}.")
-        player.pause()
-        moved = "$why Opening it in ${ch.app}."
-        note = "Playing in ${ch.app}. Pick another channel, or press Play to try here again."
-        LiveInApps.open(context, ch)
-        true
+        Report.note("Player", "$name: $why Opening it on the aerial ($aerial).")
+        letGo()
+        moved = "$why Opening it on the aerial."
+        note = "Playing on the aerial. Pick another channel, or press Play to try here again."
+        if (Aerial.openChannel(context, aerial)) return@handOff true
+        handedOff[0] = false
+        false
     }
 
     // The TV switched to the picture's own frame rate, when that is chosen; back to its usual one after.
@@ -618,6 +632,11 @@ fun PlayerScreen(
 
             override fun onPlayerError(error: PlaybackException) {
                 hasPlayed[0] = false
+                // Handed to the aerial or the channel's app: no trying again behind it.
+                if (handedOff[0]) {
+                    Report.note("Player", items.getOrNull(index)?.name.orEmpty() + ": stopped here while it plays elsewhere (" + error.errorCodeName + ")")
+                    return
+                }
                 val versions = streamsAt(index)
                 val kind = when {
                     versions.getOrNull(stream)?.url?.startsWith("magnet:") == true -> "torrent"
@@ -933,6 +952,7 @@ fun PlayerScreen(
     LaunchedEffect(retryTick) {
         if (retryTick == 0) return@LaunchedEffect
         delay(1_500)
+        if (handedOff[0]) return@LaunchedEffect
         if (shifting) {
             // Playing from the copy: start again at its newest end.
             reload += 1
@@ -1247,6 +1267,7 @@ fun PlayerScreen(
             shiftHolder[0] = null
         } else if (visible && leftScreen[0]) {
             leftScreen[0] = false
+            handedOff[0] = false
             if (live && shiftWanted) reload += 1
             else if (live) { player.seekToDefaultPosition(); player.prepare() }
             player.play()

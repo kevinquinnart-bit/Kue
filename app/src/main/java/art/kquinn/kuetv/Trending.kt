@@ -309,13 +309,22 @@ object LiveInApps {
         Ch("RTÉ Live", "RTÉ Player", "com.twentyfouri.tvbridge.rte", "https://www.rte.ie/rpng-static/ctv/androidTv/onnow"),
     )
 
+    // Made once, not each time a channel is looked up (it is looked up while the player's buttons are drawn).
+    private val marks = Regex("\\p{Mn}+")
+    private val tag = Regex("^[a-z]{2,3}\\s*[:|]\\s*")
+    private val versionWords = Regex("\\b(hd|fhd|uhd|4k|sd|uk|london|\\(.*?\\))\\b")
+    private val notName = Regex("[^a-z0-9+]")
+    private val known = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<Ch>>()
+
     /**
      * The entry for a channel by its name in a provider's list ("ITV 1 HD", "UK: Channel 4", "E4 +1" is left out:
      * the apps only play the main channel). RTÉ's channels all open RTÉ Player's Live page, where the channel is picked.
      */
-    fun forChannel(name: String): Ch? {
-        val n = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase().replace(Regex("^[a-z]{2,3}\\s*[:|]\\s*"), "").replace(Regex("\\b(hd|fhd|uhd|4k|sd|uk|london|\\(.*?\\))\\b"), " ")
-            .replace(Regex("[^a-z0-9+]"), "")
+    fun forChannel(name: String): Ch? = known.getOrPut(name) { java.util.Optional.ofNullable(look(name)) }.orElse(null)
+
+    private fun look(name: String): Ch? {
+        val n = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace(tag, "").replace(versionWords, " ")
+            .replace(notName, "")
         if (n.contains("+1") || n.contains("plus1")) return null
         val key = when (n) {
             "rteone", "rte1", "rteonehd", "rte2", "rtetwo", "rtenews", "rtenewsnow", "rtenewschannel", "rtejr", "rtejunior" -> "RTÉ Live"

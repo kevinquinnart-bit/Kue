@@ -277,7 +277,8 @@ object Versions {
         val names = HashMap<String, String>()
         for (channel in channels) {
             val r = read(channel.name)
-            val key = r.name.lowercase().replace(notNameMarks, " ").trim().ifEmpty { r.name.lowercase() }
+            // Spaces don't count either: the add-ons' "4seven" is the provider's "4 Seven", "ITV1" its "ITV 1" (Kevin, 23 November 2026).
+            val key = r.name.lowercase().replace(notNameMarks, "").ifEmpty { r.name.lowercase() }
             val free = channel.id.startsWith(Library.FREE)
             val other = Combined.isOther(channel.id)
             val label = when {

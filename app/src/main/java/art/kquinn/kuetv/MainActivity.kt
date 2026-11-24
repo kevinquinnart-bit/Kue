@@ -223,11 +223,14 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         Screen.visible = true
+        // Any other app's sound (the aerial, a channel's app) stops now KueTV is back.
+        SoundFocus.take(this)
     }
 
     override fun onStop() {
         super.onStop()
         Screen.visible = false
+        SoundFocus.drop(this)
     }
 
     // Leaving KueTV (Home) while something plays: it carries on in a small picture in the corner, where the device allows.
@@ -372,20 +375,29 @@ private fun App() {
     var healthOpen by remember { mutableStateOf(false) }
     // A film or episode that can play from an add-on or from the provider's own copy, waiting for the user to pick.
     var choice by remember { mutableStateOf<Playing?>(null) }
-    // What the lists show: everything the provider sent, less the categories chosen to be hidden.
-    val shownLibrary = remember(library, Choices.changes, kids, Renames.changes, HiddenChannels.changes) {
-        // A kids profile: adult categories hidden too.
-        val adult: (List<Category>) -> Set<String> = { cats -> if (kids) cats.filter { Profiles.isAdult(it.name) }.mapTo(HashSet()) { it.id } else emptySet() }
-        // Channels given names of the user's own.
-        library?.renamed(Renames.all(context))?.without(
-            Choices.hidden(context, "live") + adult(library.liveCategories),
-            Choices.hidden(context, "film") + adult(library.filmCategories),
-            Choices.hidden(context, "show") + adult(library.showCategories),
-        )
-            // ...and each kind's categories in the user's own order.
-            ?.inOrder(Choices.order(context, "live"), Choices.order(context, "film"), Choices.order(context, "show"))
-            // ...and without the channels hidden one by one.
-            ?.withoutChannels(HiddenChannels.all(context))
+    // What the lists show: everything the provider sent, less the categories chosen to be hidden. Made away from the
+    // screen, with the channels' rows and Live TV's lists, as [built] is: made on the screen it held the remote up for
+    // 10 seconds at a time (Kevin's report, 23 November 2026: Versions.group under HomeScreen). The last lists stay up
+    // while new ones are made.
+    var shownLibrary by remember { mutableStateOf<Library?>(null) }
+    LaunchedEffect(library, Choices.changes, kids, Renames.changes, HiddenChannels.changes) {
+        val lib = library
+        if (lib == null) { shownLibrary = null; return@LaunchedEffect }
+        shownLibrary = withContext(Dispatchers.Default) {
+            // A kids profile: adult categories hidden too.
+            val adult: (List<Category>) -> Set<String> = { cats -> if (kids) cats.filter { Profiles.isAdult(it.name) }.mapTo(HashSet()) { it.id } else emptySet() }
+            // Channels given names of the user's own.
+            lib.renamed(Renames.all(context)).without(
+                Choices.hidden(context, "live") + adult(lib.liveCategories),
+                Choices.hidden(context, "film") + adult(lib.filmCategories),
+                Choices.hidden(context, "show") + adult(lib.showCategories),
+            )
+                // ...and each kind's categories in the user's own order.
+                .inOrder(Choices.order(context, "live"), Choices.order(context, "film"), Choices.order(context, "show"))
+                // ...and without the channels hidden one by one.
+                .withoutChannels(HiddenChannels.all(context))
+                .also { it.groups; it.liveIndex }
+        }
     }
     // Each time KueTV comes to the front: carry on copying any recordings that are waiting for Google Drive.
     LaunchedEffect(Resumes.count) { Recordings.wake(context) }
@@ -486,8 +498,10 @@ private fun App() {
         try {
             var round = 0
             while (true) {
-                var mine = Sync.current(context, bodies())
-                Sync.published = Sync.pack(mine)
+                // Gathered and packed away from the screen: on it, this held the remote up for up to 6 seconds every
+                // 15 (Kevin's report, 23 November 2026: Sync.pack).
+                var mine = withContext(Dispatchers.Default) { Sync.current(context, bodies()) }
+                Sync.published = withContext(Dispatchers.Default) { Sync.pack(mine) }
                 // The other device is asked straight away, then every minute.
                 if (round % 4 == 0) {
                     val others = withContext(Dispatchers.IO) { runCatching { Sync.pull(context, pairKey) }.getOrDefault(emptyList()) }
@@ -496,15 +510,15 @@ private fun App() {
                         for ((name, part) in wanted) {
                             runCatching { take(name, part.body) }
                             // Noted as it now stands here, with the time it was changed there, so it isn't sent back as a change of this device's.
-                            Sync.adopted(context, name, bodies()[name].orEmpty(), part.at)
+                            Sync.adopted(context, name, withContext(Dispatchers.Default) { bodies()[name].orEmpty() }, part.at)
                         }
                         if (wanted.isNotEmpty()) {
                             Report.note("Keeping in step", "took from the other device: " + wanted.keys.sorted().joinToString(", "))
                             Sync.tookNote(wanted.keys)
                             // Says what came across, so keep in step can be seen working (Kevin, 23 November 2026).
                             kueToast(context, "Kept in step: " + Sync.words(wanted.keys) + " updated from the other device.")
-                            mine = Sync.current(context, bodies())
-                            Sync.published = Sync.pack(mine)
+                            mine = withContext(Dispatchers.Default) { Sync.current(context, bodies()) }
+                            Sync.published = withContext(Dispatchers.Default) { Sync.pack(mine) }
                         }
                     }
                 }
@@ -522,7 +536,7 @@ private fun App() {
         try {
             if (!drive.signedIn) "Sign in to Google Drive first."
             else {
-                val text = Backup.pack(bodies())
+                val text = withContext(Dispatchers.Default) { Backup.pack(bodies()) }
                 withContext(Dispatchers.IO) { drive.putText(Backup.FILE, text) }
                 Backup.done(context)
                 Report.note("Backup", "saved to Google Drive: " + text.length / 1024 + " KB")
