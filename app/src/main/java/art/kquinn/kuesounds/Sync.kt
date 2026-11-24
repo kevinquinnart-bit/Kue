@@ -111,10 +111,18 @@ object Sync {
         }
     }
 
-    /** Fetches the Drive's copy, brings the two together, and sends the result back when it differs. */
+    /**
+     * Fetches the Drive's copy, brings the two together, and sends the result back when it differs. Google can
+     * refuse a pass the phone still counts as good (24 Nov 2026: refused every two minutes from 03:31 to 03:48 on
+     * Kevin's phone): the refused pass is dropped and the sync tried once more with a new one.
+     */
     suspend fun now() = lock.withLock {
-        if (!Net.online(app)) return@withLock
-        val token = Google.token() ?: return@withLock
+        try { once() } catch (e: Drive.SignedOut) { once() }
+    }
+
+    private suspend fun once() {
+        if (!Net.online(app)) return
+        val token = Google.token() ?: return
         var id = prefs().getString("fileId", null)
         if (id == null) id = find(token)
         val remote = id?.let { download(it, token) }
@@ -142,6 +150,7 @@ object Sync {
     private fun find(token: String): String? {
         val url = Drive.API + "?q=" + java.net.URLEncoder.encode("name = '$FILE_NAME' and trashed = false", "UTF-8") + "&fields=files(id)&spaces=drive"
         Drive.http.newCall(Request.Builder().url(url).header("Authorization", "Bearer $token").build()).execute().use { r ->
+            if (r.code == 401) { Google.forget(); throw Drive.SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + " to finding the data file")
             return Drive.parsePage(r.body.string()).files.firstOrNull()?.id?.also { prefs().edit().putString("fileId", it).apply() }
         }
@@ -150,6 +159,7 @@ object Sync {
     private fun download(id: String, token: String): String? {
         Drive.http.newCall(Request.Builder().url(Drive.mediaUrl(id)).header("Authorization", "Bearer $token").build()).execute().use { r ->
             if (r.code == 404) return null
+            if (r.code == 401) { Google.forget(); throw Drive.SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + " to reading the data file")
             return r.body.string()
         }
@@ -160,6 +170,7 @@ object Sync {
             .header("Authorization", "Bearer $token")
             .patch(json.toRequestBody("application/json".toMediaType())).build()
         Drive.http.newCall(request).execute().use { r ->
+            if (r.code == 401) { Google.forget(); throw Drive.SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + " to saving the data file")
         }
     }
@@ -173,6 +184,7 @@ object Sync {
             .header("Authorization", "Bearer $token")
             .post(body.toRequestBody("multipart/related; boundary=$boundary".toMediaType())).build()
         Drive.http.newCall(request).execute().use { r ->
+            if (r.code == 401) { Google.forget(); throw Drive.SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + " to making the data file")
             return com.google.gson.JsonParser.parseString(r.body.string()).asJsonObject.get("id").asString
         }

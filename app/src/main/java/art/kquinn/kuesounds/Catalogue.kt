@@ -52,9 +52,16 @@ object Catalogue {
                 .addQueryParameter("limit", limit.toString()).build(),
         )
 
-    /** Asks MusicBrainz at [url], at most once a second, waiting and asking again while it is busy. */
+    /**
+     * Asks MusicBrainz at [url], at most once a second, waiting and asking again while it is busy.
+     * [patient]: wait as long as it takes (fixing, where a song left out means pressing Fix again). Otherwise
+     * (looking up while scanning) give up on this one after about half a minute: it is looked up next time, and
+     * the scan's own pause after several failures in a row covers the catalogue being down. Measured on Kevin's
+     * phone 23-24 Nov 2026: every busy answer cost 7 to 8 minutes on the patient waits, about 60 of them across
+     * the three days of looking up.
+     */
     @Synchronized
-    private fun askAt(url: okhttp3.HttpUrl): String {
+    private fun askAt(url: okhttp3.HttpUrl, patient: Boolean = false): String {
         // One question a second at most, as MusicBrainz asks.
         val wait = lastAsked + 1100 - System.currentTimeMillis()
         if (wait > 0) Thread.sleep(wait)
@@ -63,7 +70,7 @@ object Catalogue {
         // Busy or not answering: wait longer each time (3, 6, 12, 24, 45 seconds, then a minute and two), or as
         // long as MusicBrainz says to. Not answering in time counts as busy: on 23 November 2026 eight searches
         // in a row went unanswered for a minute each, and the looking up stopped.
-        val waits = longArrayOf(3_000, 6_000, 12_000, 24_000, 45_000, 60_000, 120_000)
+        val waits = if (patient) longArrayOf(3_000, 6_000, 12_000, 24_000, 45_000, 60_000, 120_000) else longArrayOf(3_000, 8_000, 20_000)
         var why = "stayed busy"
         for (attempt in waits.indices) {
             var told = 0L
@@ -81,7 +88,7 @@ object Catalogue {
             } catch (e: java.net.UnknownHostException) {
                 why = "couldn't be reached"
             }
-            Thread.sleep(maxOf(waits[attempt], minOf(told, 120_000L)))
+            Thread.sleep(maxOf(waits[attempt], minOf(told, if (patient) 120_000L else 20_000L)))
             lastAsked = System.currentTimeMillis()
         }
         throw IOException("MusicBrainz " + why)
@@ -277,6 +284,7 @@ object Catalogue {
             askAt(
                 (SEARCH + "release/" + releaseId).toHttpUrl().newBuilder().addQueryParameter("inc", "recordings+artist-credits")
                     .addQueryParameter("fmt", "json").build(),
+                patient = true,
             ),
         )
 

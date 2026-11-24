@@ -151,7 +151,29 @@ object Fixer {
         }
     }
 
+    /**
+     * One song. Google can refuse a pass the phone handed over as still good (it came from the phone's store, so its
+     * age isn't known): on 24 Nov 2026 Kevin's phone was refused for at least 17 minutes in a row while KueSounds
+     * still counted its pass as fresh. A refusal now drops that pass and the song is tried once more with a new one;
+     * only a second refusal stops the fixing, which is when Google really does want the permission asked for again.
+     */
     private suspend fun fixOne(context: Context, t: Track, al: Album, cover: File, song: Catalogue.Song?): Boolean {
+        try {
+            return fixOnce(context, t, al, cover, song)
+        } catch (e: Drive.SignedOut) {
+            Scanner.note("Google refused the pass while fixing " + t.fileName + ": trying again with a new one")
+        }
+        return try {
+            fixOnce(context, t, al, cover, song)
+        } catch (e: Drive.SignedOut) {
+            Scanner.note("fixing stopped: Google needs the edit permission again")
+            synchronized(waiting) { waiting.clear() }
+            false
+        }
+    }
+
+    /** One try at one song. Throws [Drive.SignedOut] when Google refuses the pass; any other failure is noted. */
+    private suspend fun fixOnce(context: Context, t: Track, al: Album, cover: File, song: Catalogue.Song?): Boolean {
         val work = File(context.cacheDir, "fix").apply { mkdirs() }
         val file = File(work, t.id + "." + Library.ending(t.fileName))
         return try {
@@ -175,9 +197,7 @@ object Fixer {
             }
             true
         } catch (e: Drive.SignedOut) {
-            Scanner.note("fixing stopped: Google needs the edit permission again")
-            synchronized(waiting) { waiting.clear() }
-            false
+            throw e
         } catch (e: Exception) {
             Scanner.note("not fixed: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
             false

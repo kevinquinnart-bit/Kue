@@ -121,6 +121,7 @@ object Drive {
         val token = Google.token() ?: throw SignedOut()
         val request = Request.Builder().url(mediaUrl(id)).header("Authorization", "Bearer $token").build()
         http.newCall(request).execute().use { r ->
+            if (r.code == 401) { Google.forget(); throw SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code)
             target.parentFile?.mkdirs()
             r.body.byteStream().use { input -> target.outputStream().use { input.copyTo(it) } }
@@ -131,7 +132,7 @@ object Drive {
     fun downloadWhole(id: String, target: File, token: String) {
         val request = Request.Builder().url(mediaUrl(id)).header("Authorization", "Bearer $token").build()
         http.newCall(request).execute().use { r ->
-            if (r.code == 401) throw SignedOut()
+            if (r.code == 401) { Google.forget(); throw SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + " to the download")
             target.parentFile?.mkdirs()
             r.body.byteStream().use { input -> target.outputStream().use { input.copyTo(it) } }
@@ -153,7 +154,7 @@ object Drive {
             .patch("{}".toRequestBody("application/json; charset=UTF-8".toMediaType()))
             .build()
         val session = http.newCall(start).execute().use { r ->
-            if (r.code == 401) throw SignedOut()
+            if (r.code == 401) { Google.forget(); throw SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + " to starting the upload")
             r.header("Location") ?: throw IOException("Google Drive gave no upload address")
         }

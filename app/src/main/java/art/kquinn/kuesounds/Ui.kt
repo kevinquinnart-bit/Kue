@@ -751,7 +751,7 @@ object Ui {
      * details into the files in the Drive.
      */
     @Composable
-    private fun FixFiles(albums: List<Album>, label: String = "Fix the files") {
+    private fun FixFiles(albums: List<Album>, label: String = "Fix the files", main: Boolean = false) {
         val context = LocalContext.current
         var sure by remember { mutableStateOf(false) }
         val todo = albums.filter { Fixer.canFix(it) && !Fixer.isFixed(it) }
@@ -766,7 +766,8 @@ object Ui {
                 todo.isEmpty() -> Words("Files fixed in your Drive.", 14, K.Soft, centre = albums.size == 1)
                 Fixer.running && todo.any { Fixer.isWaiting(it) } -> Words("Waiting to be fixed.", 14, K.Soft, centre = albums.size == 1)
                 Fixer.running && albums.size == 1 && Fixer.status.contains(todo.first().title) -> Words(Fixer.status, 14, K.Accent, lines = 2, centre = true)
-                !sure -> Button(label, main = false, modifier = Modifier.fillMaxWidth()) { sure = true }
+                // Settings shows it as the yellow button (Kevin, 24 Nov 2026: the blue one on a panel looked like text).
+                !sure -> Button(label, main = main, modifier = Modifier.fillMaxWidth()) { sure = true }
                 else -> {
                     Words(
                         "For " + count(songs, "song file") + " in your Drive: puts each song's name and artist right, takes out " +
@@ -1021,7 +1022,7 @@ object Ui {
             // The button is here, under step 4, as well as further down.
             if (view.matched.isNotEmpty()) {
                 if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 3)
-                FixFiles(view.matched, "Fix all matched albums")
+                FixFiles(view.matched, "Fix all matched albums", main = true)
             }
         }
     }
@@ -1128,7 +1129,7 @@ object Ui {
                 if (Fixer.status.isNotEmpty()) Words(Fixer.status, 14, K.Accent, lines = 2)
                 if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 2)
                 Spacer(Modifier.height(8.dp))
-                FixFiles(fixable, "Fix all matched albums")
+                FixFiles(fixable, "Fix all matched albums", main = true)
             }
             Panel {
                 Words("KueSounds", 14, K.Soft)

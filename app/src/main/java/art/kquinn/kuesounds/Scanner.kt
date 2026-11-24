@@ -436,7 +436,9 @@ object Scanner {
         note("lookup failed (" + what + "): " + e.javaClass.simpleName + " " + e.message)
         if (failsInARow >= 8) throw TooManyFailures(e.message ?: e.javaClass.simpleName)
         status = "The music catalogue isn't answering. Trying again shortly"
-        Thread.sleep(10_000L)
+        // One failure: carry on after 10 seconds. Three or more in a row: the catalogue is down, so rest 5 minutes
+        // before the next, which keeps a long outage (about three quarters of an hour) from stopping the scan.
+        Thread.sleep(if (failsInARow >= 3) 300_000L else 10_000L)
         return r
     }
 
