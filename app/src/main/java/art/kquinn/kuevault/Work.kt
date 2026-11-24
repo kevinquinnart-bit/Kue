@@ -17,6 +17,9 @@ import java.io.File
  * and binning them. Each call gives the screen plain words for anything that went wrong.
  */
 object Work {
+    /** Work that carries on when the person moves to another screen: putting papers in, reading manuals. */
+    val scope = kotlinx.coroutines.MainScope()
+
     /** What is being done now, for the screen: "Uploading Report.pdf · 42%". Empty when nothing is. */
     var doing by mutableStateOf("")
     /** The last thing finished, said plainly, until it is closed. */
@@ -84,6 +87,7 @@ object Work {
             }
             Library.replace(read)
             Library.tidy()
+            Things.relink(Library.items.toList())
             Report.note("library read: " + Library.items.size + " files in " + read.size + " of " + Vault.places.size + " places")
         } finally {
             reading = false
@@ -137,21 +141,27 @@ object Work {
         else -> unreachable[place.id] ?: (place.label + " couldn't be reached.")
     }
 
-    /** Downloads a file and hands it to the app on the phone that opens that kind of file. */
-    suspend fun open(context: Context, item: Store.Item) {
-        val place = Vault.place(item.placeId) ?: run { problem = "That file's place isn't connected any more."; return }
-        val store = store(context, place) ?: run { problem = signInWords(place); return }
+    /** Downloads a file into the phone's cache (once), or null with the reason given to the person. */
+    suspend fun fetch(context: Context, item: Store.Item): File? {
+        val place = Vault.place(item.placeId) ?: run { problem = "That file's place isn't connected any more."; return null }
+        val store = store(context, place) ?: run { problem = signInWords(place); return null }
         val folder = File(context.cacheDir, "open").apply { mkdirs() }
         val file = File(folder, item.id.hashCode().toUInt().toString(16) + "-" + item.name.replace(Regex("[\\\\/:*?\"<>|]"), "_"))
-        if (!file.exists() || file.length() != item.size) {
+        if (!file.exists() || (item.size > 0 && file.length() != item.size)) {
             doing = "Opening " + item.name + " · 0%"
             val ok = withContext(Dispatchers.IO) {
                 runCatching { store.download(item, file) { p -> doing = "Opening " + item.name + " · $p%" } }
                     .onFailure { failed(place, it, "downloading") }.isSuccess
             }
             doing = ""
-            if (!ok) { problem = unreachable[place.id] ?: (item.name + " didn't download. Check the internet and try again."); return }
+            if (!ok) { file.delete(); problem = unreachable[place.id] ?: (item.name + " didn't download. Check the internet and try again."); return null }
         }
+        return file
+    }
+
+    /** Downloads a file and hands it to the app on the phone that opens that kind of file. */
+    suspend fun open(context: Context, item: Store.Item) {
+        val file = fetch(context, item) ?: return
         val uri = androidx.core.content.FileProvider.getUriForFile(context, context.packageName + ".files", file)
         val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, item.mime.ifBlank { "*/*" }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { context.startActivity(Intent.createChooser(view, item.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
@@ -319,6 +329,156 @@ object Work {
                 val q = Vault.quotas[home.id] ?: continue
                 if (q.limit != null && q.fraction >= Vault.ARCHIVE_FROM) archiveNow(context, section, force = false)
             }
+        }
+    }
+
+    // ------------------------------------------------------------------ My things: papers, manuals and links
+
+    /** A file brought in from the phone, a share or the scanner: kept in the cache, with its kind. */
+    data class Brought(val file: File, val mime: String, val name: String)
+
+    /** Copies what [uri] points at into the phone's cache, so it can be read and put in a place. */
+    suspend fun bringIn(context: Context, uri: Uri, mimeGiven: String? = null): Brought? = withContext(Dispatchers.IO) {
+        runCatching {
+            val (name, _, mimeRead) = if (uri.scheme == "file") Triple(uri.lastPathSegment ?: "File", -1L, "") else describe(context, uri)
+            val mime = (mimeGiven?.takeIf { it.isNotBlank() && it != "*/*" } ?: mimeRead.takeIf { it.isNotBlank() && it != "application/octet-stream" } ?: HomeStore.mimeOf(name))
+            val folder = File(context.cacheDir, "in").apply { mkdirs() }
+            val file = File(folder, "in" + System.nanoTime() + "." + extensionOf(mime, name))
+            (context.contentResolver.openInputStream(uri) ?: throw java.io.IOException("couldn't be opened")).use { input -> file.outputStream().use { input.copyTo(it) } }
+            Brought(file, mime, name)
+        }.onFailure { Report.note("bringing a file in failed: " + it.javaClass.simpleName) }.getOrNull()
+    }
+
+    /** Words typed or shared (an email's text, say) kept as a text file, so they can go with a thing. */
+    fun textFile(context: Context, text: String): Brought {
+        val folder = File(context.cacheDir, "in").apply { mkdirs() }
+        val file = File(folder, "in" + System.nanoTime() + ".txt")
+        file.writeText(text)
+        return Brought(file, "text/plain", "Text.txt")
+    }
+
+    fun extensionOf(mime: String, name: String): String = when (mime) {
+        "application/pdf" -> "pdf"
+        "image/jpeg" -> "jpg"
+        "image/png" -> "png"
+        "image/webp" -> "webp"
+        "image/heic" -> "heic"
+        "text/plain" -> "txt"
+        "text/html" -> "html"
+        "message/rfc822" -> "eml"
+        else -> name.substringAfterLast('.', "").takeIf { it.length in 1..5 } ?: "bin"
+    }
+
+    /**
+     * Puts [brought] into My things' place as [thing]'s [kind] paper, named after the thing. A manual's words
+     * are read straight away for asking. The answer is what to tell the person, or empty when it failed.
+     */
+    suspend fun attach(context: Context, thing: Thing, kind: Paper, brought: Brought): String {
+        val place = Vault.homeOf(Section.THINGS) ?: run { problem = "Choose where My things' papers live first."; return "" }
+        val store = store(context, place) ?: run { problem = signInWords(place); return "" }
+        if (Vault.room(Section.THINGS, brought.file.length()) == Room.FULL) {
+            problem = place.label + " is full. Free some space there, or choose another place for My things in Places."
+            return ""
+        }
+        val name = Things.fileName(thing, kind, extensionOf(brought.mime, brought.name))
+        doing = "Putting in " + name + " · 0%"
+        val item = withContext(Dispatchers.IO) {
+            runCatching { store.upload(context, Section.THINGS, Uri.fromFile(brought.file), name, brought.mime, brought.file.length()) { p -> doing = "Putting in $name · $p%" } }
+                .onFailure { failed(place, it, "putting in a paper") }.getOrNull()
+        }
+        doing = ""
+        if (item == null) { problem = unreachable[place.id] ?: "$name didn't go in. Check the internet and try again."; return "" }
+        Library.add(item)
+        val paper = Paperwork(kind, item.placeId, item.id, item.name, item.size, item.mime)
+        Things.addPaper(thing.id, paper)
+        Vault.quotas[place.id]?.let { Vault.keepQuota(place.id, it.copy(used = it.used + item.size)) }
+        Report.note("a " + kind.one.lowercase() + " of " + Vault.size(item.size) + " put in " + Vault.describe(place))
+        if (kind != Paper.MANUAL) return kind.one + " added to " + thing.title + "."
+        return if (readManual(context, thing.id, paper, brought.file)) "Manual added. Ask it anything in Ask your manuals."
+        else "Manual added, but it has no words KueVault could read, so it can't be asked."
+    }
+
+    /**
+     * Reads a manual's words and keeps them for asking. Its own words first; a manual of scanned pages is
+     * read off each page's picture instead, on the phone. [pdf]: the manual on the phone, or null to download it.
+     */
+    suspend fun readManual(context: Context, thingId: String, paper: Paperwork, pdf: File? = null): Boolean {
+        val file = pdf ?: fetch(context, paper.item()) ?: return false
+        if (paper.mime != "application/pdf" && !file.name.endsWith(".pdf", true)) {
+            val words = Scan.wordsOfFile(context, file, paper.mime)
+            return Manuals.keep(context, thingId, paper, listOf(words))
+        }
+        doing = "Reading the manual…"
+        try {
+            val own = withContext(Dispatchers.IO) { runCatching { Manuals.pagesOf(context, file) }.getOrDefault(emptyList()) }
+            if (own.count { it.isNotBlank() } * 2 >= own.size.coerceAtLeast(1)) return Manuals.keep(context, thingId, paper, own)
+            val count = withContext(Dispatchers.IO) { Manuals.pageCount(file) }.coerceAtMost(300)
+            val pages = ArrayList<String>()
+            for (i in 0 until count) {
+                doing = "Reading the manual · page " + (i + 1) + " of " + count
+                val own1 = own.getOrNull(i).orEmpty()
+                pages += own1.ifBlank { withContext(Dispatchers.IO) { Manuals.pagePicture(file, i) }?.let { Scan.words(it) }.orEmpty() }
+            }
+            return Manuals.keep(context, thingId, paper, pages)
+        } finally {
+            doing = ""
+        }
+    }
+
+    /** Opens one of a thing's papers, wherever it is now. */
+    suspend fun openPaper(context: Context, paper: Paperwork) {
+        val item = Things.find(paper, Library.items.toList()) ?: paper.item()
+        open(context, item)
+    }
+
+    /** Moves one of a thing's papers to its place's bin, and takes it off the thing. */
+    suspend fun binPaper(context: Context, thingId: String, paper: Paperwork) {
+        val item = Things.find(paper, Library.items.toList()) ?: paper.item()
+        val place = Vault.place(item.placeId)
+        val store = place?.let { store(context, it) }
+        if (store != null) {
+            val ok = withContext(Dispatchers.IO) { runCatching { store.bin(item) }.onFailure { failed(place, it, "binning a paper") }.isSuccess }
+            if (!ok) { problem = unreachable[place.id] ?: (item.name + " couldn't be moved to the bin. Try again."); return }
+            Library.remove(item)
+        }
+        Things.removePaper(thingId, paper)
+        Manuals.forget(context, thingId, paper.id)
+    }
+
+    /** Takes a thing out of My things; [alsoPapers]: its papers go to their places' bins too. */
+    suspend fun removeThing(context: Context, thing: Thing, alsoPapers: Boolean) {
+        if (alsoPapers) for (p in thing.papers) binPaper(context, thing.id, p)
+        for (p in thing.papers) Manuals.forget(context, thing.id, p.id)
+        Things.remove(thing.id)
+        told = thing.title + " taken out of My things." + if (alsoPapers && thing.papers.isNotEmpty()) " Its papers are in the bin." else ""
+    }
+
+    private val web by lazy { okhttp3.OkHttpClient.Builder().connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS).readTimeout(60, java.util.concurrent.TimeUnit.SECONDS).build() }
+
+    /** Downloads a link the person shared (a maker's manual, say). Null with the reason given when it isn't a file. */
+    suspend fun fetchLink(context: Context, url: String): Brought? {
+        doing = "Downloading…"
+        try {
+            return withContext(Dispatchers.IO) {
+                runCatching {
+                    web.newCall(okhttp3.Request.Builder().url(url).header("User-Agent", "Mozilla/5.0 (Android) KueVault/" + BuildConfig.VERSION_NAME).build()).execute().use { r ->
+                        if (!r.isSuccessful) throw java.io.IOException("the site answered " + r.code)
+                        val type = r.header("Content-Type").orEmpty().substringBefore(';').trim().lowercase()
+                        val name = url.substringBefore('?').substringAfterLast('/').ifBlank { "Download" }
+                        val folder = File(context.cacheDir, "in").apply { mkdirs() }
+                        val file = File(folder, "in" + System.nanoTime() + ".part")
+                        r.body.byteStream().use { input -> file.outputStream().use { input.copyTo(it) } }
+                        val head = file.inputStream().use { val b = ByteArray(5); val n = it.read(b); if (n > 0) String(b, 0, n) else "" }
+                        val mime = if (head.startsWith("%PDF")) "application/pdf" else type.ifBlank { HomeStore.mimeOf(name) }
+                        if (mime.startsWith("text/html")) { file.delete(); throw java.io.IOException("that link is a web page, not a file") }
+                        val done = File(folder, "in" + System.nanoTime() + "." + extensionOf(mime, name))
+                        file.renameTo(done)
+                        Brought(done, mime, name)
+                    }
+                }.onFailure { problem = "That link couldn't be downloaded: " + (it.message ?: "try again") + ". Open it, download the file, then add it from the phone." }.getOrNull()
+            }
+        } finally {
+            doing = ""
         }
     }
 }

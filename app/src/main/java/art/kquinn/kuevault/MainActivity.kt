@@ -71,6 +71,9 @@ class MainActivity : ComponentActivity() {
         Report.init(this)
         Vault.init(this)
         Library.init(this)
+        Things.init(this)
+        Reminders.start(this)
+        Incoming.take(intent)
         setContent {
             Ui.App(
                 Asks(
@@ -80,6 +83,12 @@ class MainActivity : ComponentActivity() {
                 ),
             )
         }
+    }
+
+    /** Something shared with KueVault while it was already open. */
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        Incoming.take(intent)
     }
 
     override fun onResume() {

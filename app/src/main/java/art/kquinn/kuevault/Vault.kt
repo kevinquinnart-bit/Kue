@@ -13,6 +13,8 @@ enum class Section(val title: String, val colour: Long, val ready: Boolean, val 
     MUSIC("Music", 0xFFF28C38, false, "Music opens in KueSounds"),
     FILMS("Films", 0xFF6BD08A, false, "Films open in KueTV"),
     DOCUMENTS("Documents", 0xFFC9A3FF, true, ""),
+    /** Everything the person owns, each with its receipt, warranty, manual and photos. */
+    THINGS("My things", 0xFF4FD1C5, true, ""),
     BACKUPS("Backups", 0xFFB9C2D3, false, "Backups arrive with the new-phone move"),
 }
 

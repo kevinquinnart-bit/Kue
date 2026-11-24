@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Android's own backup of KueVault's set-up (Android 11 and older): which places are connected, where each
-     section lives and keeps its copies, and the library list. Not home-computer passwords: they are locked to
+     section lives and keeps its copies, the library list, and the list of your things. Not home-computer passwords: they are locked to
      this phone's key and couldn't be opened on another; KueVault asks for them again. -->
 <full-backup-content>
     <include domain="sharedpref" path="vault.xml" />
     <include domain="file" path="library.json" />
+    <include domain="file" path="things.json" />
 </full-backup-content>

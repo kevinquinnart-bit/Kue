@@ -89,6 +89,19 @@ sealed class Screen {
     data class HomeForm(val forSection: Section?, val again: Place? = null) : Screen()
     /** Moving to a new phone: what comes back by itself, and the phone's photos and videos. */
     data object NewPhone : Screen()
+    /** Everything the person owns. */
+    data object Things : Screen()
+    data class ThingView(val id: String) : Screen()
+    /** The ways of adding a thing: scanning a receipt, a photo of the label, a file, Amazon orders, or typing. */
+    data object AddThing : Screen()
+    /** The form for a thing; [brought]: a paper waiting to go with it once it's kept, as [kind]. */
+    data class EditThing(val draft: Thing, val isNew: Boolean, val brought: Work.Brought? = null, val kind: Paper = Paper.RECEIPT) : Screen()
+    /** Choosing which Amazon orders become things. */
+    data class Amazon(val orders: List<Reader.Order>) : Screen()
+    /** Asking the manuals: one thing's ([thingId]) or everything's (null). */
+    data class Ask(val thingId: String?) : Screen()
+    /** Something shared into KueVault from another app. */
+    data object Shared : Screen()
 }
 
 /** What the screens ask the app to do that only the app can: the phone's own pickers and Google's page. */
@@ -101,12 +114,12 @@ class Asks(
 )
 
 @Composable
-private fun Words(text: String, size: Int = 15, colour: Color = K.Ink, bold: Boolean = false, lines: Int = 2, modifier: Modifier = Modifier) {
+internal fun Words(text: String, size: Int = 15, colour: Color = K.Ink, bold: Boolean = false, lines: Int = 2, modifier: Modifier = Modifier) {
     Text(text, color = colour, fontSize = size.sp, fontFamily = K.Poppins, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, maxLines = lines, overflow = TextOverflow.Ellipsis, modifier = modifier)
 }
 
 @Composable
-private fun Button(text: String, main: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun Button(text: String, main: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Box(
         modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Panel).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         contentAlignment = Alignment.Center,
@@ -114,14 +127,14 @@ private fun Button(text: String, main: Boolean = false, modifier: Modifier = Mod
 }
 
 @Composable
-private fun Meter(fraction: Float, colour: Color, height: Int = 6) {
+internal fun Meter(fraction: Float, colour: Color, height: Int = 6) {
     Box(Modifier.fillMaxWidth().height(height.dp).clip(RoundedCornerShape(height.dp)).background(K.Raised)) {
         Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(height.dp).clip(RoundedCornerShape(height.dp)).background(colour))
     }
 }
 
 @Composable
-private fun Title(text: String, onBack: (() -> Unit)? = null) {
+internal fun Title(text: String, onBack: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (onBack != null) {
             Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onBack), contentAlignment = Alignment.Center) { Words("‹", 24) }
@@ -141,10 +154,14 @@ object Ui {
             screen = when (val s = screen) {
                 is Screen.HomeForm -> if (s.again != null) Screen.Places else Screen.AddPlace(s.forSection)
                 Screen.NewPhone -> Screen.Settings
+                is Screen.ThingView, Screen.AddThing, is Screen.Amazon -> Screen.Things
+                is Screen.EditThing -> if (s.isNew) Screen.Things else Screen.ThingView(s.draft.id)
+                is Screen.Ask -> s.thingId?.let { Screen.ThingView(it) } ?: Screen.Things
                 is Screen.AddPlace -> s.forSection?.let { Screen.ChooseHome(it) } ?: Screen.Places
                 else -> Screen.Hub
             }
         }
+        LaunchedEffect(Incoming.count) { if (Incoming.waiting()) screen = Screen.Shared }
         LaunchedEffect(Vault.places.size) { if (Vault.places.isNotEmpty()) { Work.readSpace(context); Work.readLibrary(context); Work.keepUp(context) } }
 
         Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
@@ -153,6 +170,7 @@ object Ui {
                     Screen.Hub -> Hub(
                         onOpen = { section ->
                             screen = when {
+                                section == Section.THINGS -> Screen.Things
                                 Vault.homeOf(section) == null && Library.of(section).isEmpty() -> Screen.ChooseHome(section)
                                 else -> Screen.Files(section)
                             }
@@ -163,6 +181,8 @@ object Ui {
                     Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) }, onPassword = { screen = Screen.HomeForm(null, it) })
                     Screen.Settings -> Settings(onNewPhone = { screen = Screen.NewPhone }) { screen = Screen.Hub }
                     Screen.NewPhone -> NewPhone { screen = Screen.Settings }
+                    Screen.Things, is Screen.ThingView, Screen.AddThing, is Screen.EditThing, is Screen.Amazon, is Screen.Ask, Screen.Shared ->
+                        ThingsUi.Show(s) { screen = it }
                     is Screen.Files -> Files(s.section, asks, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(s.section) }, onKeep = { archive -> screen = Screen.ChooseKeep(s.section, archive) })
                     is Screen.ChooseKeep -> ChooseKeep(s.section, s.archive, onDone = { screen = Screen.Files(s.section) })
                     is Screen.ChooseHome -> ChooseHome(
@@ -173,7 +193,7 @@ object Ui {
                             val to = Vault.place(id)
                             Work.told = s.section.title + " now lives in " + (to?.label ?: "") + "."
                             if (move && before != null && to != null && before.id != to.id) scope.launch { Work.told = Work.moveSection(context, s.section, before, to) }
-                            screen = Screen.Files(s.section)
+                            screen = if (s.section == Section.THINGS) Screen.Things else Screen.Files(s.section)
                         },
                         onAdd = { screen = Screen.AddPlace(s.section) },
                         onBack = { screen = Screen.Hub },
@@ -213,7 +233,7 @@ object Ui {
     @Composable
     private fun Nav(now: Screen, go: (Screen) -> Unit) {
         Row(Modifier.fillMaxWidth().background(K.Panel).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            val items = listOf("Hub" to Screen.Hub, "Search" to Screen.Library, "Places" to Screen.Places)
+            val items = listOf("Hub" to Screen.Hub, "My things" to Screen.Things, "Search" to Screen.Library, "Places" to Screen.Places)
             for ((label, target) in items) {
                 val on = now == target
                 Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable { go(target) }.padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
@@ -354,7 +374,7 @@ object Ui {
     }
 
     @Composable
-    private fun Chip(text: String, on: Boolean, onClick: () -> Unit) {
+    internal fun Chip(text: String, on: Boolean, onClick: () -> Unit) {
         Box(Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) K.Accent else K.Panel).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
             Words(text, 13, if (on) Color(0xFF111111) else K.Ink, bold = on, lines = 1)
         }
@@ -483,7 +503,7 @@ object Ui {
             Title(if (archive) section.title + ": archive" else section.title + ": backup copy", onDone)
             Words(
                 if (archive) "When " + (Vault.homeOf(section)?.label ?: "its place") + " is 80% full, the oldest " + section.title.lowercase() + " go here until it is back to 70%. Each one leaves only once it is safely here and in the backup copy, so it is always in two places."
-                else "A full second copy of every " + section.title.lowercase().removeSuffix("s") + " file, kept up to date whenever KueVault opens on Wi-Fi.",
+                else "A full second copy of everything in " + section.title + ", kept up to date whenever KueVault opens on Wi-Fi.",
                 14, K.Soft, lines = 5, modifier = Modifier.padding(horizontal = 20.dp),
             )
             Spacer(Modifier.height(12.dp))
@@ -582,7 +602,7 @@ object Ui {
     }
 
     @Composable
-    private fun Field(label: String, value: String, example: String, secret: Boolean = false, onChange: (String) -> Unit) {
+    internal fun Field(label: String, value: String, example: String, secret: Boolean = false, onChange: (String) -> Unit) {
         if (label.isNotEmpty()) Words(label, 13, K.Soft, lines = 1)
         Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(horizontal = 16.dp, vertical = 14.dp), contentAlignment = Alignment.CenterStart) {
             if (value.isEmpty() && example.isNotEmpty()) Words(example, 15, K.Soft.copy(alpha = 0.5f), lines = 1)
@@ -614,11 +634,11 @@ object Ui {
                 }
                 Spacer(Modifier.height(6.dp))
                 Words("Privacy", 15, bold = true)
-                Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server, and nothing is sent anywhere else. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 8)
+                Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server. Receipts, labels and manuals are read on this phone; the only thing sent anywhere else is a product's barcode number, to Open Products Facts, when you scan one. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 10)
                 Button(if (forget) "Tap again to forget everything on this phone" else "Forget everything on this phone", modifier = Modifier.fillMaxWidth()) {
-                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Work.told = "Forgotten. Your files are still in your places." }
+                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Things.forgetAll(); Work.told = "Forgotten. Your files are still in your places." }
                 }
-                Words("Takes every place out of KueVault on this phone. The files stay where they are.", 12, K.Soft, lines = 3)
+                Words("Takes every place and the list of your things out of KueVault on this phone. The files, papers included, stay where they are.", 12, K.Soft, lines = 3)
             }
         }
     }

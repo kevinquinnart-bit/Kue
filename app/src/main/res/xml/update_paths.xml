@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The folders KueVault shares with other apps: a newer KueVault for the installer, and a file being opened. -->
+<!-- The folders KueVault shares with other apps: a newer KueVault for the installer, a file being opened, and a photo the camera takes for My things. -->
 <paths>
     <cache-path name="update" path="update/" />
     <cache-path name="open" path="open/" />
+    <cache-path name="photo" path="photo/" />
 </paths>
