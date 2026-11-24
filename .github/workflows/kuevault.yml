@@ -45,7 +45,22 @@ jobs:
       - name: Test
         run: |
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest --stacktrace
+          # Tried twice: a download from Maven sometimes fails on the first go.
+          ./gradlew :app:testDebugUnitTest --stacktrace || ./gradlew :app:testDebugUnitTest --stacktrace || {
+            # Which tests failed, as notes on the run, readable without signing in.
+            for f in app/build/test-results/testDebugUnitTest/*.xml; do
+              grep -q "<failure" "$f" || continue
+              python3 - "$f" <<'PY'
+          import sys, xml.etree.ElementTree as ET
+          for case in ET.parse(sys.argv[1]).getroot().iter("testcase"):
+              for fail in case.findall("failure"):
+                  text = (fail.get("message") or "")[:300].replace("\n", " ").replace("%", "%25")
+                  print("::error title=" + case.get("classname", "") + "." + case.get("name", "") + "::" + text)
+          PY
+            done
+            echo "::error title=Test::the tests didn't run to the end; see the log"
+            exit 1
+          }
 
       - name: Build
         run: |
