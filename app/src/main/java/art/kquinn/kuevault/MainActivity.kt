@@ -31,8 +31,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** The section files are being picked for. */
+    private var pickingFor: Section = Section.DOCUMENTS
+
     private val filePicker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNotEmpty()) lifecycleScope.launch { Work.upload(this@MainActivity, uris) }
+        val section = pickingFor
+        if (uris.isNotEmpty()) lifecycleScope.launch { Work.upload(this@MainActivity, section, uris) }
     }
 
     /** Asks Google for KueVault's one permission on [email]: straight away when it was given before. */
@@ -66,12 +70,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Report.init(this)
         Vault.init(this)
+        Library.init(this)
         setContent {
             Ui.App(
                 Asks(
                     addGoogle = { section -> addingFor = section; runCatching { accountChooser.launch(Google.chooser()) }.onFailure { Work.problem = "This phone has no list of Google accounts to choose from." } },
                     signInAgain = { email -> addingFor = null; addingEmail = email; ask(email) },
-                    pickFiles = { filePicker.launch(arrayOf("*/*")) },
+                    pickFiles = { section -> pickingFor = section; filePicker.launch(arrayOf("*/*")) },
                 ),
             )
         }

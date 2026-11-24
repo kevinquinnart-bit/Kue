@@ -25,6 +25,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -72,10 +73,12 @@ object K {
 /** The screens, as a person moves between them. */
 sealed class Screen {
     data object Hub : Screen()
-    data object Documents : Screen()
+    /** Everything in every place, with search. */
+    data object Library : Screen()
     data object Places : Screen()
     data object Settings : Screen()
-    data class Coming(val section: Section) : Screen()
+    /** One section's files. */
+    data class Files(val section: Section) : Screen()
     /** Choosing which place [section] lives in. */
     data class ChooseHome(val section: Section) : Screen()
     /** Choosing what kind of place to connect; [forSection] lives there once it's connected. */
@@ -89,7 +92,8 @@ class Asks(
     /** Connects a Google account; the section, when given, then lives in it. */
     val addGoogle: (Section?) -> Unit,
     val signInAgain: (String) -> Unit,
-    val pickFiles: () -> Unit,
+    /** The phone's file picker; what is picked goes into the section's place. */
+    val pickFiles: (Section) -> Unit,
 )
 
 @Composable
@@ -136,7 +140,7 @@ object Ui {
                 else -> Screen.Hub
             }
         }
-        LaunchedEffect(Vault.places.size) { if (Vault.places.isNotEmpty()) Work.readSpace(context) }
+        LaunchedEffect(Vault.places.size) { if (Vault.places.isNotEmpty()) { Work.readSpace(context); Work.readLibrary(context) } }
 
         Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
             Box(Modifier.weight(1f)) {
@@ -144,17 +148,16 @@ object Ui {
                     Screen.Hub -> Hub(
                         onOpen = { section ->
                             screen = when {
-                                Vault.homeOf(section) == null -> Screen.ChooseHome(section)
-                                section.ready -> Screen.Documents
-                                else -> Screen.Coming(section)
+                                Vault.homeOf(section) == null && Library.of(section).isEmpty() -> Screen.ChooseHome(section)
+                                else -> Screen.Files(section)
                             }
                         },
                         onSettings = { screen = Screen.Settings },
                     )
-                    Screen.Documents -> Documents(asks, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(Section.DOCUMENTS) })
+                    Screen.Library -> LibraryScreen()
                     Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) })
                     Screen.Settings -> Settings { screen = Screen.Hub }
-                    is Screen.Coming -> Coming(s.section, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(s.section) })
+                    is Screen.Files -> Files(s.section, asks, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(s.section) })
                     is Screen.ChooseHome -> ChooseHome(
                         s.section,
                         onPick = { id -> Vault.setHome(s.section, id); Work.doing = s.section.title + " now lives in " + (Vault.place(id)?.label ?: "") + "."; screen = Screen.Hub },
@@ -191,10 +194,10 @@ object Ui {
     @Composable
     private fun Nav(now: Screen, go: (Screen) -> Unit) {
         Row(Modifier.fillMaxWidth().background(K.Panel).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            val items = listOf("Hub" to Screen.Hub, "Documents" to Screen.Documents, "Places" to Screen.Places)
+            val items = listOf("Hub" to Screen.Hub, "Search" to Screen.Library, "Places" to Screen.Places)
             for ((label, target) in items) {
                 val on = now == target
-                Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable { go(if (target == Screen.Documents && Vault.homeOf(Section.DOCUMENTS) == null) Screen.ChooseHome(Section.DOCUMENTS) else target) }.padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable { go(target) }.padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
                     Words(label, 13, if (on) K.Accent else K.Soft, bold = on)
                 }
             }
@@ -254,56 +257,98 @@ object Ui {
         }
     }
 
+    /** One section's files, from every place, newest first; new ones go to the section's own place. */
     @Composable
-    private fun Coming(section: Section, onBack: () -> Unit, onMove: () -> Unit) {
+    private fun Files(section: Section, asks: Asks, onBack: () -> Unit, onMove: () -> Unit) {
+        val home = Vault.homeOf(section)
+        val files = Library.of(section)
         Column(Modifier.fillMaxSize()) {
             Title(section.title, onBack)
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Words(section.coming + ". Its place is ready for it.", 15, K.Soft, lines = 4)
-                Vault.homeOf(section)?.let { Words("Lives in " + it.label, 14) }
-                Button("Choose another place", modifier = Modifier.fillMaxWidth(), onClick = onMove)
+            Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f).clickable(onClick = onMove)) {
+                    Words(home?.let { "Lives in " + it.label } ?: "No place yet", 13, K.Soft, lines = 1)
+                    Words("Change", 12, K.Accent, bold = true, lines = 1)
+                }
+                if (home != null) Button("+ Add files", main = true) { asks.pickFiles(section) }
+            }
+            if (section.coming.isNotEmpty()) Words(section.coming + ".", 12, K.Soft, lines = 2, modifier = Modifier.padding(horizontal = 20.dp, vertical = 6.dp))
+            Spacer(Modifier.height(8.dp))
+            when {
+                files.isEmpty() && Work.reading -> Words("Reading your places…", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
+                files.isEmpty() -> Words(if (home == null) "Choose a place first." else "Nothing here yet. Tap Add files to put some in.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
+                else -> ItemList(files, showSection = false)
             }
         }
     }
 
+    /** Everything in every place: search as you type, narrow to one section, put in order. */
     @Composable
-    private fun Documents(asks: Asks, onBack: () -> Unit, onMove: () -> Unit) {
+    private fun LibraryScreen() {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var query by remember { mutableStateOf("") }
+        var section by remember { mutableStateOf<Section?>(null) }
+        var order by remember { mutableStateOf(Library.Order.NEWEST) }
+        val labels = Vault.places.associate { it.id to it.label }
+        val found = Library.search(Library.items.toList(), query, section, labels, order)
+        Column(Modifier.fillMaxSize()) {
+            Title("Search everything")
+            Column(Modifier.padding(horizontal = 20.dp)) {
+                Field("", query, "Name, kind of file or place: \"tax pdf\"") { query = it }
+                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("All", section == null) { section = null }
+                    for (s in Section.entries) Chip(s.title, section == s) { section = if (section == s) null else s }
+                }
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Words(found.size.toString() + " file" + (if (found.size == 1) "" else "s") + if (Work.reading) " · reading your places…" else "", 12, K.Soft, lines = 1, modifier = Modifier.weight(1f))
+                    for (o in Library.Order.entries) {
+                        Words(o.title, 12, if (o == order) K.Accent else K.Soft, bold = o == order, lines = 1, modifier = Modifier.clickable { order = o }.padding(horizontal = 6.dp, vertical = 8.dp))
+                    }
+                }
+                if (!Work.reading) Words("Read again", 12, K.Accent, bold = true, lines = 1, modifier = Modifier.clickable { scope.launch { Work.readLibrary(context) } }.padding(vertical = 6.dp))
+            }
+            Spacer(Modifier.height(6.dp))
+            if (Vault.places.isEmpty()) Words("Connect a place first, in Places.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
+            else if (found.isEmpty() && !Work.reading) Words(if (query.isBlank()) "Nothing in your places yet." else "Nothing matches.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
+            else ItemList(found, showSection = true)
+        }
+    }
+
+    @Composable
+    private fun Chip(text: String, on: Boolean, onClick: () -> Unit) {
+        Box(Modifier.heightIn(min = 40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) K.Accent else K.Panel).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
+            Words(text, 13, if (on) Color(0xFF111111) else K.Ink, bold = on, lines = 1)
+        }
+    }
+
+    /** Files, each opening with a tap; ⋯ shows Open and Move to the bin. */
+    @Composable
+    private fun ItemList(files: List<Store.Item>, showSection: Boolean) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var holding by remember { mutableStateOf<Store.Item?>(null) }
-        val home = Vault.homeOf(Section.DOCUMENTS)
-        LaunchedEffect(home?.id) { Work.readDocuments(context) }
-        Column(Modifier.fillMaxSize()) {
-            Title("Documents", onBack)
-            Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-                Words(home?.let { "Lives in " + it.label } ?: "", 13, K.Soft, modifier = Modifier.weight(1f).clickable(onClick = onMove))
-                Button("+ Add files", main = true) { asks.pickFiles() }
-            }
-            Spacer(Modifier.height(10.dp))
-            when {
-                home == null -> Words("Documents has no place yet.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
-                !Work.documentsRead -> Words("Reading your documents…", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
-                Work.documents.isEmpty() -> Words("Nothing here yet. Tap Add files to put some in.", 15, K.Soft, modifier = Modifier.padding(horizontal = 20.dp))
-                else -> LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(Work.documents, key = { it.placeId + it.id }) { item ->
-                        val date = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.UK).format(java.util.Date(item.modifiedMs))
-                        val where = Vault.place(item.placeId)?.label ?: ""
-                        Column(
-                            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel)
-                                .clickable { if (holding == item) holding = null else scope.launch { Work.open(context, item) } }
-                                .padding(14.dp),
-                        ) {
-                            Words(item.name, 15, bold = true)
-                            Words(Vault.size(item.size) + " · " + date + " · in " + where, 12, K.Soft, lines = 1)
-                            if (holding == item) {
-                                Spacer(Modifier.height(8.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Button("Open", main = true) { holding = null; scope.launch { Work.open(context, item) } }
-                                    Button("Move to the bin") { holding = null; scope.launch { Work.bin(context, item) } }
-                                }
-                            } else {
-                                Words("Tap to open · tap ⋯ for more", 11, K.Soft, lines = 1, modifier = Modifier.clickable { holding = item })
-                            }
+        LazyColumn(Modifier.fillMaxSize().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(files, key = { it.placeId + "|" + it.id }) { item ->
+                val date = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.UK).format(java.util.Date(item.modifiedMs))
+                val where = Vault.place(item.placeId)?.label ?: ""
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel)
+                        .clickable { if (holding == item) holding = null else scope.launch { Work.open(context, item) } }
+                        .padding(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (showSection) { Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(Color(item.section.colour))); Spacer(Modifier.width(8.dp)) }
+                        Words(item.name, 15, bold = true, modifier = Modifier.weight(1f))
+                        Words("⋯", 20, K.Soft, lines = 1, modifier = Modifier.clickable { holding = if (holding == item) null else item }.padding(start = 12.dp, end = 4.dp))
+                    }
+                    Words(Vault.size(item.size) + " · " + date + " · " + (if (showSection) item.section.title + " · " else "") + "in " + where, 12, K.Soft, lines = 1)
+                    if (holding == item) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button("Open", main = true) { holding = null; scope.launch { Work.open(context, item) } }
+                            Button("Move to the bin") { holding = null; scope.launch { Work.bin(context, item) } }
                         }
                     }
                 }
@@ -450,7 +495,7 @@ object Ui {
 
     @Composable
     private fun Field(label: String, value: String, example: String, secret: Boolean = false, onChange: (String) -> Unit) {
-        Words(label, 13, K.Soft, lines = 1)
+        if (label.isNotEmpty()) Words(label, 13, K.Soft, lines = 1)
         Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(horizontal = 16.dp, vertical = 14.dp), contentAlignment = Alignment.CenterStart) {
             if (value.isEmpty() && example.isNotEmpty()) Words(example, 15, K.Soft.copy(alpha = 0.5f), lines = 1)
             androidx.compose.foundation.text.BasicTextField(
@@ -482,7 +527,7 @@ object Ui {
                 Words("Privacy", 15, bold = true)
                 Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server, and nothing is sent anywhere else. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 8)
                 Button(if (forget) "Tap again to forget everything on this phone" else "Forget everything on this phone", modifier = Modifier.fillMaxWidth()) {
-                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Work.documents.clear(); Work.documentsRead = false; Work.doing = "Forgotten. Your files are still in your places." }
+                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Work.doing = "Forgotten. Your files are still in your places." }
                 }
                 Words("Takes every place out of KueVault on this phone. The files stay where they are.", 12, K.Soft, lines = 3)
             }

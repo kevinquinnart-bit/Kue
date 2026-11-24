@@ -95,7 +95,7 @@ object Drive {
                 out += Store.Item(
                     j.get("id").asString, j.get("name").asString, j.get("size")?.asString?.toLongOrNull() ?: 0L,
                     runCatching { java.time.Instant.parse(j.get("modifiedTime").asString).toEpochMilli() }.getOrDefault(0L),
-                    j.get("mimeType")?.asString.orEmpty(), placeId,
+                    j.get("mimeType")?.asString.orEmpty(), placeId, section,
                 )
             }
             page = o.get("nextPageToken")?.asString
@@ -143,7 +143,7 @@ object Drive {
         return Store.Item(
             j.get("id").asString, j.get("name").asString, j.get("size")?.asString?.toLongOrNull() ?: size,
             runCatching { java.time.Instant.parse(j.get("modifiedTime").asString).toEpochMilli() }.getOrDefault(System.currentTimeMillis()),
-            j.get("mimeType")?.asString ?: mime, placeId,
+            j.get("mimeType")?.asString ?: mime, placeId, section,
         )
     }
 

@@ -164,6 +164,7 @@ object Vault {
         prefs().edit().remove("used.$id").remove("limit.$id").apply()
         if (place.kind == PlaceKind.HOME) Secrets.forget(app, id)
         save()
+        Library.tidy()
         Report.note("place taken out: " + describe(place))
     }
 

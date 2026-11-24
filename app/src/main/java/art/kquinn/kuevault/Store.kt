@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit
  */
 interface Store {
     /** A file in a section: which place it is in, its name and size, and when it last changed. */
-    data class Item(val id: String, val name: String, val size: Long, val modifiedMs: Long, val mime: String, val placeId: String)
+    data class Item(val id: String, val name: String, val size: Long, val modifiedMs: Long, val mime: String, val placeId: String, val section: Section)
 
     /** How full the place is, or null when it can't say. */
     fun space(): Quota?
@@ -102,7 +102,7 @@ class HomeStore(private val place: Place, private val password: String) : Store 
         share.list(path).filter { f ->
             f.fileName != "." && f.fileName != ".." && (f.fileAttributes and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value) == 0L
         }.map { f ->
-            Store.Item(path + "\\" + f.fileName, f.fileName, f.endOfFile, f.lastWriteTime.toEpochMillis(), mimeOf(f.fileName), place.id)
+            Store.Item(path + "\\" + f.fileName, f.fileName, f.endOfFile, f.lastWriteTime.toEpochMillis(), mimeOf(f.fileName), place.id, section)
         }.sortedByDescending { it.modifiedMs }
     }
 
@@ -113,7 +113,7 @@ class HomeStore(private val place: Place, private val password: String) : Store 
         val input = context.contentResolver.openInputStream(uri) ?: throw IOException("the file couldn't be opened")
         input.use { copyUp(share, path, it, size, progress) }
         val written = share.getFileInformation(path).standardInformation.endOfFile
-        Store.Item(path, path.substringAfterLast('\\'), written, System.currentTimeMillis(), mime, place.id)
+        Store.Item(path, path.substringAfterLast('\\'), written, System.currentTimeMillis(), mime, place.id, section)
     }
 
     /** Writes [input] to [path], replacing nothing: a file that is cut short is taken away again. */

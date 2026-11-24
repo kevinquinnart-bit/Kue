@@ -26,9 +26,6 @@ object Work {
     /** Home computers that couldn't be reached last time, by place id, with why. */
     val unreachable = androidx.compose.runtime.mutableStateMapOf<String, String>()
 
-    val documents = mutableStateListOf<Store.Item>()
-    var documentsRead by mutableStateOf(false)
-
     /** The way into [place]'s files, or null with the reason marked on it. */
     suspend fun store(context: Context, place: Place): Store? = when (place.kind) {
         PlaceKind.GOOGLE -> {
@@ -63,22 +60,32 @@ object Work {
         }
     }
 
+    /** Reading the library from the places is under way. */
+    var reading by mutableStateOf(false)
+
     /**
-     * Reads what is in Documents: its own place first, then any other connected place that already has a
-     * Documents folder (files put there before Documents moved). Nothing is made where there is none.
+     * Reads every section's folder in every place into the library. A place that can't be reached keeps what
+     * the library last knew of it. Nothing is made where there is no folder.
      */
-    suspend fun readDocuments(context: Context) {
-        val all = ArrayList<Store.Item>()
-        val home = Vault.homeOf(Section.DOCUMENTS)
-        for (place in listOfNotNull(home) + Vault.places.filter { it.id != home?.id }) {
-            val store = store(context, place) ?: continue
-            withContext(Dispatchers.IO) {
-                runCatching { store.list(Section.DOCUMENTS) }.onFailure { failed(place, it, "reading Documents") }.getOrNull()
-            }?.let { all.addAll(it) }
+    suspend fun readLibrary(context: Context) {
+        if (reading) return
+        reading = true
+        try {
+            val read = HashMap<String, List<Store.Item>>()
+            for (place in Vault.places.toList()) {
+                val store = store(context, place) ?: continue
+                val list = withContext(Dispatchers.IO) {
+                    runCatching { Section.entries.flatMap { store.list(it) } }.onFailure { failed(place, it, "reading the library") }.getOrNull()
+                } ?: continue
+                if (place.kind == PlaceKind.HOME) unreachable.remove(place.id)
+                read[place.id] = list
+            }
+            Library.replace(read)
+            Library.tidy()
+            Report.note("library read: " + Library.items.size + " files in " + read.size + " of " + Vault.places.size + " places")
+        } finally {
+            reading = false
         }
-        documents.clear()
-        documents.addAll(all.sortedByDescending { it.modifiedMs })
-        documentsRead = true
     }
 
     /** Name, size and kind of a file the person picked on the phone. */
@@ -94,32 +101,32 @@ object Work {
         return Triple(name, size, context.contentResolver.getType(uri) ?: "application/octet-stream")
     }
 
-    /** Puts files from the phone into Documents' own place. When that place is full, it says so and stops. */
-    suspend fun upload(context: Context, uris: List<Uri>) {
-        val place = Vault.homeOf(Section.DOCUMENTS) ?: run { problem = "Documents has no place yet. Choose one in Places first."; return }
+    /** Puts files from the phone into [section]'s own place. When that place is full, it says so and stops. */
+    suspend fun upload(context: Context, section: Section, uris: List<Uri>) {
+        val place = Vault.homeOf(section) ?: run { problem = section.title + " has no place yet. Choose one in Places first."; return }
         val store = store(context, place) ?: run { problem = signInWords(place); return }
         var done = 0
         for (uri in uris) {
             val (name, size, mime) = withContext(Dispatchers.IO) { describe(context, uri) }
-            if (Vault.room(Section.DOCUMENTS, size.coerceAtLeast(0)) == Room.FULL) {
-                problem = place.label + " is full, so $name wasn't put in. Free some space there, or choose another place for Documents in Places."
+            if (Vault.room(section, size.coerceAtLeast(0)) == Room.FULL) {
+                problem = place.label + " is full, so $name wasn't put in. Free some space there, or choose another place for " + section.title + " in Places."
                 break
             }
             doing = "Uploading $name · 0%"
             val item = withContext(Dispatchers.IO) {
-                runCatching { store.upload(context, Section.DOCUMENTS, uri, name, mime, size) { p -> doing = "Uploading $name · $p%" } }
+                runCatching { store.upload(context, section, uri, name, mime, size) { p -> doing = "Uploading $name · $p%" } }
                     .onFailure { failed(place, it, "uploading") }.getOrNull()
             }
             if (item == null) { problem = unreachable[place.id] ?: "$name didn't upload. Check the internet and try again."; break }
-            documents.add(0, item)
+            Library.add(item)
             Vault.quotas[place.id]?.let { Vault.keepQuota(place.id, it.copy(used = it.used + item.size)) }
             Report.note("uploaded a file of " + Vault.size(item.size) + " to " + Vault.describe(place))
             done++
         }
         doing = ""
         if (done > 0) readSpace(context)
-        if (Vault.room(Section.DOCUMENTS, 0) == Room.NEARLY_FULL && problem.isEmpty()) {
-            problem = place.label + " is nearly full. Free some space there soon, or choose another place for Documents in Places."
+        if (Vault.room(section, 0) == Room.NEARLY_FULL && problem.isEmpty()) {
+            problem = place.label + " is nearly full. Free some space there soon, or choose another place for " + section.title + " in Places."
         }
     }
 
@@ -154,7 +161,7 @@ object Work {
         val place = Vault.place(item.placeId) ?: run { problem = "That file's place isn't connected any more."; return }
         val store = store(context, place) ?: run { problem = signInWords(place); return }
         val ok = withContext(Dispatchers.IO) { runCatching { store.bin(item) }.onFailure { failed(place, it, "binning") }.isSuccess }
-        if (ok) documents.remove(item) else problem = unreachable[place.id] ?: (item.name + " couldn't be moved to the bin. Try again.")
+        if (ok) Library.remove(item) else problem = unreachable[place.id] ?: (item.name + " couldn't be moved to the bin. Try again.")
     }
 
     /**
