@@ -69,6 +69,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Report.init(this)
+        KueSettings.init(this)
         Vault.init(this)
         Library.init(this)
         Things.init(this)

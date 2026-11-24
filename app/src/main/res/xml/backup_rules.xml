@@ -4,6 +4,7 @@
      this phone's key and couldn't be opened on another; KueVault asks for them again. -->
 <full-backup-content>
     <include domain="sharedpref" path="vault.xml" />
+    <include domain="sharedpref" path="kue-look.xml" />
     <include domain="file" path="library.json" />
     <include domain="file" path="things.json" />
 </full-backup-content>

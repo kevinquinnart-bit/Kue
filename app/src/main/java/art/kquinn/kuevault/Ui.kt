@@ -59,7 +59,8 @@ object K {
     val Raised = Color(0xFF263A63)
     val Accent = Color(0xFFFFD23F)
     val Ink = Color.White
-    val Soft = Color(0xFFB9C2D3)
+    /** Soft grey text; nearly white with Stronger contrast on (Settings › Look and feel). */
+    val Soft: Color get() = if (KueSettings.contrast) Color(0xFFE8EDF5) else Color(0xFFB9C2D3)
     val Warn = Color(0xFFF28C38)
     /** The light blue of the Kue K: the second word of every Kue app's name. */
     val KueBlue = Color(0xFF5CCEFF)
@@ -119,11 +120,16 @@ internal fun Words(text: String, size: Int = 15, colour: Color = K.Ink, bold: Bo
 }
 
 @Composable
-internal fun Button(text: String, main: Boolean = false, modifier: Modifier = Modifier, onClick: () -> Unit) {
-    Box(
-        modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Panel).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
-        contentAlignment = Alignment.Center,
-    ) { Words(text, 15, if (main) Color(0xFF111111) else K.Ink, bold = main) }
+internal fun Button(text: String, main: Boolean = false, modifier: Modifier = Modifier, icon: String? = null, onClick: () -> Unit) {
+    Row(
+        modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Raised).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        // A drawn Kue icon, never an emoji.
+        if (icon != null) { KueSettings.Icon(icon, 18.dp, if (main) Color(0xFF111111) else K.Ink); Spacer(Modifier.width(8.dp)) }
+        Words(text, 15, if (main) Color(0xFF111111) else K.Ink, bold = main)
+    }
 }
 
 @Composable
@@ -167,6 +173,11 @@ object Ui {
         LaunchedEffect(Incoming.count) { if (Incoming.waiting()) screen = Screen.Shared }
         LaunchedEffect(Vault.places.size) { if (Vault.places.isNotEmpty()) { Work.readSpace(context); Work.readLibrary(context); Work.keepUp(context) } }
 
+        // Settings › Look and feel › Text size: every word in the app drawn bigger or smaller.
+        val dens = androidx.compose.ui.platform.LocalDensity.current
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(dens.density, dens.fontScale * KueSettings.textScale),
+        ) {
         Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
             Box(Modifier.weight(1f)) {
                 when (val s = screen) {
@@ -182,7 +193,7 @@ object Ui {
                     )
                     Screen.Library -> LibraryScreen()
                     Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) }, onPassword = { screen = Screen.HomeForm(null, it) })
-                    Screen.Settings -> Settings(onNewPhone = { screen = Screen.NewPhone }) { screen = Screen.Hub }
+                    Screen.Settings -> Settings(onNewPhone = { screen = Screen.NewPhone }, onPlaces = { screen = Screen.Places }) { screen = Screen.Hub }
                     Screen.NewPhone -> NewPhone { screen = Screen.Settings }
                     Screen.Things, is Screen.ThingView, Screen.AddThing, is Screen.EditThing, is Screen.Amazon, is Screen.Ask, Screen.Shared ->
                         ThingsUi.Show(s) { screen = it }
@@ -231,6 +242,7 @@ object Ui {
             }
             Nav(screen) { screen = it }
         }
+        }
     }
 
     @Composable
@@ -256,7 +268,7 @@ object Ui {
                     buildAnnotatedString { append("Kue"); withStyle(SpanStyle(color = K.KueBlue)) { append("Vault") } },
                     color = K.Ink, fontSize = 24.sp, fontFamily = K.Poppins, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
                 )
-                Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onSettings), contentAlignment = Alignment.Center) { Words("⚙", 20) }
+                Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onSettings), contentAlignment = Alignment.Center) { KueSettings.Icon(KueSettings.Icons.GEAR, 24.dp, K.Ink) }
             }
             val known = Vault.places.mapNotNull { Vault.quotas[it.id] }
             val used = known.sumOf { it.used }
@@ -619,37 +631,104 @@ object Ui {
         }
     }
 
+    /** Every Kue app's settings in the same eight groups (see KueSettings). One group open at a time. */
+    private val look = KueSettings.Look(
+        page = K.Page, panel = K.Panel, raised = K.Raised, accent = K.Accent, onAccent = Color(0xFF111111), ink = K.Ink,
+        soft = { K.Soft }, font = K.Poppins,
+    )
+
     @Composable
-    private fun Settings(onNewPhone: () -> Unit, onBack: () -> Unit) {
+    private fun Settings(onNewPhone: () -> Unit, onPlaces: () -> Unit, onBack: () -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var forget by remember { mutableStateOf(false) }
+        var open by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("app") }
+        val toggle = { id: String -> open = if (open == id) "" else id }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Title("Settings", onBack)
-            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Words("KueVault " + BuildConfig.VERSION_NAME, 15, bold = true)
-                if (!BuildConfig.STORE) Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
-                Button("Moving to a new phone", modifier = Modifier.fillMaxWidth(), onClick = onNewPhone)
-                Spacer(Modifier.height(6.dp))
-                Words("Make films smaller first", 15, bold = true)
-                Words("KueVault Shrink, on your Windows PC, makes films about half the size before they go in, looking the same and still playing on phones, Fire TV and KueTV. Download it on the PC from: " + SHRINK, 13, K.Soft, lines = 6)
-                Button("Copy the PC download link", modifier = Modifier.fillMaxWidth()) {
-                    val clip = context.getSystemService(android.content.ClipboardManager::class.java)
-                    clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault Shrink", SHRINK))
-                    Work.told = "Link copied. Send it to yourself and open it on the PC."
+            Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                // 1. Account: the Google accounts and other places KueVault keeps things in
+                val googles = Vault.places.filter { it.kind == PlaceKind.GOOGLE }
+                KueSettings.Group(
+                    KueSettings.Icons.ACCOUNT, "Account",
+                    if (Vault.places.isEmpty()) "Nothing connected yet" else Vault.places.size.let { "$it place" + if (it == 1) "" else "s" } + if (googles.isNotEmpty()) " · " + googles.first().label else "",
+                    open == "account", look, { toggle("account") },
+                ) {
+                    if (Vault.places.isEmpty()) KueSettings.Note("No places connected yet.", look)
+                    Vault.places.forEach { KueSettings.Fact(it.label, it.kind.title, look) }
+                    Button("Places", modifier = Modifier.fillMaxWidth(), onClick = onPlaces)
+                    KueSettings.Note("Passwords for Google accounts are kept by Google, not KueVault.", look)
                 }
-                Button("Copy report for Claude", modifier = Modifier.fillMaxWidth()) {
-                    val clip = context.getSystemService(android.content.ClipboardManager::class.java)
-                    clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault report", Report.text(context)))
-                    Work.told = "Report copied. Paste it into the chat."
+
+                // 2. KueVault itself
+                KueSettings.Group(KueSettings.Icons.APP, "KueVault", "Make films smaller first", open == "app", look, { toggle("app") }) {
+                    KueSettings.Heading("Make films smaller first", look)
+                    Words("KueVault Shrink, on your Windows PC, makes films about half the size before they go in, looking the same and still playing on phones, Fire TV and KueTV. Download it on the PC from: " + SHRINK, 13, K.Soft, lines = 6)
+                    Button("Copy the PC download link", modifier = Modifier.fillMaxWidth()) {
+                        val clip = context.getSystemService(android.content.ClipboardManager::class.java)
+                        clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault Shrink", SHRINK))
+                        Work.told = "Link copied. Send it to yourself and open it on the PC."
+                    }
                 }
-                Spacer(Modifier.height(6.dp))
-                Words("Privacy", 15, bold = true)
-                Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server. Receipts, labels and manuals are read on this phone; the only thing sent anywhere else is a product's barcode number, to Open Products Facts, when you scan one. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 10)
-                Button(if (forget) "Tap again to forget everything on this phone" else "Forget everything on this phone", modifier = Modifier.fillMaxWidth()) {
-                    if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Things.forgetAll(); Work.told = "Forgotten. Your files are still in your places." }
+
+                // 3. Look and feel
+                KueSettings.Group(
+                    KueSettings.Icons.LOOK, "Look and feel",
+                    "Text size " + (KueSettings.textStep + 1) + " of 5" + if (KueSettings.contrast) " · stronger contrast" else "",
+                    open == "look", look, { toggle("look") },
+                ) {
+                    KueSettings.Scale("Text size", 5, KueSettings.textStep, look) { KueSettings.chooseTextStep(it) }
+                    KueSettings.Toggle("Stronger contrast", "Grey writing drawn nearly white, easier to read.", KueSettings.contrast, look) { KueSettings.chooseContrast(it) }
                 }
-                Words("Takes every place and the list of your things out of KueVault on this phone. The files, papers included, stay where they are.", 12, K.Soft, lines = 3)
+
+                // 4. Notifications: the warranty reminders
+                val allowed = Reminders.allowed(context)
+                KueSettings.Group(KueSettings.Icons.NOTICES, "Notifications", "Warranty reminders: " + if (allowed) "on" else "off", open == "notices", look, { toggle("notices") }) {
+                    KueSettings.Toggle("Warranty reminders", "30 days and 7 days before a warranty in My things ends.", allowed, look) {
+                        runCatching {
+                            context.startActivity(
+                                android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                                    .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, context.packageName)
+                                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                            )
+                        }
+                    }
+                    KueSettings.Note("Turned on and off in the phone's own settings, which open when you tap it.", look)
+                }
+
+                // 5. Backup and sync
+                KueSettings.Group(KueSettings.Icons.BACKUP, "Backup and sync", "Kept by Android's own backup", open == "backup", look, { toggle("backup") }) {
+                    KueSettings.Note("Android's own backup keeps KueVault's set-up: your places, where each section lives, and your things. Home computer passwords stay on this phone.", look)
+                    Button("Moving to a new phone", modifier = Modifier.fillMaxWidth(), onClick = onNewPhone)
+                }
+
+                // 6. Privacy and storage
+                KueSettings.Group(KueSettings.Icons.PRIVACY, "Privacy and storage", "No KueVault server", open == "privacy", look, { toggle("privacy") }) {
+                    KueSettings.Heading("What leaves this phone", look)
+                    Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server. Receipts, labels and manuals are read on this phone; the only thing sent anywhere else is a product's barcode number, to Open Products Facts, when you scan one. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 10)
+                    Button("Permissions", modifier = Modifier.fillMaxWidth()) { KueSettings.openPermissions(context) }
+                    KueSettings.Heading("Forget", look)
+                    Button(if (forget) "Tap again to forget everything on this phone" else "Forget everything on this phone", modifier = Modifier.fillMaxWidth()) {
+                        if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Things.forgetAll(); Work.told = "Forgotten. Your files are still in your places." }
+                    }
+                    Words("Takes every place and the list of your things out of KueVault on this phone. The files, papers included, stay where they are.", 12, K.Soft, lines = 3)
+                }
+
+                // 7. Your Kue apps
+                KueSettings.Group(KueSettings.Icons.KUE, "Your Kue apps", "KueTV, KueSounds", open == "kue", look, { toggle("kue") }) {
+                    KueSettings.KueApps(context.packageName, look)
+                }
+
+                // 8. Help and about
+                KueSettings.Group(KueSettings.Icons.HELP, "Help and about", "Version " + BuildConfig.VERSION_NAME, open == "help", look, { toggle("help") }) {
+                    KueSettings.Fact("Version", BuildConfig.VERSION_NAME, look)
+                    if (!BuildConfig.STORE) Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
+                    Button("Copy report for Claude", modifier = Modifier.fillMaxWidth()) {
+                        val clip = context.getSystemService(android.content.ClipboardManager::class.java)
+                        clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault report", Report.text(context)))
+                        Work.told = "Report copied. Paste it into the chat."
+                    }
+                }
             }
         }
     }

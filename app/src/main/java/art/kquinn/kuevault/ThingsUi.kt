@@ -358,7 +358,7 @@ object ThingsUi {
                     val on = i in picked
                     val already = Reader.fromOrder(o).notes.let { it.isNotEmpty() && it in have }
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (on) K.Raised else K.Panel).clickable { if (!already) picked = if (on) picked - i else picked + i }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).background(if (on) K.Accent else K.Page).border(2.dp, if (on) K.Accent else K.Soft, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) { if (on) Words("✓", 13, Color(0xFF111111), bold = true, lines = 1) }
+                        Box(Modifier.size(22.dp).clip(RoundedCornerShape(6.dp)).background(if (on) K.Accent else K.Page).border(2.dp, if (on) K.Accent else K.Soft, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) { if (on) KueSettings.Icon(KueSettings.Icons.TICK, 16.dp, Color(0xFF111111), 2.6f) }
                         Spacer(Modifier.width(10.dp))
                         Column(Modifier.weight(1f)) {
                             Words(o.name, 13, if (already) K.Soft else K.Ink, lines = 2)
@@ -559,7 +559,7 @@ object ThingsUi {
                 Ui.Field("", question, "How do I clean the filter?") { question = it }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button("Ask", main = true, modifier = Modifier.weight(1f)) { if (question.isNotBlank()) ask(question) }
-                    Button("🎤 Say it", modifier = Modifier.weight(1f)) {
+                    Button("Say it", modifier = Modifier.weight(1f), icon = KueSettings.Icons.MIC) {
                         val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                             .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-GB").putExtra(RecognizerIntent.EXTRA_PROMPT, "Ask your manuals")
                         runCatching { listen.launch(i) }.onFailure { Work.problem = "This phone has no voice typing. Type the question instead." }

@@ -26,6 +26,10 @@
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
+        <!-- Settings › Your Kue apps: which other Kue apps are on this phone, to open them. -->
+        <package android:name="art.kquinn.kuetv" />
+        <package android:name="art.kquinn.kuesounds" />
+        <package android:name="art.kquinn.kuevault" />
     </queries>
 
     <uses-feature android:name="android.software.leanback" android:required="false" />
