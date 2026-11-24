@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own backup of KueTV (Android 11 and older): only the one small set-up file, the same parts as the
+     Drive backup. Lists, guides, pictures and recordings are fetched again; everything else stays on the device. -->
+<full-backup-content>
+    <include domain="file" path="phone-backup.json" />
+</full-backup-content>

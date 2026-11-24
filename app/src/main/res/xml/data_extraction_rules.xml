@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own backup of KueTV (Android 12 and newer), to the person's Google account and when moving to a
+     new device: only the one small set-up file, the same parts as the Drive backup. Free, private, and not
+     counted against the person's Drive space. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <include domain="file" path="phone-backup.json" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="phone-backup.json" />
+    </device-transfer>
+</data-extraction-rules>

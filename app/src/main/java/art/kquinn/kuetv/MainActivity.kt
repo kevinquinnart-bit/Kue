@@ -571,6 +571,26 @@ private fun App() {
             "Couldn't restore: " + (e.message ?: "something went wrong")
         }
     }
+    // Android's own backup (24 November 2026): the same parts as the Drive backup, kept in one small file that
+    // Android copies to the person's Google account itself, free, private and not counted against their Drive.
+    // Google's Drive rules need its permission for apps that back up into Drive themselves; this needs none.
+    LaunchedEffect(Resumes.count, library != null) {
+        if (library == null) return@LaunchedEffect
+        delay(20_000)
+        withContext(Dispatchers.IO) {
+            runCatching { AutoBackup.keep(context, Backup.pack(withContext(Dispatchers.Default) { bodies() })) }
+                .onFailure { Report.note("Backup", "phone's own backup file not written: " + it.message) }
+        }
+    }
+    // A new phone or TV with KueTV put back by Android: everything comes back from that file, once.
+    LaunchedEffect(Unit) {
+        val text = withContext(Dispatchers.IO) { AutoBackup.waiting(context) } ?: return@LaunchedEffect
+        val parts = Backup.unpack(text) ?: return@LaunchedEffect
+        for ((name, body) in parts) runCatching { take(name, body) }
+        AutoBackup.used(context)
+        Report.note("Backup", "set-up brought back from the phone's own backup: " + parts.keys.sorted().joinToString(", "))
+        kueToast(context, "Your KueTV set-up came back from this device's backup.")
+    }
     // Backing up by itself: by default every time KueTV opens, once the lists are in.
     LaunchedEffect(Resumes.count, library != null) {
         if (library == null || !Recordings.drive(context).signedIn || !Backup.due(context)) return@LaunchedEffect

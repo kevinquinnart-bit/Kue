@@ -205,6 +205,36 @@ object Backup {
     }
 }
 
+/**
+ * The file Android's own backup keeps: the same parts as the Drive backup. Android copies only this file (see
+ * res/xml/data_extraction_rules.xml), so it stays well under its 25 MB a app. When Android puts KueTV back on a
+ * new device, the file is there before KueTV first opens, with no note yet that it was used: [waiting] gives it.
+ */
+object AutoBackup {
+    private const val FILE = "phone-backup.json"
+    private fun file(context: Context) = java.io.File(context.filesDir, FILE)
+    private fun prefs(context: Context) = context.getSharedPreferences("auto_backup", Context.MODE_PRIVATE)
+
+    /** Writes the parts, noting this device has its own set-up, so they are never brought back over it. */
+    fun keep(context: Context, text: String) {
+        val f = file(context)
+        val part = java.io.File(f.path + ".part")
+        part.writeText(text)
+        if (!part.renameTo(f)) { f.delete(); part.renameTo(f) }
+        prefs(context).edit().putBoolean("mine", true).apply()
+    }
+
+    /** The parts Android brought back with a fresh install, not yet used, or null. */
+    fun waiting(context: Context): String? {
+        if (prefs(context).getBoolean("mine", false)) return null
+        return runCatching { file(context).takeIf { it.exists() }?.readText() }.getOrNull()
+    }
+
+    fun used(context: Context) {
+        prefs(context).edit().putBoolean("mine", true).apply()
+    }
+}
+
 /** The user's own categories of live channels: a name and the channels in it, in the order added. */
 object MyCategories {
     data class Mine(val id: String, val name: String, val channels: List<String>)
