@@ -1118,8 +1118,13 @@ private fun FocusRow(
     playing: Boolean = false,
     /** One of KueTV's own drawn pictures in front of the words, in place of an emoji (Kevin, 23 November 2026). */
     icon: Glyph? = null,
+    /** A drawn Kue icon by its lines (KueSettings.Icons), for the settings groups and profile pictures. */
+    drawn: String? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    // A tick, cross, star or box written at the start of the words is drawn, never a symbol from the phone's font (Kevin, 24 Nov 2026).
+    val (markLines, markFilled, words) = KueSettings.Icons.lead(text)
+    val lines = drawn ?: markLines
     val phoneRow = LocalPhone.current
     val button = if (phoneRow) look else Look.ROW
     Row(
@@ -1150,9 +1155,10 @@ private fun FocusRow(
     ) {
         leading?.invoke()
         if (icon != null) KueIcon(icon, if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else AccentInk, Modifier.size((textSize.value * 1.2f).dp))
+        if (lines != null) KueSettings.Icon(lines, (textSize.value * 1.25f).dp, if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else AccentInk, 2f, filled = drawn == null && markFilled)
         Column {
             Text(
-                text,
+                words,
                 color = if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else Ink,
                 fontSize = textSize,
                 fontWeight = if (focused || chosen || playing || button == Look.MAIN) FontWeight.Bold else FontWeight.Normal,
@@ -1615,6 +1621,8 @@ private class BrowseState(saved: Map<String, String> = emptyMap()) {
 
     /** The part of Settings open: null for the list of parts. */
     var settingsPage by mutableStateOf<String?>(null)
+    /** The Kue settings group open on Settings' first page: KueTV's own, each time (see the eight groups). */
+    var settingsGroup by mutableStateOf("KueTV")
 
     /** Picking channels to hide in Live TV: the rows picked so far; null when not picking. */
     var hiding by mutableStateOf<Set<String>?>(null)
@@ -2471,11 +2479,11 @@ private fun MainScreen(
                     "Your channels" to "Provider details" + (if (savedProviders.size > 1) " (" + savedProviders.size + " saved)" else "") + ", favourites, categories, free channel lists ($freeCount), TV guide",
                     "Films and series" to "Add-ons (" + addOns.size + "), Stremio account",
                     *(if (phone) emptyArray() else arrayOf("This TV" to "Aerial TV, quick settings, the TV's own settings, storage, apps")),
-                    "Looks" to UiLang.name(UiLang.code) + " · " + Looks.schemes[Looks.scheme].name + " · " + Looks.themes[Looks.theme] + " · " + Looks.accents[Looks.accent] + if (Looks.glass > 0) " · Glass look" else "",
-                    "Your things" to "History, profiles · using " + profile.picture + (if (profile.picture.isEmpty()) "" else " ") + profile.name + if (profile.kids) " (kids)" else "",
+                    "Look and feel" to UiLang.name(UiLang.code) + " · " + Looks.schemes[Looks.scheme].name + " · " + Looks.themes[Looks.theme] + " · " + Looks.accents[Looks.accent] + if (Looks.glass > 0) " · Glass look" else "",
+                    "Your things" to "History, profiles · using " + profile.name + if (profile.kids) " (kids)" else "",
                     "Backup and sync" to "Google Drive: " + (when { !drive.isSetUp -> "not set up"; drive.signedIn -> "signed in"; else -> "not signed in" }) + " · Devices sync, keep in step: " + if (paired) "on" else "off",
                     "VPN" to remember(Vpn.changes, Vpn.level) { vpnLine(context) },
-                    "Help" to "Health check" + (if (notWorking == 0) "" else ": $notWorking not working") + ", report, updates · version " + BuildConfig.VERSION_NAME,
+                    "Help and about" to "Health check" + (if (notWorking == 0) "" else ": $notWorking not working") + ", report, updates · version " + BuildConfig.VERSION_NAME,
                 )
                 Column(
                     // The rows can run past the bottom of a TV screen, so the list scrolls as the remote moves down it.
@@ -2498,14 +2506,85 @@ private fun MainScreen(
                                 }
                             }, look = Look.OTHER, below = "The TV with KueTV on this Wi-Fi goes to standby")
                         }
-                        parts.forEach { (name, summary) ->
+                        // THE EIGHT KUE GROUPS (Kevin, 24 November 2026): the same order and drawn icons in every Kue app
+                        // (KueSettings). KueTV's own parts sit in the KueTV group, which is open every time Settings opens,
+                        // so the most used are still first. A group holding one part opens that part straight away.
+                        val summaryOf = parts.toMap()
+                        val part: @Composable (String, Modifier) -> Unit = { name, extra ->
+                            summaryOf[name]?.let { summary ->
+                                FocusRow(
+                                    // The VPN has a page of its own, opened straight away.
+                                    name, { if (name == "VPN") Vpn.screenOpen = true else { leftFrom[0] = null; state.settingsPage = name } },
+                                    (if (name == leftFrom[0]) Modifier.focusRequester(backTo) else Modifier).then(extra),
+                                    look = Look.OTHER, below = summary,
+                                )
+                            }
+                        }
+                        val inGroup = Modifier.padding(start = if (phone) 18.dp else 28.dp)
+                        val groupRow: @Composable (String, String, String, String?) -> Unit = { title, lines, summary, opens ->
+                            val isOpen = state.settingsGroup == title
                             FocusRow(
-                                // The VPN has a page of its own, opened straight away.
-                                name, { if (name == "VPN") Vpn.screenOpen = true else { leftFrom[0] = null; state.settingsPage = name } },
-                                if (name == leftFrom[0]) Modifier.focusRequester(backTo) else Modifier,
-                                look = Look.OTHER, below = summary,
+                                title, {
+                                    if (opens != null) { leftFrom[0] = null; state.settingsPage = opens }
+                                    else state.settingsGroup = if (isOpen) "" else title
+                                },
+                                if (opens != null && opens == leftFrom[0]) Modifier.focusRequester(backTo) else Modifier,
+                                look = Look.OTHER, below = summary, drawn = lines, chosen = isOpen,
                             )
                         }
+                        // 1. Account
+                        groupRow("Account", KueSettings.Icons.ACCOUNT, summaryOf["Your things"].orEmpty(), "Your things")
+                        // 2. KueTV
+                        groupRow("KueTV", KueSettings.Icons.APP, "Watching, your channels, films and series" + (if (phone) "" else ", this TV") + ", VPN", null)
+                        if (state.settingsGroup == "KueTV") {
+                            for (name in listOf("Watching", "Your channels", "Films and series", "This TV", "VPN")) part(name, inGroup)
+                        }
+                        // 3. Look and feel
+                        groupRow("Look and feel", KueSettings.Icons.LOOK, summaryOf["Look and feel"].orEmpty(), "Look and feel")
+                        // 4. Notifications: the programme reminders set in the TV guide
+                        val reminders = remember(Reminders.changes) { Reminders.all(context) }
+                        groupRow("Notifications", KueSettings.Icons.NOTICES, if (reminders.isEmpty()) "No programme reminders set" else "Programme reminders: " + reminders.size, null)
+                        if (state.settingsGroup == "Notifications") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
+                            if (reminders.isEmpty()) Note("None set. In the TV guide, OK on a later programme sets a reminder.")
+                            val clock = java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK)
+                            for (r in reminders) {
+                                FocusRow(
+                                    r.title, {}, look = Look.OTHER, below = r.channel + " · " + clock.format(java.util.Date(r.startMs)) + (if (phone) " · press and hold to take it off" else " · hold OK to take it off"),
+                                    onHold = { Reminders.remove(context, r) },
+                                )
+                            }
+                        }
+                        // 5. Backup and sync
+                        groupRow("Backup and sync", KueSettings.Icons.BACKUP, summaryOf["Backup and sync"].orEmpty(), "Backup and sync")
+                        // 6. Privacy and storage
+                        groupRow("Privacy and storage", KueSettings.Icons.PRIVACY, "What leaves this " + (if (phone) "phone" else "TV") + ", permissions", null)
+                        if (state.settingsGroup == "Privacy and storage") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
+                            Note(
+                                "KueTV talks only to what you see in it: your TV provider, the add-ons, free channel lists and guides you choose, " +
+                                    "film and TV listings, the weather for your rough area, the VPN when it is on, Google Drive for your backup and " +
+                                    "recordings, and GitHub for updates. There is no KueTV server.",
+                            )
+                            FocusRow("Permissions", { KueSettings.openPermissions(context) }, look = Look.OTHER, below = "KueTV's page in the " + (if (phone) "phone's" else "TV's") + " own settings")
+                            if (!phone) FocusRow("Storage", { leftFrom[0] = null; state.settingsPage = "This TV" }, look = Look.OTHER, below = "In This TV, with the TV's space and apps")
+                        }
+                        // 7. Your Kue apps
+                        groupRow("Your Kue apps", KueSettings.Icons.KUE, "KueSounds, KueVault", null)
+                        if (state.settingsGroup == "Your Kue apps") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
+                            for (app in KueSettings.apps.filter { it.pkg != context.packageName }) {
+                                val launch = context.packageManager.getLeanbackLaunchIntentForPackage(app.pkg) ?: context.packageManager.getLaunchIntentForPackage(app.pkg)
+                                FocusRow(
+                                    app.name, {
+                                        val opened = runCatching {
+                                            context.startActivity((launch ?: android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(app.download))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                                        }.isSuccess
+                                        if (!opened) kueToast(context, "Get " + app.name + " from " + app.download)
+                                    },
+                                    look = Look.OTHER, drawn = KueSettings.Icons.APP, below = if (launch != null) "On this " + (if (phone) "phone" else "TV") + " · OK to open" else "Not on this " + (if (phone) "phone" else "TV") + " · OK to get it",
+                                )
+                            }
+                        }
+                        // 8. Help and about
+                        groupRow("Help and about", KueSettings.Icons.HELP, summaryOf["Help and about"].orEmpty(), "Help and about")
                     } else {
                     Heading("Settings › $page")
                     // The remote lands on the page's first row.
@@ -2838,7 +2917,7 @@ private fun MainScreen(
                                 below = "What is playing carries on in a corner when you press Home, where the device allows it",
                             )
                         }
-                        "Looks" -> {
+                        "Look and feel" -> {
                             FocusRow(
                                 "Language: " + UiLang.name(UiLang.code), { UiLang.set(context, UiLang.next()) }, first(), look = Look.OTHER,
                                 below = "KueTV's own words. OK for the next language",
@@ -3017,7 +3096,7 @@ private fun MainScreen(
                                 }
                             }
                         }
-                        "Help" -> {
+                        "Help and about" -> {
                             FocusRow("Health check" + if (notWorking == 0) "" else " · $notWorking not working", onHealth, first(), look = Look.OTHER, below = "Tries every source the app uses")
                             FocusRow("Report for Claude", onReport, look = Look.OTHER)
                             FocusRow("About and updates · version " + BuildConfig.VERSION_NAME, onAbout, look = Look.OTHER)
@@ -3239,16 +3318,14 @@ private fun Poster(
         Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Panel)) {
             if (poster.isNotBlank()) AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             if (favourite) {
-                Text(
-                    "★", color = AccentInk, fontSize = 22.sp,
-                    modifier = Modifier.align(Alignment.TopStart).padding(6.dp).background(Looks.page.copy(alpha = 0.8f), RoundedCornerShape(8.dp)).padding(horizontal = 7.dp, vertical = 1.dp),
-                )
+                Box(Modifier.align(Alignment.TopStart).padding(6.dp).background(Looks.page.copy(alpha = 0.8f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                    KueSettings.Icon(KueSettings.Icons.STAR, 20.dp, AccentInk, filled = true)
+                }
             }
             if (watched) {
-                Text(
-                    "✓", color = Color.Black, fontSize = 18.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0xFF6BD08A), RoundedCornerShape(8.dp)).padding(horizontal = 7.dp, vertical = 1.dp),
-                )
+                Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0xFF6BD08A), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                    KueSettings.Icon(KueSettings.Icons.TICK, 18.dp, Color.Black, 2.6f)
+                }
             }
             if (rating > 0f) {
                 // The rating, with KueTV's own star, in the bottom right of the picture (Kevin, 23 November 2026).
@@ -4526,7 +4603,7 @@ private fun AddOnsScreen(onDone: () -> Unit) {
     Page("My add-ons", "Each add-on and how it did when last checked. OK on one opens it.", status) {
         FocusRow(
             if (Health.running) "Checking each add-on…" else "Check them all again", checkAll, Modifier.focusRequester(first), look = Look.OTHER,
-            below = "✓ working   ! answers, with a gap   ✗ not working",
+            below = "Tick: working · !: answers, with a gap · Cross: not working",
         )
         if (addOns.isEmpty()) Note("No add-ons yet. Sign in to Stremio, or add one by its link, from Settings › Films and series.")
         addOns.forEach { addOn ->
@@ -6611,6 +6688,8 @@ private fun HealthScreen(account: Account, library: Library?, onDone: () -> Unit
 @Composable
 private fun HealthRow(title: String, detail: String, state: Int) {
     var focused by remember { mutableStateOf(false) }
+    val (markLines, _, words) = KueSettings.Icons.lead(title)
+    val ink = when (state) { Check.WORKING -> Ink; Check.DOUBT -> AccentInk; else -> Color(0xFFFF6B5E) }
     Column(
         Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
             .background(if (focused) Looks.faint2 else Color.Transparent)
@@ -6618,7 +6697,10 @@ private fun HealthRow(title: String, detail: String, state: Int) {
             .focusable()
             .padding(horizontal = 16.dp, vertical = 8.dp),
     ) {
-        Text(title, color = when (state) { Check.WORKING -> Ink; Check.DOUBT -> AccentInk; else -> Color(0xFFFF6B5E) }, fontSize = Sizes.ROW, fontWeight = FontWeight.Bold)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (markLines != null) KueSettings.Icon(markLines, (Sizes.ROW.value * 1.2f).dp, ink, 2.2f)
+            Text(words, color = ink, fontSize = Sizes.ROW, fontWeight = FontWeight.Bold)
+        }
         Text(detail, color = Soft, fontSize = 16.sp)
     }
 }
@@ -7316,7 +7398,7 @@ private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> U
             for (p in profiles) {
                 val using = p.id == current.id
                 FocusRow(
-                    (if (using) "● " else "") + (if (p.picture.isEmpty()) "" else p.picture + " ") + p.name + (if (p.kids) " · kids" else "") + (if (p.pin.isNotEmpty()) " · PIN" else ""),
+                    (if (using) "● " else "") + p.name + (if (p.kids) " · kids" else "") + (if (p.pin.isNotEmpty()) " · PIN" else ""),
                     {
                         when {
                             using -> Unit
@@ -7326,6 +7408,7 @@ private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> U
                     },
                     if (!given) { given = true; first() } else Modifier,
                     look = Look.OTHER,
+                    drawn = KueSettings.Icons.pictures[p.picture]?.second,
                     below = when {
                         using -> "In use"
                         p.id.isEmpty() -> "OK to switch to it"
@@ -7334,7 +7417,10 @@ private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> U
                     onHold = if (using || p.id.isEmpty()) null else ({ Profiles.remove(context, p.id); said = Status("Removed " + p.name + ".", Status.OK) }),
                 )
             }
-            FocusRow("Picture for " + current.name + ": " + current.picture.ifEmpty { "none" }, { Profiles.nextPicture(context, current.id) }, look = Look.OTHER, below = "OK for the next one")
+            FocusRow(
+                "Picture for " + current.name + ": " + (KueSettings.Icons.pictures[current.picture]?.first ?: "none"), { Profiles.nextPicture(context, current.id) },
+                look = Look.OTHER, below = "OK for the next one", drawn = KueSettings.Icons.pictures[current.picture]?.second,
+            )
             FocusRow("Add a profile", { adding = false; said = null }, look = Look.OTHER)
             FocusRow("Add a kids profile", { adding = true; newName = "Kids"; said = null }, look = Look.OTHER)
             FocusRow(if (current.pin.isEmpty()) "Set a PIN for " + current.name else "Change or remove " + current.name + "'s PIN", { settingPin = true; said = null }, look = Look.OTHER)
