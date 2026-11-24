@@ -184,6 +184,29 @@ object Playing {
         c.play()
     }
 
+    /** Whether what is playing now is music (not radio or a podcast), so songs can be put with it. */
+    private fun playingMusic(c: androidx.media3.session.MediaController): Boolean {
+        if (c.mediaItemCount == 0) return false
+        val id = c.currentMediaItem?.mediaId ?: return false
+        return Scanner.data.tracks.any { it.id == id }
+    }
+
+    /** Puts [list] straight after the song playing now; with no music playing, plays them. (Hold menus, 24 Nov 2026.) */
+    fun playNext(list: List<Track>) {
+        val c = controller ?: return
+        if (list.isEmpty()) return
+        if (!playingMusic(c)) return play(list, 0)
+        c.addMediaItems((c.currentMediaItemIndex + 1).coerceAtMost(c.mediaItemCount), list.map { item(it) })
+    }
+
+    /** Puts [list] at the end of what is playing; with no music playing, plays them. */
+    fun addToQueue(list: List<Track>) {
+        val c = controller ?: return
+        if (list.isEmpty()) return
+        if (!playingMusic(c)) return play(list, 0)
+        c.addMediaItems(list.map { item(it) })
+    }
+
     /** A podcast episode to play: from the phone when saved there, otherwise from the show's own website. */
     fun episodeItem(e: Podcasts.Episode): MediaItem {
         val show = Podcasts.showOf(e)

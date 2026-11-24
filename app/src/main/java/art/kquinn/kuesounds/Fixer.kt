@@ -235,7 +235,7 @@ class WorkService : Service() {
             manager.createNotificationChannel(NotificationChannel("work", "Looking through, saving and fixing music", NotificationManager.IMPORTANCE_LOW))
         }
         return NotificationCompat.Builder(this, "work")
-            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setSmallIcon(R.drawable.kue_status)
             .setContentTitle("KueSounds")
             .setContentText(text)
             .setOngoing(true)

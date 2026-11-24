@@ -181,7 +181,7 @@ object Ui {
 
     /** A big yellow button, or a blue one when it is the second choice. */
     @Composable
-    internal fun Button(label: String, main: Boolean = true, glyph: Glyph? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    internal fun Button(label: String, main: Boolean = true, glyph: Glyph? = null, modifier: Modifier = Modifier, icon: String? = null, onClick: () -> Unit) {
         Row(
             modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Raised)
                 .clickable(onClick = onClick).padding(horizontal = 18.dp),
@@ -190,6 +190,9 @@ object Ui {
         ) {
             if (glyph != null) {
                 Sign(glyph, 20.dp, if (main) K.Page else K.Ink)
+                Spacer(Modifier.width(8.dp))
+            } else if (icon != null) {
+                KueSettings.Icon(icon, 20.dp, if (main) K.Page else K.Ink, 2f, filled = icon == KueSettings.Icons.PLAY)
                 Spacer(Modifier.width(8.dp))
             }
             Words(label, 16, if (main) K.Page else K.Ink, bold = main)
@@ -329,7 +332,7 @@ object Ui {
                     }
                     tab == Tab.ALBUMS -> AlbumGrid(albums, go)
                     tab == Tab.ARTISTS -> ArtistList(artists, go)
-                    tab == Tab.SONGS -> SongList(songs)
+                    tab == Tab.SONGS -> SongList(songs, go)
                     tab == Tab.SINGLES -> {
                         val titles = Scanner.data.singleTitles
                         val singles = remember(titles, songs) {
@@ -341,7 +344,7 @@ object Ui {
                     tab == Tab.FAVOURITES -> {
                         val ids = Sync.favouriteIds()
                         val favs = remember(ids, songs) { songs.filter { it.id in ids } }
-                        if (favs.isEmpty()) Note("Tap the heart on a playing song to keep it here.") else SongList(favs)
+                        if (favs.isEmpty()) Note("Tap the heart on a playing song to keep it here.") else SongList(favs, go)
                     }
                     tab == Tab.ON_PHONE -> {
                         val saved = Offline.saved
@@ -474,7 +477,11 @@ object Ui {
     }
 
     @Composable
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
     private fun AlbumGrid(albums: List<Album>, go: (Screen) -> Unit, header: (@Composable () -> Unit)? = null) {
+        // Hold an album: play, queue, add to a playlist, save to the phone, fix its files, go to its artist.
+        var heldAlbum by remember { mutableStateOf<Album?>(null) }
+        heldAlbum?.let { al -> AlbumBox(al, go) { heldAlbum = null } }
         LazyVerticalGrid(
             columns = GridCells.Adaptive(150.dp),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp),
@@ -484,7 +491,7 @@ object Ui {
         ) {
             if (header != null) item(span = { GridItemSpan(maxLineSpan) }) { header() }
             items(albums, key = { it.key }) { al ->
-                Column(Modifier.clickable { go(Screen.AlbumPage(al.key)) }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.combinedClickable(onClick = { go(Screen.AlbumPage(al.key)) }, onLongClick = { heldAlbum = al }), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Cover(Scanner.artFor(al), Modifier.fillMaxWidth().aspectRatio(1f))
                     Spacer(Modifier.height(2.dp))
                     Words(al.title, 15, bold = true)
@@ -520,9 +527,12 @@ object Ui {
 
     @Composable
     private fun ArtistList(artists: List<Artist>, go: (Screen) -> Unit) {
+        // Hold an artist: play or queue everything of theirs, add it to a playlist, save it to the phone.
+        var held by remember { mutableStateOf<Artist?>(null) }
+        held?.let { a -> ArtistBox(a) { held = null } }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
             items(artists, key = { "a:" + it.name }) { a ->
-                Row2(a.name, count(a.albums.size, "album") + " · " + count(a.songCount, "song"), Glyph.PERSON) { go(Screen.ArtistPage(a.name)) }
+                Row2(a.name, count(a.albums.size, "album") + " · " + count(a.songCount, "song"), Glyph.PERSON, onHold = { held = a }) { go(Screen.ArtistPage(a.name)) }
             }
         }
     }
@@ -530,33 +540,104 @@ object Ui {
     private fun count(n: Int, word: String): String = String.format("%,d", n) + " " + word + if (n == 1) "" else "s"
 
     @Composable
-    private fun SongList(songs: List<Track>) {
-        // Hold a song: add it to a playlist, or put its name right.
+    private fun SongList(songs: List<Track>, go: (Screen) -> Unit) {
+        // Hold a song: the song's own menu (see SongBox).
         var held by remember { mutableStateOf<Track?>(null) }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
             itemsIndexed(songs, key = { _, t -> t.id }) { i, t ->
                 Row2(t.title, t.artist, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { held = t }) { Playing.play(songs, i) }
             }
         }
-        held?.let { t -> SongBox(t) { held = null } }
+        held?.let { t -> SongBox(t, go) { held = null } }
     }
 
-    /** What can be done with a held song: add it to a playlist, or put its name and artist right. */
+    /** A hold menu: the name of what was held, a line under it, its choices, then Cancel. Scrolls on a small phone. */
     @Composable
-    fun SongBox(t: Track, onClose: () -> Unit) {
+    private fun HoldBox(title: String, below: String, onClose: () -> Unit, choices: @Composable () -> Unit) {
+        Dialog(onDismissRequest = onClose) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Words(title, 18, bold = true, lines = 2)
+                if (below.isNotEmpty()) Words(below, 14, K.Soft)
+                choices()
+                Button("Cancel", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+            }
+        }
+    }
+
+    /** Play next, add to the queue, add to a playlist and save to (or take off) the phone: the same on songs, albums and artists. */
+    @Composable
+    private fun CommonChoices(songs: List<Track>, onAdd: () -> Unit, onClose: () -> Unit) {
+        val context = LocalContext.current
+        Button("Play next", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.fillMaxWidth()) { Playing.playNext(songs); onClose() }
+        Button("Add to the queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.fillMaxWidth()) { Playing.addToQueue(songs); onClose() }
+        Button("Add to a playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth(), onClick = onAdd)
+        if (songs.isNotEmpty() && songs.all { it.id in Offline.saved }) {
+            Button("Take off the phone", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.fillMaxWidth()) { Offline.remove(songs); onClose() }
+        } else {
+            Button("Save to the phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.fillMaxWidth()) { Offline.save(context, songs); onClose() }
+        }
+    }
+
+    /**
+     * What can be done with a held song. Add to a playlist stays first, as before; then playing it next or later,
+     * favourites, saving it to the phone, going to its album or artist, and putting its name right (Kevin, 24 Nov 2026).
+     */
+    @Composable
+    fun SongBox(t: Track, go: ((Screen) -> Unit)? = null, onClose: () -> Unit) {
         var doing by remember { mutableStateOf("") }
         when (doing) {
             "add" -> ListUi.AddBox("\"" + t.title + "\"", listOf(t.id), onClose)
             "edit" -> EditSong(t, onClose)
-            else -> Dialog(onDismissRequest = onClose) {
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Words(t.title, 18, bold = true, lines = 2)
-                    Words(t.artist, 14, K.Soft)
-                    Button("Add to a playlist", modifier = Modifier.fillMaxWidth()) { doing = "add" }
-                    Button("Edit name and artist", main = false, modifier = Modifier.fillMaxWidth()) { doing = "edit" }
-                    Button("Cancel", main = false, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+            else -> HoldBox(t.title, listOf(t.artist, t.album).filter { it.isNotBlank() }.joinToString(" · "), onClose) {
+                Button("Add to a playlist", icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) { doing = "add" }
+                Button("Play next", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.fillMaxWidth()) { Playing.playNext(listOf(t)); onClose() }
+                Button("Add to the queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.fillMaxWidth()) { Playing.addToQueue(listOf(t)); onClose() }
+                val fav = Sync.isFavourite(t.id)
+                Button(if (fav) "Take out of favourites" else "Add to favourites", main = false, glyph = if (fav) Glyph.HEART_FULL else Glyph.HEART, modifier = Modifier.fillMaxWidth()) {
+                    Sync.flipFavourite(t.id); onClose()
                 }
+                val context = LocalContext.current
+                if (t.id in Offline.saved) Button("Take off the phone", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.fillMaxWidth()) { Offline.remove(listOf(t)); onClose() }
+                else Button("Save to the phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.fillMaxWidth()) { Offline.save(context, listOf(t)); onClose() }
+                if (go != null) {
+                    val album = Scanner.view.albums.firstOrNull { al -> al.tracks.any { it.id == t.id } }
+                    if (album != null) Button("Go to the album", main = false, icon = KueSettings.Icons.DISC, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.AlbumPage(album.key)) }
+                    val artist = album?.artist ?: t.artist
+                    if (Scanner.view.artists.any { it.name == artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(artist)) }
+                }
+                Button("Edit name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { doing = "edit" }
             }
+        }
+    }
+
+    /** What can be done with a held album (Kevin, 24 November 2026). */
+    @Composable
+    private fun AlbumBox(al: Album, go: (Screen) -> Unit, onClose: () -> Unit) {
+        val context = LocalContext.current
+        var adding by remember { mutableStateOf(false) }
+        if (adding) { ListUi.AddBox("the album", al.tracks.map { it.id }, onClose); return }
+        HoldBox(al.title, listOf(al.artist, count(al.tracks.size, "song")).joinToString(" · "), onClose) {
+            Button("Play", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0); onClose() }
+            Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0, shuffled = true); onClose() }
+            CommonChoices(al.tracks, { adding = true }, onClose)
+            if (Fixer.canFix(al) && !Fixer.isFixed(al)) Button("Fix the files", main = false, icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { Fixer.fix(context, listOf(al)); onClose() }
+            if (Scanner.view.artists.any { it.name == al.artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(al.artist)) }
+        }
+    }
+
+    /** What can be done with a held artist: everything of theirs (Kevin, 24 November 2026). */
+    @Composable
+    private fun ArtistBox(a: Artist, onClose: () -> Unit) {
+        val all = remember(a) { a.albums.flatMap { it.tracks } }
+        var adding by remember { mutableStateOf(false) }
+        if (adding) { ListUi.AddBox(a.name, all.map { it.id }, onClose); return }
+        HoldBox(a.name, count(a.albums.size, "album") + " · " + count(a.songCount, "song"), onClose) {
+            Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(all, 0); onClose() }
+            Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) { Playing.play(all, 0, shuffled = true); onClose() }
+            CommonChoices(all, { adding = true }, onClose)
         }
     }
 
@@ -665,14 +746,21 @@ object Ui {
             Box(Modifier.fillMaxSize().padding(28.dp)) { Words("Nothing matches that.", 17, K.Soft) }
             return
         }
+        // Holding works here too: the same menus as in the lists.
+        var heldArtist by remember { mutableStateOf<Artist?>(null) }
+        var heldAlbum by remember { mutableStateOf<Album?>(null) }
+        var heldSong by remember { mutableStateOf<Track?>(null) }
+        heldArtist?.let { a -> ArtistBox(a) { heldArtist = null } }
+        heldAlbum?.let { al -> AlbumBox(al, go) { heldAlbum = null } }
+        heldSong?.let { t -> SongBox(t, go) { heldSong = null } }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
             if (r.artists.isNotEmpty()) item { Heading("Artists") }
-            items(r.artists, key = { "a:" + it.name }) { a -> Row2(a.name, count(a.albums.size, "album"), Glyph.PERSON) { go(Screen.ArtistPage(a.name)) } }
+            items(r.artists, key = { "a:" + it.name }) { a -> Row2(a.name, count(a.albums.size, "album"), Glyph.PERSON, onHold = { heldArtist = a }) { go(Screen.ArtistPage(a.name)) } }
             if (r.albums.isNotEmpty()) item { Heading("Albums") }
-            items(r.albums, key = { "l:" + it.key }) { al -> Row2(al.title, al.artist, Glyph.DISC) { go(Screen.AlbumPage(al.key)) } }
+            items(r.albums, key = { "l:" + it.key }) { al -> Row2(al.title, al.artist, Glyph.DISC, onHold = { heldAlbum = al }) { go(Screen.AlbumPage(al.key)) } }
             if (r.songs.isNotEmpty()) item { Heading("Songs") }
             itemsIndexed(r.songs, key = { _, t -> "s:" + t.id }) { i, t ->
-                Row2(t.title, t.artist + " · " + t.album, Glyph.NOTE, highlight = t.id == Playing.currentId) { Playing.play(r.songs, i) }
+                Row2(t.title, t.artist + " · " + t.album, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { heldSong = t }) { Playing.play(r.songs, i) }
             }
         }
     }
@@ -689,7 +777,7 @@ object Ui {
     private fun AlbumPage(al: Album, back: () -> Unit, go: (Screen) -> Unit) {
         // Hold a song: add it to a playlist, or put its name right.
         var held by remember { mutableStateOf<Track?>(null) }
-        held?.let { t -> SongBox(t) { held = null } }
+        held?.let { t -> SongBox(t, go) { held = null } }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 20.dp)) {
             item {
                 Column(Modifier.fillMaxWidth().padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -891,7 +979,7 @@ object Ui {
                 if (songNow) Box(
                     Modifier.size(52.dp).clip(CircleShape).background(K.Panel).clickable(onClickLabel = "Add to a playlist") { adding = true },
                     contentAlignment = Alignment.Center,
-                ) { Words("+", 26, K.Soft, bold = true) }
+                ) { KueSettings.Icon(KueSettings.Icons.PLAYLIST, 26.dp, K.Soft, 2f) }
                 if (adding) ListUi.AddBox("this song", listOf(Playing.currentId)) { adding = false }
                 if (songNow) Spacer(Modifier.width(10.dp))
                 if (songNow) Box(

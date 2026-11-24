@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
@@ -161,7 +162,11 @@ object OnlineUi {
     @Composable
     fun RadioControls() {
         Column(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Ui.Words("● Live radio", 15, K.Accent, bold = true)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                KueSettings.Icon(KueSettings.Icons.DOT, 12.dp, K.Accent, filled = true)
+                Spacer(Modifier.width(6.dp))
+                Ui.Words("Live radio", 15, K.Accent, bold = true)
+            }
             Box(
                 Modifier.size(80.dp).clip(CircleShape).background(K.Accent).clickable(onClickLabel = if (Playing.isPlaying) "Stop" else "Play") { Playing.toggle() },
                 contentAlignment = Alignment.Center,
@@ -308,7 +313,11 @@ object OnlineUi {
             }
             item {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.clickable { steps = !steps }) { Ui.Words((if (steps) "▾ " else "▸ ") + "Your Spotify Client ID", 16, bold = true) }
+                    Row(Modifier.clickable { steps = !steps }, verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.rotate(if (steps) 90f else 0f)) { KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Ink, 2.2f) }
+                        Spacer(Modifier.width(6.dp))
+                        Ui.Words("Your Spotify Client ID", 16, bold = true)
+                    }
                     Field("Client ID", typed) { typed = it; SpotifyLink.clientId(it) }
                     if (steps) Ui.Words(
                         "Spotify only lets apps like KueSounds in with a free developer key, made once with a Premium account:\n" +
