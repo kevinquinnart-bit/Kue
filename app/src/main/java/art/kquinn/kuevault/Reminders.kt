@@ -60,7 +60,7 @@ object Reminders {
             val day = DateTimeFormatter.ofPattern("d MMMM yyyy", Locale.UK)
             for ((t, left) in due(Things.all.toList(), said, Things.today())) {
                 val text = t.title + "'s warranty ends " + (if (left == 0) "today" else "in $left day" + (if (left == 1) "" else "s")) + ", on " + t.warrantyEnds!!.format(day) + "."
-                val n = NotificationCompat.Builder(c, CHANNEL).setSmallIcon(R.drawable.kue_mark).setContentTitle("Warranty ending")
+                val n = NotificationCompat.Builder(c, CHANNEL).setSmallIcon(R.drawable.kue_status).setContentTitle("Warranty ending")
                     .setContentText(text).setStyle(NotificationCompat.BigTextStyle().bigText(text + " If anything is wrong with it, claim before then."))
                     .setContentIntent(open).setAutoCancel(true).build()
                 runCatching { nm.notify(t.id.hashCode(), n) }

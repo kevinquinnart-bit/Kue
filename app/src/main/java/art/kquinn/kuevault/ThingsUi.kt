@@ -223,7 +223,7 @@ object ThingsUi {
                     Words("Change", 12, K.Accent, bold = true, lines = 1)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button("+ Add a thing", main = true, modifier = Modifier.weight(1f)) { go(Screen.AddThing) }
+                    Button("Add a thing", main = true, modifier = Modifier.weight(1f), icon = KueSettings.Icons.PLUS) { go(Screen.AddThing) }
                     if (Things.all.any { it.papersOf(Paper.MANUAL).isNotEmpty() }) Button("Ask your manuals", modifier = Modifier.weight(1f)) { go(Screen.Ask(null)) }
                 }
                 if (Things.all.size > 3) Ui.Field("", query, "Search: \"kettle\", \"Bosch\", \"Currys\"") { query = it }
@@ -475,7 +475,11 @@ object ThingsUi {
                     val list = t.papersOf(kind)
                     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Words(kind.title, 15, bold = true, lines = 1, modifier = Modifier.weight(1f))
-                        Words("+ Add", 13, K.Accent, bold = true, lines = 1, modifier = Modifier.clickable { choosing = if (choosing == kind) null else kind }.padding(horizontal = 6.dp, vertical = 8.dp))
+                        Row(Modifier.clickable { choosing = if (choosing == kind) null else kind }.padding(horizontal = 6.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            KueSettings.Icon(KueSettings.Icons.PLUS, 14.dp, K.Accent, 2.4f)
+                            Spacer(Modifier.width(4.dp))
+                            Words("Add", 13, K.Accent, bold = true, lines = 1)
+                        }
                     }
                     if (choosing == kind) {
                         if (Vault.homeOf(Section.THINGS) == null) Button("Choose where the papers live first", main = true, modifier = Modifier.fillMaxWidth()) { go(Screen.ChooseHome(Section.THINGS)) }
@@ -497,12 +501,12 @@ object ThingsUi {
                         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable { Work.scope.launch { Work.openPaper(context, p) } }.padding(12.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Words(p.name, 14, lines = 1, modifier = Modifier.weight(1f))
-                                Words("⋯", 20, K.Soft, lines = 1, modifier = Modifier.clickable { holding = if (holding == p) null else p }.padding(start = 12.dp, end = 4.dp))
+                                Box(Modifier.clickable { holding = if (holding == p) null else p }.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) { KueSettings.Icon(KueSettings.Icons.MORE, 22.dp, K.Soft, filled = true) }
                             }
                             Words(Vault.size(p.size) + " · in " + (Vault.place((Things.find(p, Library.items.toList()) ?: p.item()).placeId)?.label ?: "a place no longer connected"), 11, K.Soft, lines = 1)
                             if (holding == p) Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Button("Open", main = true) { holding = null; Work.scope.launch { Work.openPaper(context, p) } }
-                                Button("Move to the bin") { holding = null; Work.scope.launch { Work.binPaper(context, id, p) } }
+                                Button("Open", main = true, icon = KueSettings.Icons.OPEN) { holding = null; Work.scope.launch { Work.openPaper(context, p) } }
+                                Button("Move to the bin", icon = KueSettings.Icons.BIN) { holding = null; Work.scope.launch { Work.binPaper(context, id, p) } }
                             }
                         }
                     }

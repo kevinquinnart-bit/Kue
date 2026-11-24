@@ -143,11 +143,21 @@ internal fun Meter(fraction: Float, colour: Color, height: Int = 6) {
 internal fun Title(text: String, onBack: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (onBack != null) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onBack), contentAlignment = Alignment.Center) { Words("‹", 24) }
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onBack), contentAlignment = Alignment.Center) { KueSettings.Icon(KueSettings.Icons.BACK, 22.dp, K.Ink, 2.2f) }
             Spacer(Modifier.width(12.dp))
         }
         Words(text, 24, bold = true, lines = 1)
     }
+}
+
+/** Each section's drawn Kue icon, drawn in the section's own colour. */
+internal fun iconOf(s: Section): String = when (s) {
+    Section.PHOTOS -> KueSettings.Icons.PHOTO
+    Section.MUSIC -> KueSettings.Icons.MUSIC
+    Section.FILMS -> KueSettings.Icons.FILM
+    Section.DOCUMENTS -> KueSettings.Icons.DOCUMENT
+    Section.THINGS -> KueSettings.Icons.THINGS
+    Section.BACKUPS -> KueSettings.Icons.BACKUP
 }
 
 /** Where KueVault Shrink, the Windows program, is downloaded. */
@@ -248,11 +258,20 @@ object Ui {
     @Composable
     private fun Nav(now: Screen, go: (Screen) -> Unit) {
         Row(Modifier.fillMaxWidth().background(K.Panel).padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceAround) {
-            val items = listOf("Hub" to Screen.Hub, "My things" to Screen.Things, "Search" to Screen.Library, "Places" to Screen.Places)
-            for ((label, target) in items) {
+            // Each with its drawn Kue icon above its name (Kevin, 24 November 2026).
+            val items = listOf(
+                Triple("Hub", Screen.Hub, KueSettings.Icons.HUB), Triple("My things", Screen.Things, KueSettings.Icons.THINGS),
+                Triple("Search", Screen.Library, KueSettings.Icons.SEARCH), Triple("Places", Screen.Places, KueSettings.Icons.PLACES),
+            )
+            for ((label, target, icon) in items) {
                 val on = now == target
-                Box(Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable { go(target) }.padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
-                    Words(label, 13, if (on) K.Accent else K.Soft, bold = on)
+                Column(
+                    Modifier.heightIn(min = 44.dp).clip(RoundedCornerShape(10.dp)).clickable { go(target) }.padding(horizontal = 14.dp, vertical = 6.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    KueSettings.Icon(icon, 22.dp, if (on) K.Accent else K.Soft)
+                    Spacer(Modifier.height(3.dp))
+                    Words(label, 12, if (on) K.Accent else K.Soft, bold = on, lines = 1)
                 }
             }
         }
@@ -301,9 +320,13 @@ object Ui {
                 .clickable(onClick = onClick).padding(14.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Box(Modifier.size(12.dp).clip(RoundedCornerShape(6.dp)).background(colour))
+            KueSettings.Icon(iconOf(section), 28.dp, colour)
             Words(section.title, 17, bold = true, lines = 1)
-            if (home == null) Words("+ Choose its place", 13, K.Accent, bold = true)
+            if (home == null) Row(verticalAlignment = Alignment.CenterVertically) {
+                KueSettings.Icon(KueSettings.Icons.PLUS, 14.dp, K.Accent, 2.4f)
+                Spacer(Modifier.width(4.dp))
+                Words("Choose its place", 13, K.Accent, bold = true)
+            }
             else {
                 Words(if (warn) (q!!.fraction * 100).toInt().toString() + "% full · " + home.label else home.label, 12, if (warn) K.Warn else K.Soft, lines = 1)
                 if (q?.limit != null) Meter(q.fraction, if (warn) K.Warn else colour)
@@ -327,7 +350,7 @@ object Ui {
                     Words(home?.let { "Lives in " + it.label } ?: "No place yet", 13, K.Soft, lines = 1)
                     Words("Change", 12, K.Accent, bold = true, lines = 1)
                 }
-                if (home != null) Button("+ Add files", main = true) { asks.pickFiles(section) }
+                if (home != null) Button("Add files", main = true, icon = KueSettings.Icons.PLUS) { asks.pickFiles(section) }
             }
             if (home != null) Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Row(Modifier.fillMaxWidth().clickable { onKeep(false) }, verticalAlignment = Alignment.CenterVertically) {
@@ -411,16 +434,16 @@ object Ui {
                         .padding(14.dp),
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (showSection) { Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(Color(item.section.colour))); Spacer(Modifier.width(8.dp)) }
+                        if (showSection) { KueSettings.Icon(iconOf(item.section), 18.dp, Color(item.section.colour)); Spacer(Modifier.width(8.dp)) }
                         Words(item.name, 15, bold = true, modifier = Modifier.weight(1f))
-                        Words("⋯", 20, K.Soft, lines = 1, modifier = Modifier.clickable { holding = if (holding == item) null else item }.padding(start = 12.dp, end = 4.dp))
+                        Box(Modifier.clickable { holding = if (holding == item) null else item }.padding(start = 12.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) { KueSettings.Icon(KueSettings.Icons.MORE, 22.dp, K.Soft, filled = true) }
                     }
                     Words(Vault.size(item.size) + " · " + date + " · " + (if (showSection) item.section.title + " · " else "") + "in " + where, 12, K.Soft, lines = 1)
                     if (holding == item) {
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button("Open", main = true) { holding = null; scope.launch { Work.open(context, item) } }
-                            Button("Move to the bin") { holding = null; scope.launch { Work.bin(context, item) } }
+                            Button("Open", main = true, icon = KueSettings.Icons.OPEN) { holding = null; scope.launch { Work.open(context, item) } }
+                            Button("Move to the bin", icon = KueSettings.Icons.BIN) { holding = null; scope.launch { Work.bin(context, item) } }
                         }
                     }
                 }
@@ -471,7 +494,7 @@ object Ui {
                     }
                 }
             }
-            Column(Modifier.padding(20.dp)) { Button("+ Connect a place", main = true, modifier = Modifier.fillMaxWidth(), onClick = onAdd) }
+            Column(Modifier.padding(20.dp)) { Button("Connect a place", main = true, modifier = Modifier.fillMaxWidth(), icon = KueSettings.Icons.PLUS, onClick = onAdd) }
         }
     }
 
@@ -505,7 +528,7 @@ object Ui {
                         }
                     }
                 }
-                Button("+ Connect a new place", main = true, modifier = Modifier.fillMaxWidth(), onClick = onAdd)
+                Button("Connect a new place", main = true, modifier = Modifier.fillMaxWidth(), icon = KueSettings.Icons.PLUS, onClick = onAdd)
             }
         }
     }
