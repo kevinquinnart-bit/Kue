@@ -9,4 +9,5 @@
     <include domain="sharedpref" path="podcasts.xml" />
     <include domain="sharedpref" path="podcast-positions.xml" />
     <include domain="sharedpref" path="notices.xml" />
+    <include domain="sharedpref" path="kue-look.xml" />
 </full-backup-content>

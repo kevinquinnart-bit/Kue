@@ -87,7 +87,8 @@ object K {
     val Raised = Color(0xFF263A63)
     val Accent = Color(0xFFFFD23F)
     val Ink = Color.White
-    val Soft = Color(0xFFB9C2D3)
+    /** Soft grey text; nearly white with Stronger contrast on (Settings › Look and feel). */
+    val Soft: Color get() = if (KueSettings.contrast) Color(0xFFE8EDF5) else Color(0xFFB9C2D3)
     /** The light blue of the Kue K: the second word of every Kue app's name ("TV", "Sounds"). */
     val KueBlue = Color(0xFF5CCEFF)
     val Poppins = FontFamily(
@@ -122,8 +123,14 @@ object Ui {
 
     @Composable
     fun App(signedIn: Boolean, signingIn: Boolean, signInProblem: String, onSignIn: () -> Unit) {
-        Box(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
-            if (!signedIn) SignIn(signingIn, signInProblem, onSignIn) else Main()
+        // Settings › Look and feel › Text size: every word in the app drawn bigger or smaller.
+        val d = androidx.compose.ui.platform.LocalDensity.current
+        androidx.compose.runtime.CompositionLocalProvider(
+            androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, d.fontScale * KueSettings.textScale),
+        ) {
+            Box(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding()) {
+                if (!signedIn) SignIn(signingIn, signInProblem, onSignIn) else Main()
+            }
         }
     }
 
@@ -176,7 +183,7 @@ object Ui {
     @Composable
     internal fun Button(label: String, main: Boolean = true, glyph: Glyph? = null, modifier: Modifier = Modifier, onClick: () -> Unit) {
         Row(
-            modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Panel)
+            modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Raised)
                 .clickable(onClick = onClick).padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
@@ -939,8 +946,7 @@ object Ui {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var sure by remember { mutableStateOf(false) }
-        Panel {
-            Words("Backup", 14, K.Soft)
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             val at = Backup.lastAt
             Words(if (at == 0L) "Not backed up yet" else "Backed up " + java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(at)), 17)
             Words(
@@ -1067,51 +1073,73 @@ object Ui {
         }
     }
 
+    /** Every Kue app's settings in the same eight groups (see KueSettings). One group open at a time. */
+    private val look = KueSettings.Look(
+        page = K.Page, panel = K.Panel, raised = K.Raised, accent = K.Accent, onAccent = K.Page, ink = K.Ink,
+        soft = { K.Soft }, font = K.Poppins,
+    )
+
     @Composable
     private fun Settings(back: () -> Unit) {
         val data = Scanner.data
-        Column(Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var open by rememberSaveable { mutableStateOf("app") }
+        val toggle = { id: String -> open = if (open == id) "" else id }
+        val stamp = { at: Long -> java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(at)) }
+        Column(Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                 RoundButton(Glyph.BACK, "Back", onClick = back)
                 Spacer(Modifier.width(14.dp))
                 Words("Settings", 22, bold = true)
             }
-            Panel {
-                Words("Google account", 14, K.Soft)
-                Words(Google.email.ifBlank { "Signed in" }, 17)
+
+            // 1. Account
+            KueSettings.Group(KueSettings.Icons.ACCOUNT, "Account", Google.email.ifBlank { "Signed in" }, open == "account", look, { toggle("account") }) {
+                KueSettings.Fact("Google account", Google.email.ifBlank { "Signed in" }, look)
+                KueSettings.Note("Your password and sign-in are kept by Google, not KueSounds.", look)
             }
-            Panel {
-                Words("Your music", 14, K.Soft)
-                val view = Scanner.view
+
+            // 2. KueSounds itself
+            val view = Scanner.view
+            KueSettings.Group(
+                KueSettings.Icons.APP, "KueSounds",
+                count(data.tracks.size, "song") + " · " + String.format("%,d", view.leftToFix) + " albums to fix",
+                open == "app", look, { toggle("app") },
+            ) {
+                KueSettings.Heading("Your music", look)
                 Words(count(data.tracks.size, "song") + " · " + count(view.albums.size, "album"), 17)
                 Words(String.format("%,d", view.withCover) + " with a cover", 14, K.Soft)
-                Spacer(Modifier.height(12.dp))
+                Spacer(Modifier.height(6.dp))
                 MusicSteps(view)
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(4.dp))
                 if (!Scanner.running) Button("Look for new music", modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
+                KueSettings.Heading("Fix the files", look)
+                val fixable = Scanner.view.matched
+                Words(count(fixable.size, "album") + " matched · " + String.format("%,d", view.leftToFix) + " still to fix", 17)
+                if (Fixer.status.isNotEmpty()) Words(Fixer.status, 14, K.Accent, lines = 2)
+                if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 2)
+                FixFiles(fixable, "Fix all matched albums", main = true)
             }
-            Panel {
-                Words("On this phone", 14, K.Soft)
-                val saved = Offline.saved
-                val bytes = remember(saved) { Offline.bytesUsed() }
-                Words(count(saved.size, "song") + " saved · " + String.format("%.1f", bytes / 1_000_000_000.0) + " GB", 17)
-                if (Offline.status.isNotEmpty()) Words(Offline.status, 14, K.Accent, lines = 2)
-                val when_ = Sync.syncedAt
-                Words(
-                    if (when_ == 0L) "Favourites not synced with the Drive yet."
-                    else "Favourites synced with the Drive at " + java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(when_)),
-                    14, K.Soft, lines = 2,
-                )
+
+            // 3. Look and feel
+            KueSettings.Group(
+                KueSettings.Icons.LOOK, "Look and feel",
+                "Text size " + (KueSettings.textStep + 1) + " of 5" + if (KueSettings.contrast) " · stronger contrast" else "",
+                open == "look", look, { toggle("look") },
+            ) {
+                KueSettings.Scale("Text size", 5, KueSettings.textStep, look) { KueSettings.setTextStep(it) }
+                KueSettings.Toggle("Stronger contrast", "Grey writing drawn nearly white, easier to read.", KueSettings.contrast, look) { KueSettings.setContrast(it) }
             }
-            BackupPanel()
-            Panel {
-                Words("Notifications", 14, K.Soft)
-                val context = LocalContext.current
-                val on = Fixer.noticesOn
-                Words("Progress in the pull-down: " + if (on) "on" else "off", 17)
-                Words("Shows how looking through your music, saving to the phone and fixing the files are going, while KueSounds is closed. They all work the same without it.", 14, K.Soft, lines = 4)
-                Spacer(Modifier.height(8.dp))
-                Button(if (on) "Turn off in the phone's settings" else "Turn on", main = false, modifier = Modifier.fillMaxWidth()) {
+
+            // 4. Notifications
+            val on = Fixer.noticesOn
+            KueSettings.Group(KueSettings.Icons.NOTICES, "Notifications", "Progress in the pull-down: " + if (on) "on" else "off", open == "notices", look, { toggle("notices") }) {
+                KueSettings.Toggle(
+                    "Progress in the pull-down",
+                    "Shows how looking through your music, saving to the phone and fixing the files are going, while KueSounds is closed.",
+                    on, look,
+                ) {
                     if (on) runCatching {
                         context.startActivity(
                             android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS)
@@ -1120,24 +1148,51 @@ object Ui {
                         )
                     } else Fixer.askNotices()
                 }
+                if (on) KueSettings.Note("Turning it off is done in the phone's own settings, which open when you tap it.", look)
             }
-            Panel {
-                Words("Fix the files", 14, K.Soft)
-                val fixable = Scanner.view.matched
-                val left = Scanner.view.leftToFix
-                Words(count(fixable.size, "album") + " matched · " + String.format("%,d", left) + " still to fix", 17)
-                if (Fixer.status.isNotEmpty()) Words(Fixer.status, 14, K.Accent, lines = 2)
-                if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 2)
-                Spacer(Modifier.height(8.dp))
-                FixFiles(fixable, "Fix all matched albums", main = true)
+
+            // 5. Backup and sync
+            KueSettings.Group(
+                KueSettings.Icons.BACKUP, "Backup and sync",
+                if (Backup.lastAt == 0L) "Not backed up yet" else "Backed up " + stamp(Backup.lastAt),
+                open == "backup", look, { toggle("backup") },
+            ) {
+                BackupPanel()
+                KueSettings.Heading("Favourites", look)
+                val when_ = Sync.syncedAt
+                KueSettings.Note(if (when_ == 0L) "Not synced with the Drive yet." else "Synced with the Drive at " + stamp(when_), look)
             }
-            Panel {
-                Words("KueSounds", 14, K.Soft)
-                Words("Version " + BuildConfig.VERSION_NAME, 17)
-                Spacer(Modifier.height(8.dp))
+
+            // 6. Privacy and storage
+            val saved = Offline.saved
+            val bytes = remember(saved) { Offline.bytesUsed() }
+            KueSettings.Group(
+                KueSettings.Icons.PRIVACY, "Privacy and storage",
+                count(saved.size, "song") + " saved · " + String.format("%.1f", bytes / 1_000_000_000.0) + " GB",
+                open == "privacy", look, { toggle("privacy") },
+            ) {
+                KueSettings.Heading("Space on this phone", look)
+                Words(count(saved.size, "song") + " saved · " + String.format("%.1f", bytes / 1_000_000_000.0) + " GB", 17)
+                if (Offline.status.isNotEmpty()) Words(Offline.status, 14, K.Accent, lines = 2)
+                KueSettings.Heading("What leaves this phone", look)
+                KueSettings.Note(
+                    "Your songs stay in your Google Drive. Album and song names go to the MusicBrainz music catalogue and its cover " +
+                        "library to look them up. The podcasts, radio stations and videos you choose are fetched from where they are " +
+                        "published. KueSounds checks GitHub for new versions. Nothing else.",
+                    look,
+                )
+                Button("Permissions", main = false, modifier = Modifier.fillMaxWidth()) { KueSettings.openPermissions(context) }
+            }
+
+            // 7. Your Kue apps
+            KueSettings.Group(KueSettings.Icons.KUE, "Your Kue apps", "KueTV, KueVault", open == "kue", look, { toggle("kue") }) {
+                KueSettings.KueApps(context.packageName, look)
+            }
+
+            // 8. Help and about
+            KueSettings.Group(KueSettings.Icons.HELP, "Help and about", "Version " + BuildConfig.VERSION_NAME, open == "help", look, { toggle("help") }) {
+                KueSettings.Fact("Version", BuildConfig.VERSION_NAME, look)
                 var copied by remember { mutableStateOf(false) }
-                val context = LocalContext.current
-                val scope = rememberCoroutineScope()
                 // Checking by hand, as well as the pop-up: finds a newer version and puts it on now.
                 var updateSays by remember { mutableStateOf("") }
                 var checking by remember { mutableStateOf(false) }
@@ -1150,7 +1205,6 @@ object Ui {
                     }
                 }
                 if (updateSays.isNotEmpty()) Words(updateSays, 14, K.Accent, lines = 3)
-                Spacer(Modifier.height(8.dp))
                 Button(if (copied) "Copied. Paste it to Claude." else "Copy report for Claude", main = false, modifier = Modifier.fillMaxWidth()) {
                     scope.launch {
                         val text = withContext(Dispatchers.Default) { Scanner.report() }

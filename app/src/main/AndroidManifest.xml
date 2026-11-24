@@ -15,6 +15,13 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- Settings › Your Kue apps: to see which other Kue apps are on this phone, to open them. -->
+    <queries>
+        <package android:name="art.kquinn.kuetv" />
+        <package android:name="art.kquinn.kuesounds" />
+        <package android:name="art.kquinn.kuevault" />
+    </queries>
+
     <application
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"

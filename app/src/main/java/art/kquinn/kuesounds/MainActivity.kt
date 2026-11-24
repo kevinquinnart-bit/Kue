@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Google.init(this)
+        KueSettings.init(this)
         Scanner.init(this)
         Offline.init(this)
         Sync.init(this)

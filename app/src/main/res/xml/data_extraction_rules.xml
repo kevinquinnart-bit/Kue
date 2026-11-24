@@ -10,6 +10,7 @@
         <include domain="sharedpref" path="podcasts.xml" />
         <include domain="sharedpref" path="podcast-positions.xml" />
         <include domain="sharedpref" path="notices.xml" />
+        <include domain="sharedpref" path="kue-look.xml" />
     </cloud-backup>
     <device-transfer>
         <include domain="file" path="library.json" />
@@ -18,5 +19,6 @@
         <include domain="sharedpref" path="podcasts.xml" />
         <include domain="sharedpref" path="podcast-positions.xml" />
         <include domain="sharedpref" path="notices.xml" />
+        <include domain="sharedpref" path="kue-look.xml" />
     </device-transfer>
 </data-extraction-rules>
