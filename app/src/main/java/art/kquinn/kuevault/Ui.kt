@@ -85,8 +85,10 @@ sealed class Screen {
     data class ChooseKeep(val section: Section, val archive: Boolean) : Screen()
     /** Choosing what kind of place to connect; [forSection] lives there once it's connected. */
     data class AddPlace(val forSection: Section?) : Screen()
-    /** Typing in a home computer's details. */
-    data class HomeForm(val forSection: Section?) : Screen()
+    /** Typing in a home computer's details; [again]: a place already connected whose password is wanted again. */
+    data class HomeForm(val forSection: Section?, val again: Place? = null) : Screen()
+    /** Moving to a new phone: what comes back by itself, and the phone's photos and videos. */
+    data object NewPhone : Screen()
 }
 
 /** What the screens ask the app to do that only the app can: the phone's own pickers and Google's page. */
@@ -137,7 +139,8 @@ object Ui {
         var screen by remember { mutableStateOf<Screen>(Screen.Hub) }
         BackHandler(enabled = screen != Screen.Hub) {
             screen = when (val s = screen) {
-                is Screen.HomeForm -> Screen.AddPlace(s.forSection)
+                is Screen.HomeForm -> if (s.again != null) Screen.Places else Screen.AddPlace(s.forSection)
+                Screen.NewPhone -> Screen.Settings
                 is Screen.AddPlace -> s.forSection?.let { Screen.ChooseHome(it) } ?: Screen.Places
                 else -> Screen.Hub
             }
@@ -157,8 +160,9 @@ object Ui {
                         onSettings = { screen = Screen.Settings },
                     )
                     Screen.Library -> LibraryScreen()
-                    Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) })
-                    Screen.Settings -> Settings { screen = Screen.Hub }
+                    Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) }, onPassword = { screen = Screen.HomeForm(null, it) })
+                    Screen.Settings -> Settings(onNewPhone = { screen = Screen.NewPhone }) { screen = Screen.Hub }
+                    Screen.NewPhone -> NewPhone { screen = Screen.Settings }
                     is Screen.Files -> Files(s.section, asks, onBack = { screen = Screen.Hub }, onMove = { screen = Screen.ChooseHome(s.section) }, onKeep = { archive -> screen = Screen.ChooseKeep(s.section, archive) })
                     is Screen.ChooseKeep -> ChooseKeep(s.section, s.archive, onDone = { screen = Screen.Files(s.section) })
                     is Screen.ChooseHome -> ChooseHome(
@@ -180,7 +184,7 @@ object Ui {
                         onHome = { screen = Screen.HomeForm(s.forSection) },
                         onBack = { screen = s.forSection?.let { Screen.ChooseHome(it) } ?: Screen.Places },
                     )
-                    is Screen.HomeForm -> HomeForm(s.forSection, onDone = { screen = if (s.forSection != null) Screen.Hub else Screen.Places }, onBack = { screen = Screen.AddPlace(s.forSection) })
+                    is Screen.HomeForm -> HomeForm(s.forSection, s.again, onDone = { screen = if (s.forSection != null) Screen.Hub else Screen.Places }, onBack = { screen = if (s.again != null) Screen.Places else Screen.AddPlace(s.forSection) })
                 }
             }
             if (Work.doing.isNotEmpty()) Box(Modifier.fillMaxWidth().background(K.Raised).padding(horizontal = 20.dp, vertical = 10.dp)) { Words(Work.doing, 14) }
@@ -391,7 +395,7 @@ object Ui {
 
     /** Every place connected: how full, what lives there, and anything it needs. */
     @Composable
-    private fun Places(asks: Asks, onAdd: () -> Unit, onChoose: (Section) -> Unit) {
+    private fun Places(asks: Asks, onAdd: () -> Unit, onChoose: (Section) -> Unit, onPassword: (Place) -> Unit) {
         var confirm by remember { mutableStateOf<String?>(null) }
         Column(Modifier.fillMaxSize()) {
             Title("Places")
@@ -411,6 +415,7 @@ object Ui {
                         if (q?.limit != null) Meter(q.fraction, if (q.fraction >= Vault.NEARLY) K.Warn else K.KueBlue)
                         if (p.id in Work.signInAgain) Button("Sign in again", main = true) { asks.signInAgain(p.email) }
                         Work.unreachable[p.id]?.let { Words(it, 12, K.Warn, lines = 3) }
+                        if (p.kind == PlaceKind.HOME && Secrets.read(LocalContext.current, p.id) == null) Button("Type the password again", main = true) { onPassword(p) }
                         if (confirm == p.id) {
                             Words("Taking it out of KueVault leaves its files where they are." + if (sections.isNotEmpty()) " The sections living here will need a new place." else "", 12, K.Soft, lines = 3)
                             Button("Take this place out") { confirm = null; Vault.disconnect(p.id) }
@@ -538,12 +543,12 @@ object Ui {
 
     /** A home computer's details: its name, the shared folder, and the computer's own sign-in. */
     @Composable
-    private fun HomeForm(forSection: Section?, onDone: () -> Unit, onBack: () -> Unit) {
+    private fun HomeForm(forSection: Section?, again: Place?, onDone: () -> Unit, onBack: () -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        var host by remember { mutableStateOf("") }
-        var share by remember { mutableStateOf("") }
-        var user by remember { mutableStateOf("") }
+        var host by remember { mutableStateOf(again?.host.orEmpty()) }
+        var share by remember { mutableStateOf(again?.share.orEmpty()) }
+        var user by remember { mutableStateOf(again?.user.orEmpty()) }
         var password by remember { mutableStateOf("") }
         var saying by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf(false) }
@@ -592,7 +597,7 @@ object Ui {
     }
 
     @Composable
-    private fun Settings(onBack: () -> Unit) {
+    private fun Settings(onNewPhone: () -> Unit, onBack: () -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var forget by remember { mutableStateOf(false) }
@@ -601,6 +606,7 @@ object Ui {
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Words("KueVault " + BuildConfig.VERSION_NAME, 15, bold = true)
                 Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
+                Button("Moving to a new phone", modifier = Modifier.fillMaxWidth(), onClick = onNewPhone)
                 Button("Copy report for Claude", modifier = Modifier.fillMaxWidth()) {
                     val clip = context.getSystemService(android.content.ClipboardManager::class.java)
                     clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault report", Report.text(context)))
@@ -613,6 +619,39 @@ object Ui {
                     if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Work.told = "Forgotten. Your files are still in your places." }
                 }
                 Words("Takes every place out of KueVault on this phone. The files stay where they are.", 12, K.Soft, lines = 3)
+            }
+        }
+    }
+
+    /** Moving to a new phone: the set-up comes back by itself; the phone's photos and videos go to Backups and back. */
+    @Composable
+    private fun NewPhone(onBack: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var then by remember { mutableStateOf<(() -> Unit)?>(null) }
+        val ask = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+            if (granted.values.any { it }) then?.invoke() else Work.problem = "KueVault needs to see your photos and videos for this. Allow it, then try again."
+            then = null
+        }
+        fun withMedia(work: () -> Unit) { then = work; ask.launch(PhoneMedia.permissions) }
+        BackHandler { onBack() }
+        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Title("Moving to a new phone", onBack)
+            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Words("Your set-up comes back by itself", 16, bold = true)
+                Words("Android's own backup keeps KueVault's set-up: your places, where each section lives, its copies and archive. When you set up the new phone and restore from your Google account, then put KueVault on, it's all there. Sign in to each Google place again with one tap, and type home computer passwords again: they never leave this phone.", 13, K.Soft, lines = 10)
+                Spacer(Modifier.height(6.dp))
+                Words("This phone's photos and videos", 16, bold = true)
+                val blocked = PhoneMedia.blocked()
+                Words(blocked ?: ("They go to Backups, in " + (Vault.homeOf(Section.BACKUPS)?.label ?: "") + ". Only ones not already there are copied."), 13, if (blocked == null) K.Soft else K.Warn, lines = 4)
+                if (blocked == null && Work.doing.isEmpty()) {
+                    Button("Back up this phone's photos and videos", main = true, modifier = Modifier.fillMaxWidth()) {
+                        withMedia { scope.launch { Work.told = PhoneMedia.backUp(context) } }
+                    }
+                    Button("Bring them back to this phone", modifier = Modifier.fillMaxWidth()) {
+                        withMedia { scope.launch { Work.told = PhoneMedia.bringBack(context) } }
+                    }
+                }
             }
         }
     }
