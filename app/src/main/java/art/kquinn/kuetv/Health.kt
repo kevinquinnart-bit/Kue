@@ -110,8 +110,8 @@ object Health {
             val episodes = episode?.count("streams") ?: 0
             parts += when {
                 film == null && episode == null -> Check.DEAD to "Streams: " + filmWhy.replaceFirstChar { it.lowercase() }
-                films + episodes == 0 -> Check.DOUBT to "Streams: answers, but none for a well-known film or episode"
-                else -> Check.WORKING to "Streams: $films for a test film, $episodes for a test episode"
+                films + episodes == 0 -> Check.DOUBT to "Streams: answers, but none for a well-known movie or episode"
+                else -> Check.WORKING to "Streams: $films for a test movie, $episodes for a test episode"
             }
         }
         if (addOn.subtitles) {
@@ -120,8 +120,8 @@ object Health {
             val mine = all.count { Langs.matches(lang, it.get("lang")?.takeIf { l -> l.isJsonPrimitive }?.asString.orEmpty()) }
             parts += when {
                 subs == null -> Check.DEAD to "Subtitles: " + subsWhy.replaceFirstChar { it.lowercase() }
-                mine == 0 -> Check.DOUBT to "Subtitles: answers, but no " + lang.name + " ones for a test film (" + all.size + " in other languages)"
-                else -> Check.WORKING to "Subtitles: $mine in " + lang.name + " for a test film"
+                mine == 0 -> Check.DOUBT to "Subtitles: answers, but no " + lang.name + " ones for a test movie (" + all.size + " in other languages)"
+                else -> Check.WORKING to "Subtitles: $mine in " + lang.name + " for a test movie"
             }
         }
         for (written in addOn.catalogues.take(3)) {
@@ -165,7 +165,7 @@ object Health {
         val entries = try {
             Stremio.collection(key)
         } catch (e: AddOnProblem) {
-            return Check(name, Check.DEAD, mark(Check.DEAD) + e.message + " Sign in again in Settings › Films and series › Add-ons.")
+            return Check(name, Check.DEAD, mark(Check.DEAD) + e.message + " Sign in again in Settings › Movies and series › Add-ons.")
         }
         val have = AddOnStore.all(context).mapTo(HashSet()) { it.base }
         val usable = entries.filter { it.addOn != null }
@@ -211,9 +211,9 @@ object Health {
                     library.films.firstOrNull()?.let { film ->
                         val about = runCatching { Provider.filmAbout(account, film.id) }
                         out += when {
-                            about.isFailure -> Check("Film details from your provider", Check.DEAD, "It didn't answer when asked about a film.")
-                            about.getOrNull()?.isEmpty != false -> Check("Film details from your provider", Check.DOUBT, "It answers, but sent nothing about \"" + film.name + "\".")
-                            else -> Check("Film details from your provider", Check.WORKING, "Sent details for a test film.")
+                            about.isFailure -> Check("Movie details from your provider", Check.DEAD, "It didn't answer when asked about a movie.")
+                            about.getOrNull()?.isEmpty != false -> Check("Movie details from your provider", Check.DOUBT, "It answers, but sent nothing about \"" + film.name + "\".")
+                            else -> Check("Movie details from your provider", Check.WORKING, "Sent details for a test movie.")
                         }
                     }
                 }
@@ -221,24 +221,24 @@ object Health {
             // The public film index add-ons are asked through.
             val (index, indexWhy) = ask(AddOns.index + "/catalog/movie/top/search=the%20thing.json")
             out += when {
-                index == null -> Check("The film index", Check.DEAD, "$indexWhy. Add-on streams can't be found without it.")
-                index.count("metas") == 0 -> Check("The film index", Check.DOUBT, "It answers, but found nothing for a test search.")
-                else -> Check("The film index", Check.WORKING, "Found " + index.count("metas") + " films for a test search.")
+                index == null -> Check("The movie index", Check.DEAD, "$indexWhy. Add-on streams can't be found without it.")
+                index.count("metas") == 0 -> Check("The movie index", Check.DOUBT, "It answers, but found nothing for a test search.")
+                else -> Check("The movie index", Check.WORKING, "Found " + index.count("metas") + " movies for a test search.")
             }
             // The lists of films and series to browse, beyond the provider's own: a few of them are tried.
             val catalogues = runCatching { AddOns.catalogues(AddOnStore.all(context)) }.getOrDefault(emptyList())
             if (catalogues.isEmpty()) {
-                out += Check("Film and series catalogues", Check.DOUBT, "None found. The film index listed none, and no add-on gives any.")
+                out += Check("Movie and series catalogues", Check.DOUBT, "None found. The movie index listed none, and no add-on gives any.")
             } else {
                 val tried = catalogues.take(6)
                 val pages = tried.map { c -> c to runCatching { AddOns.page(c, 0) }.getOrNull() }
                 val dead = pages.filter { it.second == null }.map { it.first.name }
                 val empty = pages.filter { it.second?.isEmpty() == true }.map { it.first.name }
                 out += when {
-                    dead.size == tried.size -> Check("Film and series catalogues", Check.DEAD, "None of the " + tried.size + " tried answered.")
-                    dead.isNotEmpty() -> Check("Film and series catalogues", Check.DOUBT, (tried.size - dead.size).toString() + " of " + tried.size + " tried answered. Not answering: " + dead.joinToString(", ") + ".")
-                    empty.isNotEmpty() -> Check("Film and series catalogues", Check.DOUBT, "All " + tried.size + " tried answered, but these were empty: " + empty.joinToString(", ") + ".")
-                    else -> Check("Film and series catalogues", Check.WORKING, catalogues.size.toString() + " catalogues. The " + tried.size + " tried all answered, " + pages.sumOf { it.second?.size ?: 0 } + " titles on their first pages.")
+                    dead.size == tried.size -> Check("Movie and series catalogues", Check.DEAD, "None of the " + tried.size + " tried answered.")
+                    dead.isNotEmpty() -> Check("Movie and series catalogues", Check.DOUBT, (tried.size - dead.size).toString() + " of " + tried.size + " tried answered. Not answering: " + dead.joinToString(", ") + ".")
+                    empty.isNotEmpty() -> Check("Movie and series catalogues", Check.DOUBT, "All " + tried.size + " tried answered, but these were empty: " + empty.joinToString(", ") + ".")
+                    else -> Check("Movie and series catalogues", Check.WORKING, catalogues.size.toString() + " catalogues. The " + tried.size + " tried all answered, " + pages.sumOf { it.second?.size ?: 0 } + " titles on their first pages.")
                 }
             }
             stremio(context)?.let { out += it }

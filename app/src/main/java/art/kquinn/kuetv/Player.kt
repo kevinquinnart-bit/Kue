@@ -641,7 +641,7 @@ fun PlayerScreen(
                 val kind = when {
                     versions.getOrNull(stream)?.url?.startsWith("magnet:") == true -> "torrent"
                     live -> "live channel"
-                    else -> "film or recording"
+                    else -> "movie or recording"
                 }
                 Report.note(
                     "Player",
@@ -669,7 +669,7 @@ fun PlayerScreen(
                 tries += 1
                 if (tries >= maxOf(MAX_TRIES, versions.size * 2)) {
                     if (!(live && toOwnApp("This channel isn't playing here."))) {
-                        note = if (live) "This channel isn't playing right now." else "This film isn't playing right now."
+                        note = if (live) "This channel isn't playing right now." else "This movie isn't playing right now."
                     }
                 } else if (live && versions.size > 1 && tries % 2 == 0) {
                     // Two failures in a row on this version: try the next one, going round to the first after the last.

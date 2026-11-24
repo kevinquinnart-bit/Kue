@@ -114,7 +114,7 @@ object Torrents {
             val files = info.files()
             val count = files.numFiles()
             val index = AddOns.pickFile(List(count) { files.filePath(it) }, List(count) { files.fileSize(it) }, want.file, want.season, want.episode)
-                ?: throw FileNotFoundException("This torrent has no film in it.")
+                ?: throw FileNotFoundException("This torrent has no movie in it.")
             if (files.fileSize(index) + ROOM_TO_SPARE > dir.usableSpace) throw FileNotFoundException("There isn't enough storage here for this torrent.")
             val priorities = Array(count) { if (it == index) Priority.DEFAULT else Priority.IGNORE }
             sm.download(info, dir, null, priorities, null, TorrentFlags.SEQUENTIAL_DOWNLOAD)
@@ -174,7 +174,7 @@ class TorrentSource(private val context: Context) : BaseDataSource(true) {
         val torrent = Torrents.open(context, dataSpec.uri.toString())
         playing = torrent
         position = dataSpec.position
-        if (position > torrent.size) throw FileNotFoundException("Asked to read past the end of the film.")
+        if (position > torrent.size) throw FileNotFoundException("Asked to read past the end of the movie.")
         left = if (dataSpec.length != C.LENGTH_UNSET.toLong()) dataSpec.length else torrent.size - position
         started = true
         transferStarted(dataSpec)

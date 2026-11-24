@@ -1272,7 +1272,7 @@ private fun LoadingScreen(onReport: () -> Unit) {
         CircularProgressIndicator(color = AccentInk)
         Spacer(Modifier.height(22.dp))
         Text(
-            "Loading your channels and films…", color = Ink, fontSize = Sizes.ROW,
+            "Loading your channels and movies…", color = Ink, fontSize = Sizes.ROW,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
         )
@@ -1439,7 +1439,7 @@ private fun Field(
 
 // --------------------------------------------------------------------------------------------- main
 
-private enum class Section(val label: String) { HOME("Home"), SEARCH("Search"), LIVE("Live TV"), GUIDE("TV Guide"), CATCHUP("Catch-up"), FILMS("Films"), SERIES("Series"), RECORDINGS("Recordings"), APPS("TV apps"), SETTINGS("Settings") }
+private enum class Section(val label: String) { HOME("Home"), SEARCH("Search"), LIVE("Live TV"), GUIDE("TV Guide"), CATCHUP("Catch-up"), FILMS("Movies"), SERIES("Series"), RECORDINGS("Recordings"), APPS("TV apps"), SETTINGS("Settings") }
 
 private const val ALL = "\u0000all"
 private const val FAVOURITES = "\u0000favourites"
@@ -1544,7 +1544,7 @@ private fun TitleMenu(
             FocusRow("Play", { onClose(); onPlay() }, Modifier.focusRequester(first), look = Look.MAIN, textSize = 17.sp, padV = 8.dp)
             FocusRow(if (favourite) "Remove from favourites" else "Add to favourites", { onFavourite(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.STAR)
             FocusRow(if (watched) "Mark as not watched" else "✓ Mark as watched", { onWatched(); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp)
-            if (onPeople != null) FocusRow("Cast and director", { onClose(); onPeople() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "Their other films")
+            if (onPeople != null) FocusRow("Cast and director", { onClose(); onPeople() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "Their other movies")
             if (playUrl.isNotBlank()) {
                 FocusRow("⬇ Download to watch offline", {
                     onClose()
@@ -1939,12 +1939,13 @@ private fun MainScreen(
                     }
                 }
                 Section.FILMS -> {
-                    state.filmCategory = if (library.films.any { Favourites.key(it, login) in favs }) FAVOURITES else ALL
+                    // Films and Series open on All (Kevin, 24 November 2026); Favourites is a press away.
+                    state.filmCategory = ALL
                     launch { runCatching { state.filmCategoryList.scrollToItem(0) } }
                     launch { runCatching { state.filmGrid.scrollToItem(0) } }
                 }
                 Section.SERIES -> if (state.openShow == null) {
-                    state.showCategory = if (library.shows.any { Favourites.key(it) in favs }) FAVOURITES else ALL
+                    state.showCategory = ALL
                     launch { runCatching { state.showCategoryList.scrollToItem(0) } }
                     launch { runCatching { state.showGrid.scrollToItem(0) } }
                 }
@@ -2350,26 +2351,26 @@ private fun MainScreen(
                 var creditsMenu by remember { mutableStateOf<Pair<String, List<Pair<String, () -> Unit>>>?>(null) }
                 LaunchedEffect(peopleOf) {
                     val film = peopleOf ?: return@LaunchedEffect
-                    kueToast(context, "Asking the film index who is in it…", long = false)
+                    kueToast(context, "Asking the movie index who is in it…", long = false)
                     val found = withContext(Dispatchers.IO) { runCatching { AddOns.people("movie", film.name) }.getOrNull() }
                     peopleOf = null
-                    if (found == null) { kueToast(context, "The film index doesn't know who is in " + film.name + "."); return@LaunchedEffect }
+                    if (found == null) { kueToast(context, "The movie index doesn't know who is in " + film.name + "."); return@LaunchedEffect }
                     peopleMenu = film.name to (found.cast.map { who -> "With $who" to { creditsOf = who to false } } + found.directors.map { who -> "Directed by $who" to { creditsOf = who to true } })
                 }
                 LaunchedEffect(creditsOf) {
                     val (who, directed) = creditsOf ?: return@LaunchedEffect
-                    kueToast(context, "Finding " + who + "'s films…", long = false)
+                    kueToast(context, "Finding " + who + "'s movies…", long = false)
                     val films = withContext(Dispatchers.IO) { runCatching { Credits.films(who, directed) }.getOrNull() }
                     creditsOf = null
-                    if (films == null) { kueToast(context, "Couldn't reach Wikidata, where the films are listed. Try again in a minute."); return@LaunchedEffect }
-                    if (films.isEmpty()) { kueToast(context, "No films are listed for $who."); return@LaunchedEffect }
+                    if (films == null) { kueToast(context, "Couldn't reach Wikidata, where the movies are listed. Try again in a minute."); return@LaunchedEffect }
+                    if (films.isEmpty()) { kueToast(context, "No movies are listed for $who."); return@LaunchedEffect }
                     val mine = library.films.groupBy { Credits.plain(it.name) }
                     val canStream = addOns.any { it.streams }
                     val rows = films.mapNotNull { c ->
                         val ours = mine[Credits.plain(c.title)]?.firstOrNull()
                         val label = c.title + (c.year?.let { " ($it)" } ?: "")
                         when {
-                            ours != null -> "▶ $label · in your films" to {
+                            ours != null -> "▶ $label · in your movies" to {
                                 onPlay(listOf(Playable(ours.name, ours.url, find = finder("movie", ours.name, null, null), poster = ours.poster)), 0, false, "film:" + ours.id)
                             }
                             canStream -> "$label · from your add-ons" to {
@@ -2378,8 +2379,8 @@ private fun MainScreen(
                             else -> null
                         }
                     }.sortedBy { if (it.first.startsWith("▶")) 0 else 1 }
-                    if (rows.isEmpty()) kueToast(context, "None of $who's films are in your films, and you have no add-ons to play the rest from.")
-                    else creditsMenu = (if (directed) "Directed by " else "With ") + who + " · " + rows.size + " films" to rows
+                    if (rows.isEmpty()) kueToast(context, "None of $who's movies are in your movies, and you have no add-ons to play the rest from.")
+                    else creditsMenu = (if (directed) "Directed by " else "With ") + who + " · " + rows.size + " movies" to rows
                 }
                 peopleMenu?.let { (title, options) -> OptionsBox("Cast and director · $title", options) { peopleMenu = null } }
                 creditsMenu?.let { (title, options) -> OptionsBox(title, options) { creditsMenu = null } }
@@ -2400,7 +2401,7 @@ private fun MainScreen(
                     )
                 }
                 Column(fill()) {
-                    Heading((if (shown.size == 1) "1 film" else "${shown.size} films") + menuHint("film"))
+                    Heading((if (shown.size == 1) "1 movie" else "${shown.size} movies") + menuHint("film"))
                     ListingChips(watchedToo = true)
                     // Until the remote is on a film in this list, the first one is told about, so the box is never empty.
                     val onFilm = remember(shown, state.onFilm) { state.onFilm?.takeIf { f -> shown.any { it.id == f.id } } ?: shown.firstOrNull() }
@@ -2477,7 +2478,7 @@ private fun MainScreen(
                 val parts = listOf(
                     "Watching" to "Subtitles, pause and rewind, sound and picture, text size",
                     "Your channels" to "Provider details" + (if (savedProviders.size > 1) " (" + savedProviders.size + " saved)" else "") + ", favourites, categories, free channel lists ($freeCount), TV guide",
-                    "Films and series" to "Add-ons (" + addOns.size + "), Stremio account",
+                    "Movies and series" to "Add-ons (" + addOns.size + "), Stremio account",
                     *(if (phone) emptyArray() else arrayOf("This TV" to "Aerial TV, quick settings, the TV's own settings, storage, apps")),
                     "Look and feel" to UiLang.name(UiLang.code) + " · " + Looks.schemes[Looks.scheme].name + " · " + Looks.themes[Looks.theme] + " · " + Looks.accents[Looks.accent] + if (Looks.glass > 0) " · Glass look" else "",
                     "Your things" to "History, profiles · using " + profile.name + if (profile.kids) " (kids)" else "",
@@ -2535,9 +2536,9 @@ private fun MainScreen(
                         // 1. Account
                         groupRow("Account", KueSettings.Icons.ACCOUNT, summaryOf["Your things"].orEmpty(), "Your things")
                         // 2. KueTV
-                        groupRow("KueTV", KueSettings.Icons.APP, "Watching, your channels, films and series" + (if (phone) "" else ", this TV") + ", VPN", null)
+                        groupRow("KueTV", KueSettings.Icons.APP, "Watching, your channels, movies and series" + (if (phone) "" else ", this TV") + ", VPN", null)
                         if (state.settingsGroup == "KueTV") {
-                            for (name in listOf("Watching", "Your channels", "Films and series", "This TV", "VPN")) part(name, inGroup)
+                            for (name in listOf("Watching", "Your channels", "Movies and series", "This TV", "VPN")) part(name, inGroup)
                         }
                         // 3. Look and feel
                         groupRow("Look and feel", KueSettings.Icons.LOOK, summaryOf["Look and feel"].orEmpty(), "Look and feel")
@@ -2561,7 +2562,7 @@ private fun MainScreen(
                         if (state.settingsGroup == "Privacy and storage") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
                             Note(
                                 "KueTV talks only to what you see in it: your TV provider, the add-ons, free channel lists and guides you choose, " +
-                                    "film and TV listings, the weather for your rough area, the VPN when it is on, Google Drive for your backup and " +
+                                    "movie and TV listings, the weather for your rough area, the VPN when it is on, Google Drive for your backup and " +
                                     "recordings, and GitHub for updates. There is no KueTV server.",
                             )
                             FocusRow("Permissions", { KueSettings.openPermissions(context) }, look = Look.OTHER, below = "KueTV's page in the " + (if (phone) "phone's" else "TV's") + " own settings")
@@ -2622,14 +2623,14 @@ private fun MainScreen(
                                     val on = remember(Combined.changes) { Combined.isOn(context, a) }
                                     FocusRow(
                                         Providers.label(a) + ": " + if (on) "on" else "off", { Combined.setOn(context, a, !on) },
-                                        look = Look.OTHER, below = "Its channels, films and series shown with these ones · OK to change",
+                                        look = Look.OTHER, below = "Its channels, movies and series shown with these ones · OK to change",
                                     )
                                 }
                                 sub("This provider")
                             }
                             FocusRow("Change provider details", onEdit, first(), look = Look.OTHER)
                             FocusRow("Add another provider", extras.addProvider, look = Look.OTHER, below = "The one in use is kept, to switch back to")
-                            FocusRow("Reload channels and films", onReload, look = Look.OTHER, below = "Fetches everything afresh from your provider")
+                            FocusRow("Reload channels and movies", onReload, look = Look.OTHER, below = "Fetches everything afresh from your provider")
                             if (inUse?.isLogin == true) {
                                 var askAgain by remember { mutableIntStateOf(0) }
                                 val plan by produceState<Provider.Subscription?>(null, inUse, askAgain) {
@@ -2729,7 +2730,7 @@ private fun MainScreen(
                                 .sortedBy { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
                             val favFilms = library.films.filter { Favourites.key(it, login) in favs }
                             val favShows = library.shows.filter { Favourites.key(it) in favs }
-                            if (favChannels.isEmpty() && favFilms.isEmpty() && favShows.isEmpty()) Note("Nothing starred yet. Hold OK on a channel, film or series to star it.")
+                            if (favChannels.isEmpty() && favFilms.isEmpty() && favShows.isEmpty()) Note("Nothing starred yet. Hold OK on a channel, movie or series to star it.")
                             var given = false
                             val firstOne: () -> Modifier = { if (given) Modifier else { given = true; first() } }
                             if (favChannels.isNotEmpty()) sub("Channels")
@@ -2738,7 +2739,7 @@ private fun MainScreen(
                                 FocusRow(g.name, { onPlay(livePlayables, i, true, "fav:" + g.id) }, firstOne(), look = Look.OTHER, leading = { Logo(g.logo) },
                                     below = "Hold OK to take off", onHold = { favourites.toggleAll(g.versions.map { Favourites.key(it.channel, login) }) })
                             }
-                            if (favFilms.isNotEmpty()) sub("Films")
+                            if (favFilms.isNotEmpty()) sub("Movies")
                             for (f in favFilms) {
                                 FocusRow(f.name, { onPlay(listOf(Playable(f.name, f.url, find = finder("movie", f.name, null, null), poster = f.poster)), 0, false, "fav:" + f.id) }, firstOne(),
                                     look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(f, login)) })
@@ -2826,7 +2827,7 @@ private fun MainScreen(
                                     "Recently watched, your own categories, channel names you changed, and reminders. Text size and the small TV stay each device's own.",
                             )
                                                 }
-                        "Films and series" -> {
+                        "Movies and series" -> {
                             // Three jobs, three screens.
                             val stremioEmail = remember(Stremio.changes) { if (Stremio.key(context).isEmpty()) "" else Stremio.email(context) }
                             FocusRow("Stremio account", onStremio, first(), look = Look.OTHER, below = if (stremioEmail.isEmpty()) "Not signed in" else "Signed in as $stremioEmail")
@@ -2902,7 +2903,7 @@ private fun MainScreen(
                             if (!phone) {
                                 val matchRate = engineNow >= 0 && FrameRate.on(context)
                                 FocusRow(
-                                    "Match the TV to the film: " + if (matchRate) "on" else "off", { FrameRate.on(context, !matchRate) }, look = Look.OTHER,
+                                    "Match the TV to the movie: " + if (matchRate) "on" else "off", { FrameRate.on(context, !matchRate) }, look = Look.OTHER,
                                     below = "Smoother movement. The screen may go dark for a second as each one starts",
                                 )
                             }
@@ -3854,7 +3855,7 @@ private fun Pane.EpisodePage(
             val label = s.name + (s.year?.let { " ($it)" } ?: "")
             when {
                 ours != null -> "▶ $label · in your series" to { state.openShow = ours }
-                s.imdb.startsWith("tt") -> "$label · from the film index" to { state.openShow = Show(Catalogue.PREFIX + s.imdb, s.name, s.poster, "") }
+                s.imdb.startsWith("tt") -> "$label · from the movie index" to { state.openShow = Show(Catalogue.PREFIX + s.imdb, s.name, s.poster, "") }
                 else -> null
             }
         }.sortedBy { if (it.first.startsWith("▶")) 0 else 1 }
@@ -3879,7 +3880,7 @@ private fun Pane.EpisodePage(
                         val own = runCatching { Provider.episodes(account, show.id) }.getOrDefault(emptyList())
                         if (own.isNotEmpty()) Result.success(own)
                         else AddOns.seriesByName(show.name)?.let { AddOns.episodes(it.id) }?.takeIf { it.isNotEmpty() }
-                            ?.also { Report.note("Series", show.name + ": no episodes from the provider; " + it.size + " from the film index") }
+                            ?.also { Report.note("Series", show.name + ": no episodes from the provider; " + it.size + " from the movie index") }
                             ?.let { Result.success(it) }
                             ?: Result.success(own)
                     }
@@ -4065,7 +4066,7 @@ private fun Pane.SearchPane(
         OutlinedTextField(
             value = state.query,
             onValueChange = { state.query = it },
-            label = { Text("Search channels, films and series", fontSize = 16.sp) },
+            label = { Text("Search channels, movies and series", fontSize = 16.sp) },
             singleLine = true,
             textStyle = MaterialTheme.typography.titleLarge,
             modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
@@ -4124,7 +4125,7 @@ private fun Pane.SearchPane(
                         below = group.name + " · " + whenText + if (onNow) "" else if (programme.startMs > now) " · OK for a reminder, or to record" else " · OK for catch-up",
                     )
                 }
-                if (filmsFound.isNotEmpty()) item(key = "h:film") { Box(Modifier.padding(top = 14.dp)) { Heading("Films") } }
+                if (filmsFound.isNotEmpty()) item(key = "h:film") { Box(Modifier.padding(top = 14.dp)) { Heading("Movies") } }
                 itemsIndexed(filmsFound, key = { _, f -> "film:" + f.id }) { _, film ->
                     val key = "film:" + film.id
                     val favKey = Favourites.key(film, login)
@@ -4158,7 +4159,7 @@ private fun Pane.SearchPane(
                     )
                 }
                 if (more == null) item(key = "h:looking") { Box(Modifier.padding(top = 14.dp)) { Heading("Looking in the catalogues…") } }
-                if (moreFilms.isNotEmpty()) item(key = "h:catfilm") { Box(Modifier.padding(top = 14.dp)) { Heading("More films, from the catalogues") } }
+                if (moreFilms.isNotEmpty()) item(key = "h:catfilm") { Box(Modifier.padding(top = 14.dp)) { Heading("More movies, from the catalogues") } }
                 itemsIndexed(moreFilms, key = { _, f -> "catfilm:" + f.id }) { _, film ->
                     val key = Catalogue.PREFIX + film.id
                     FocusRow(
@@ -4607,7 +4608,7 @@ private fun AddOnsScreen(onDone: () -> Unit) {
             if (Health.running) "Checking each add-on…" else "Check them all again", checkAll, Modifier.focusRequester(first), look = Look.OTHER,
             below = "Tick: working · !: answers, with a gap · Cross: not working",
         )
-        if (addOns.isEmpty()) Note("No add-ons yet. Sign in to Stremio, or add one by its link, from Settings › Films and series.")
+        if (addOns.isEmpty()) Note("No add-ons yet. Sign in to Stremio, or add one by its link, from Settings › Movies and series.")
         addOns.forEach { addOn ->
             val check = Health.results.firstOrNull { it.name == Health.addOnName(addOn) }
             FocusRow(
@@ -5471,7 +5472,7 @@ private fun CategoriesScreen(library: Library, onDone: () -> Unit) {
     val kinds = remember(library, changes) {
         listOf(
             Kind("live", "Live TV", Library.ordered(library.liveCategories, Choices.order(context, "live")), library.channels.groupingBy { it.categoryId }.eachCount()),
-            Kind("film", "Films", Library.ordered(library.filmCategories, Choices.order(context, "film")), library.films.groupingBy { it.categoryId }.eachCount()),
+            Kind("film", "Movies", Library.ordered(library.filmCategories, Choices.order(context, "film")), library.films.groupingBy { it.categoryId }.eachCount()),
             Kind("show", "Series", Library.ordered(library.showCategories, Choices.order(context, "show")), library.shows.groupingBy { it.categoryId }.eachCount()),
         ).filter { it.categories.isNotEmpty() }
     }
@@ -5856,7 +5857,7 @@ private fun HomeScreen(
         // home screen, so this is the way to Freely, Prime Video and the rest.
         // TV: the TV's apps, each sorted into its row by what it is: an app installed later lands in the right row
         // by itself, the next time Home shows. The TV's own settings at the end of the last row.
-        *(AppOrder.rows.zip(listOf("TV channel apps", "Films and series apps", "Music apps", "Other apps")).map { (kind, title) ->
+        *(AppOrder.rows.zip(listOf("TV channel apps", "Movies and series apps", "Music apps", "Other apps")).map { (kind, title) ->
         @Composable { if (!phone) {
             var rowFocused by remember { mutableStateOf(false) }
             Column(Modifier.onFocusChanged { rowFocused = it.hasFocus }, verticalArrangement = blockSpacing) {
@@ -5922,7 +5923,7 @@ private fun HomeScreen(
         // Favourite films and series, each in a row of posters. Hold OK takes one off.
         { Column(verticalArrangement = blockSpacing) {
             val favFilms = remember(library, favs) { library.films.filter { Favourites.key(it, login) in favs } }
-            PosterRow("Favourite films", favFilms, { "homefilm:" + it.id }, { it.name }, { it.poster }, state, resume, onFilm,
+            PosterRow("Favourite movies", favFilms, { "homefilm:" + it.id }, { it.name }, { it.poster }, state, resume, onFilm,
                 hero = { f -> val about = state.filmAbout[f.id]; HomeHero.Plain(f.name, about?.line.orEmpty(), about?.plot.orEmpty(), f.poster) },
                 onHero = { hero = it }) { favourites.toggle(Favourites.key(it, login)) }
         } },
@@ -6753,7 +6754,7 @@ private fun CatalogueGrid(catalogue: Catalogue, state: BrowseState, resume: Focu
         }
     }
     Column(modifier) {
-        Heading(catalogue.name + " · " + items.size + (if (catalogue.key in state.catDone) "" else "+") + (if (catalogue.type == "movie") " films" else " series") + " from the catalogue")
+        Heading(catalogue.name + " · " + items.size + (if (catalogue.key in state.catDone) "" else "+") + (if (catalogue.type == "movie") " movies" else " series") + " from the catalogue")
         if (!phone) AboutStrip(on?.name, on?.about)
         when {
             problem -> Note("This catalogue didn't answer. Check the internet, or see Settings › Health check.")
@@ -7018,7 +7019,7 @@ private fun StremioScreen(onDone: () -> Unit) {
                     "Changes made in Stremio come into KueTV each time KueTV opens.\n" +
                     "Your TV and phone share the list and this sign-in when they keep in step.",
             )
-            Note("Which add-ons work: Settings › Films and series › My add-ons.")
+            Note("Which add-ons work: Settings › Movies and series › My add-ons.")
             FocusRow("‹ Back", onDone, look = Look.OTHER)
         }
     } else {
@@ -7310,7 +7311,7 @@ private fun gives(addOn: AddOn): String {
     val tv = addOn.catalogues.any { it.startsWith("tv|") }
     return listOfNotNull(
         "streams".takeIf { addOn.streams }, "subtitles".takeIf { addOn.subtitles },
-        "films and series to browse".takeIf { films }, "TV channels".takeIf { tv },
+        "movies and series to browse".takeIf { films }, "TV channels".takeIf { tv },
     ).joinToString(", ").ifEmpty { "nothing KueTV uses" }
 }
 
@@ -7444,7 +7445,7 @@ private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> U
     for (e in history.take(40)) {
         FocusRow(
             e.name, { play(e) }, look = Look.OTHER,
-            below = when (e.kind) { History.LIVE -> "Live TV"; History.FILM -> "Film or episode"; else -> "Catch-up or recording" } + " · " + clock.format(java.util.Date(e.atMs)),
+            below = when (e.kind) { History.LIVE -> "Live TV"; History.FILM -> "Movie or episode"; else -> "Catch-up or recording" } + " · " + clock.format(java.util.Date(e.atMs)),
         )
     }
     if (history.isNotEmpty()) FocusRow("Clear history", { History.clear(context) }, look = Look.OTHER, below = "Only this profile's")

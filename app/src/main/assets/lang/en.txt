@@ -46,7 +46,7 @@ and type them there.
 and type your provider details there. Your phone must be on the same Wi-Fi as this TV.
 Another VPN
 answers, but no
-answers, but none for a well-known film or episode
+answers, but none for a well-known movie or episode
 App updates
 as your provider gives them
 Asking Stremio
@@ -176,23 +176,23 @@ Empty this square
 English
 English 5.1
 Episode
-Every channel, film and series you have starred
+Every channel, movie and series you have starred
 Every showing
 every time KueTV opens
 Favourite channels
-Favourite films
+Favourite movies
 Favourite series
 Favourites
 Fetches everything afresh from your provider
 Fill in the server, username and password, or a playlist link.
-Film and series catalogues
-Film details from your provider
-Film or episode
-film or recording
-Films
-Films and series
-films and series to browse
-films for a test search.
+Movie and series catalogues
+Movie details from your provider
+Movie or episode
+movie or recording
+Movies
+Movies and series
+movies and series to browse
+movies for a test search.
 Finding the best stream
 Finding what is on
 Finish deleting
@@ -270,7 +270,7 @@ It answers, but sent nothing about "
 It couldn't be reached
 It couldn't be reached.
 It didn't answer in 15 seconds
-It didn't answer when asked about a film.
+It didn't answer when asked about a movie.
 It is in Live TV's categories.
 It needs a username and password too
 Its description
@@ -299,7 +299,7 @@ Link
 LIVE
 live channel
 Live TV
-Loading your channels and films
+Loading your channels and movies
 look at Health check
 Looking
 Looking for the other device
@@ -315,7 +315,7 @@ Mark as not watched
 Mark as watched
 Marked as not watched.
 Marked as watched.
-Match the TV to the film
+Match the TV to the movie
 Menu
 min 30 s
 min left
@@ -323,7 +323,7 @@ minutes earlier
 minutes in. Rewind to start again.
 More
 more catalogues not tried
-More films, from the catalogues
+More movies, from the catalogues
 More series, from the catalogues
 Move onto a channel to watch it here.
 Move onto a programme to see what it is about.
@@ -340,7 +340,7 @@ newest first
 Next
 Night mode
 No
-No add-ons yet. Sign in to Stremio, or add one by its link, from Settings › Films and series.
+No add-ons yet. Sign in to Stremio, or add one by its link, from Settings › Movies and series.
 no answer
 no detail
 No episodes are listed for this series.
@@ -356,7 +356,7 @@ No title
 No, keep it
 No, keep what is here
 None
-None found. The film index listed none, and no add-on gives any.
+None found. The movie index listed none, and no add-on gives any.
 None of the
 None yet
 None, outlined letters
@@ -391,7 +391,7 @@ Nothing matches "
 Nothing on this device can play YouTube trailers.
 Nothing played yet in this profile.
 Nothing set for
-Nothing starred yet. Hold OK on a channel, film or series to star it.
+Nothing starred yet. Hold OK on a channel, movie or series to star it.
 Nothing taken from the other device since opening
 Nothing to play this from yet. Add an add-on that gives streams, in Settings › Add-ons.
 Now
@@ -449,7 +449,7 @@ on, hides adult categories
 on, when your TV or speakers can
 once a day
 once a week
-ones for a test film
+ones for a test movie
 Ones in Google Drive go to its bin, where Google keeps them for 30 days.
 only on remotes that have it
 Only this profile's
@@ -521,7 +521,7 @@ Recordings here
 recordings there.
 Recordings will be copied to the folder "
 Red button
-Reload channels and films
+Reload channels and movies
 Reminder
 Reminder set
 reminder, then ● record, then neither
@@ -547,12 +547,12 @@ Save the PIN
 saved)
 Screen
 Search
-Search channels, films and series
+Search channels, movies and series
 Season
 See-through panels on a soft glow of the highlight colour
 Send this set-up
 Send this set-up to another device
-Sent details for a test film.
+Sent details for a test movie.
 Sent. The other device now has your provider details, favourites and add-ons. From now on the two keep in step by themselves when KueTV is open on both, on the same Wi-Fi.
 Series
 Series need a login
@@ -566,12 +566,12 @@ Set to record every showing of
 Set up KueTV
 setting up the connection
 Settings
-Settings › Films and series › My add-ons.
+Settings › Movies and series › My add-ons.
 Settings › My Fire TV › Developer options › Install unknown apps › KueTV › On. Then choose Update now again.
 Show all of
 show, hide and order
 Sign in
-Sign in again in Settings › Films and series › Add-ons.
+Sign in again in Settings › Movies and series › Add-ons.
 Sign in once, and KueTV brings in every add-on you have in Stremio. Your password goes only to Stremio and isn't kept.
 Sign in to Google Drive
 Sign in to Google Drive first.
@@ -677,7 +677,7 @@ The download couldn't be reached.
 the download wasn't a newer, whole app, twice
 the downloaded app couldn't be kept
 The file doesn't say which server to connect to.
-The film index
+The movie index
 The guide and catch-up need a login
 the guide answered
 The link answered
@@ -718,7 +718,7 @@ This channel isn't playing right now.
 This device isn't on a home network, so it can't send its set-up. Join the Wi-Fi and try again.
 This device isn't on a home network. Join the Wi-Fi and try again.
 This device no longer keeps in step. To start again, send the set-up from the other device.
-This film isn't playing right now.
+This movie isn't playing right now.
 this is build
 This isn't playing right now.
 This list
@@ -827,7 +827,7 @@ Your provider refused the username or password.
 Your provider sent a list the app couldn't read.
 Your provider sent no guide for this channel.
 Your provider sent no past programmes for this channel. Pick a date and time instead.
-Your provider signed you in but listed no channels, films or series.
+Your provider signed you in but listed no channels, movies or series.
 Your provider's copy
 Your provider's list stopped part way through. Try again.
 Your Stremio account holds the list of add-ons.
@@ -850,7 +850,7 @@ Music
 Everything else
 Group by topic
 TV channel apps
-Films and series apps
+Movies and series apps
 Music apps
 Other apps
 That add-on has no streams or subtitles, so KueTV has no use for it
@@ -884,8 +884,8 @@ UK free channels
 Ireland free channels
 Every country's free channels
 answers
-{#} for a test film, {#} for a test episode
-{} in {} for a test film
+{#} for a test movie, {#} for a test episode
+{} in {} for a test movie
 Catalogue "{}"
 empty
 {#} titles
@@ -897,7 +897,7 @@ Your provider answers, but sent no programmes for {}
 {#} programmes for {#} test channels
 It answers, but sent nothing about "{}"
 Add-on streams can't be found without it
-Found {#} films for a test search
+Found {#} movies for a test search
 None of the {#} tried answered
 Not answering
 {#} of {#} tried answered
@@ -943,7 +943,7 @@ OK on a channel to pick it or not
 Back to stop
 {#} channels
 Hide the {#} picked
-{#} films
+{#} movies
 using {}
 Provider details ({#} saved), reload, categories, free channel lists
 Add-ons ({#}), Stremio account
@@ -952,7 +952,7 @@ The TV's own settings
 version {#}
 not working, report, updates
 Also in your lists
-Its channels, films and series shown with these ones
+Its channels, movies and series shown with these ones
 Free channels, tried when your provider's won't play
 {#} of your channels have one
 Sounds as you move around
@@ -1136,11 +1136,11 @@ Stremio sign-in
 Last taken from the other device at {}
 Recording a programme
 Nobody was found sharing this torrent
-This torrent has no film in it
+This torrent has no movie in it
 There isn't enough storage here for this torrent
 The torrent couldn't be started
 Torrents can't be played on this device ({})
-Asked to read past the end of the film
+Asked to read past the end of the movie
 Nothing is open
 The torrent's file is shorter than it said
 The torrent was closed
@@ -1148,9 +1148,9 @@ The torrent is arriving too slowly to play
 the download answered {}
 The link answered {}
 the lookup answered {}
-answers, but no {} ones for a test film
+answers, but no {} ones for a test movie
 1 channel
-1 film
+1 movie
 1 series
 network, display, sound, apps, developer options
 {#}% watched

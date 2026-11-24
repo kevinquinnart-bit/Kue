@@ -18,7 +18,7 @@ object Topics {
         Topic("news", "News", listOf("news", "politic", "weather", "parliament", "business")),
         Topic("docs", "Documentaries", listOf("doc", "history", "nature", "science", "discovery", "geographic", "nat geo", "wildlife", "travel", "knowledge", "learning", "crime", "investigation", "educat", "culture", "outdoor")),
         Topic("music", "Music", listOf("music", "radio", "hits", "concert", "mtv", "vevo")),
-        Topic("films", "Films", listOf("movie", "film", "cinema", "box office", "vod")),
+        Topic("films", "Movies", listOf("movie", "film", "cinema", "box office", "vod")),
         Topic("ent", "Entertainment", listOf("entertain", "general", "drama", "comedy", "reality", "lifestyle", "variety", "series", "classic", "food", "home", "religio", "shopping", "local", "regional", "freeview", "saorview", "uk", "ireland", "irish", "bbc", "itv", "english", "united kingdom", "paramount")),
     )
     private val other = Topic("other", "Everything else", emptyList())

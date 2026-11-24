@@ -776,7 +776,7 @@ object Provider {
                 shows += Show(id, r["name"].orEmpty().trim(), r["cover"].orEmpty(), r["category_id"].orEmpty(), about, r["last_modified"]?.toLongOrNull() ?: 0)
             }
         }
-        if (channels.isEmpty() && films.isEmpty() && shows.isEmpty()) throw ProviderProblem("Your provider signed you in but listed no channels, films or series.")
+        if (channels.isEmpty() && films.isEmpty() && shows.isEmpty()) throw ProviderProblem("Your provider signed you in but listed no channels, movies or series.")
         // A provider that lists the same id twice must not break the lists, which tell rows apart by id.
         return Library(
             liveCategories.distinctBy { it.id }, channels.distinctBy { it.id }, filmCategories.distinctBy { it.id }, films.distinctBy { it.id },

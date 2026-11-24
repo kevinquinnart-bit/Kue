@@ -317,7 +317,7 @@ object SpareKeys {
     )
 
     /** What a button can do. The names match the menu's. */
-    val actions = listOf("Nothing", "Home", "Search", "Live TV", "TV Guide", "Catch-up", "Films", "Series", "Recordings", "Settings")
+    val actions = listOf("Nothing", "Home", "Search", "Live TV", "TV Guide", "Catch-up", "Movies", "Series", "Recordings", "Settings")
 
     private fun prefs(context: Context) = context.getSharedPreferences("choices", Context.MODE_PRIVATE)
 
@@ -335,6 +335,8 @@ object SpareKeys {
 
     fun action(context: Context, code: Int): String =
         prefs(context).getString("spare.$code", if (code == android.view.KeyEvent.KEYCODE_GUIDE) "TV Guide" else "Nothing").orEmpty()
+            // Films is called Movies since 24 November 2026: a button set before then still opens it.
+            .let { if (it == "Films") "Movies" else it }
 
     fun next(context: Context, code: Int) {
         val now = action(context, code)
