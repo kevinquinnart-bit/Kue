@@ -57,7 +57,8 @@ class FilmsExtrasTest {
         rule.waitForIdle()
         assertFalse("a choice closes the menu", shown("Add to favourites"))
         assertTrue("Mark as watched marks it", Watched.isWatched(context, film.url))
-        assertTrue("…and its poster shows ✓", shown("✓"))
+        // The poster's tick is drawn now (Kevin, 24 Nov 2026: drawn Kue icons, never symbols), found by its name.
+        assertTrue("…and its poster shows the tick", rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Watched"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
     }
 
     @Test fun watchingIntoTheCreditsMarksItWatched() {

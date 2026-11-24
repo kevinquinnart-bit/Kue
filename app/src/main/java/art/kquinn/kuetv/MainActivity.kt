@@ -3318,12 +3318,14 @@ private fun Poster(
         Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Panel)) {
             if (poster.isNotBlank()) AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             if (favourite) {
-                Box(Modifier.align(Alignment.TopStart).padding(6.dp).background(Looks.page.copy(alpha = 0.8f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                Box(Modifier.align(Alignment.TopStart).padding(6.dp).background(Looks.page.copy(alpha = 0.8f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)
+                    .semantics { contentDescription = "Favourite" }) {
                     KueSettings.Icon(KueSettings.Icons.STAR, 20.dp, AccentInk, filled = true)
                 }
             }
             if (watched) {
-                Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0xFF6BD08A), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0xFF6BD08A), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)
+                    .semantics { contentDescription = "Watched" }) {
                     KueSettings.Icon(KueSettings.Icons.TICK, 18.dp, Color.Black, 2.6f)
                 }
             }
