@@ -198,6 +198,7 @@ object Vault {
 
     /** Sets or clears ([id] null) where [section] keeps its backup copy. Clearing it clears the archive too. */
     fun setCopy(section: Section, id: String?) {
+        if (id != null && place(id)?.kind == PlaceKind.GOOGLE) return
         if (id == null) { copies.remove(section); archives.remove(section) } else copies[section] = id
         if (archives[section] != null && archives[section] == copies[section]) archives.remove(section)
         save()
@@ -209,7 +210,7 @@ object Vault {
      * an archived file must always be in two places, so one lost or stolen drive never loses it.
      */
     fun setArchive(section: Section, id: String?): Boolean {
-        if (id != null && (copies[section] == null || copies[section] == id || homes[section] == id)) return false
+        if (id != null && (copies[section] == null || copies[section] == id || homes[section] == id || place(id)?.kind == PlaceKind.GOOGLE)) return false
         if (id == null) archives.remove(section) else archives[section] = id
         save()
         Report.note(section.title + " archive: " + (place(id)?.let { describe(it) } ?: "none"))

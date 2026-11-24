@@ -485,8 +485,10 @@ object Ui {
             Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 val now = if (archive) Vault.archives[section] else Vault.copies[section]
                 val taken = setOfNotNull(Vault.homes[section], if (archive) Vault.copies[section] else null)
-                val choices = Vault.places.filter { it.id !in taken && !(archive && it.kind == PlaceKind.GOOGLE) }
-                if (choices.isEmpty()) Words(if (archive) "Connect your own drive first (Places › Connect a place › Home computer or network drive). Archives never go to another Google account." else "Connect another place first, in Places.", 14, K.Soft, lines = 4)
+                // Never into a Google account: Google's Drive rules need its written permission for apps that back
+                // up into Drive, and an archive there would only get round its storage limit (checked 24 Nov 2026).
+                val choices = Vault.places.filter { it.id !in taken && it.kind != PlaceKind.GOOGLE }
+                if (choices.isEmpty()) Words("Connect your own drive first: Places › Connect a place › Home computer or network drive. Backup copies and archives go to your own drives (and later OneDrive or Dropbox), not to Google accounts.", 14, K.Soft, lines = 5)
                 for (p in choices) {
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).then(if (p.id == now) Modifier.border(2.dp, K.Accent, RoundedCornerShape(14.dp)) else Modifier)
                         .clickable {
