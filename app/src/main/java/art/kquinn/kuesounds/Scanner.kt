@@ -215,6 +215,23 @@ object Scanner {
             )
             save()
         }
+        // 24 November 2026 (0.1.43): albums matched before 0.1.42 were never checked against the wider list of collection
+        // names, so a greatest hits the catalogue had matched as an ordinary album stayed. Each one whose name says it is
+        // a collection is now treated as one: its songs are looked up one by one, and any with no home become singles.
+        if (data.version < 7) {
+            val byKey = data.tracks.groupBy { keyOf(it) }
+            val hitKeys = data.releases.keys.filter { key -> byKey[key]?.any { Catalogue.looksLikeHits(it.album) } == true }.toSet()
+            data = data.copy(
+                tracks = data.tracks.map { t -> if (keyOf(t) in hitKeys) t.copy(ownLook = false, checked = true) else t },
+                releases = data.releases - hitKeys,
+                catalogueCovers = data.catalogueCovers - hitKeys,
+                art = data.art - hitKeys.filter { it in data.catalogueCovers }.toSet(),
+                collections = data.collections + hitKeys,
+                version = 7,
+            )
+            save()
+            note("found " + hitKeys.size + " matched albums that are greatest hits or collections: their songs are looked up one by one")
+        }
         read = data.tracks.count { it.tagged }
     }
 
@@ -460,6 +477,9 @@ object Scanner {
         waitingForWifi = false
         failsInARow = 0
         val loose = Library.compilationSongs(data.tracks)
+        // Songs already looked up with no home are made singles first, so a busy catalogue stopping the lookups
+        // below can't leave them on their collection (0.1.42 only did this after every lookup had finished).
+        makeOwnSingles(loose)
         val todo = Library.albums(data.tracks).filter { al -> !onItsOwn(al) && al.tracks.any { !it.checked && it.id !in loose } }
         note("step 3: " + todo.size + " albums to look up")
         var found = 0
@@ -519,20 +539,7 @@ object Scanner {
             save()
             if (songs.isNotEmpty()) note("looked up " + songs.size + " songs from compilations, greatest hits, unknown albums or with no album: " + moved + " given their own album or single")
 
-            // Songs off a greatest hits or compilation that the catalogue has neither an album nor a single for: each
-            // becomes a single of its own, so no collection is left (Kevin, 24 November 2026). Songs on an ordinary
-            // album the catalogue doesn't know ("Big Bam Boom") stay on that album. A song whose lookup failed
-            // hasn't been looked up yet, so it waits for next time.
-            val left = Library.albums(data.tracks).flatMap { al ->
-                al.tracks.filter { t -> t.ownLook && keyOf(t) !in data.releases && keyOf(t) !in data.ownSingles && fromCollection(t, al, loose) }
-            }
-            if (left.isNotEmpty()) {
-                val ids = left.map { it.id }.toSet()
-                data = data.copy(tracks = data.tracks.map { if (it.id in ids) Library.asOwnSingle(it) else it })
-                data = data.copy(ownSingles = data.ownSingles + data.tracks.filter { it.id in ids }.map { keyOf(it) })
-                save()
-                note(left.size.toString() + " songs off greatest hits or compilations had no album or single in the catalogue: each is now a single of its own")
-            }
+            makeOwnSingles(loose)
 
             // Every other song: did it come out as a single? One question per song, so only on Wi-Fi.
             val rest = data.tracks.filter { !it.singleChecked }
@@ -562,6 +569,24 @@ object Scanner {
     /** True when the last scan stopped looking for singles because the phone wasn't on Wi-Fi. */
     var waitingForWifi by mutableStateOf(false)
         private set
+
+    /**
+     * Songs off a greatest hits or compilation that the catalogue has neither an album nor a single for: each becomes
+     * a single of its own, so no collection is left (Kevin, 24 November 2026). Songs on an ordinary album the catalogue
+     * doesn't know ("Big Bam Boom") stay on that album. A song whose lookup failed hasn't been looked up yet, so it
+     * waits for next time. Needs no lookups, so it never waits on the catalogue.
+     */
+    private fun makeOwnSingles(loose: Set<String>) {
+        val left = Library.albums(data.tracks).flatMap { al ->
+            al.tracks.filter { t -> t.ownLook && keyOf(t) !in data.releases && keyOf(t) !in data.ownSingles && fromCollection(t, al, loose) }
+        }
+        if (left.isEmpty()) return
+        val ids = left.map { it.id }.toSet()
+        data = data.copy(tracks = data.tracks.map { if (it.id in ids) Library.asOwnSingle(it) else it })
+        data = data.copy(ownSingles = data.ownSingles + data.tracks.filter { it.id in ids }.map { keyOf(it) })
+        save()
+        note(left.size.toString() + " songs off greatest hits or compilations had no album or single in the catalogue: each is now a single of its own")
+    }
 
     /**
      * Whether a song sits on a greatest hits or other collection: one of a compilation's songs, on an album of mixed
