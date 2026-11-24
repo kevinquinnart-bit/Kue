@@ -105,6 +105,35 @@ object KueSettings {
         const val TICK = "M5 12.5l4.5 4.5L19 7.5"
         const val STAR = "M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1 5.9L12 17l-5.2 2.7 1-5.9-4.3-4.1 5.9-.8z"
         const val MIC = "M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M9 21h6"
+        const val CROSS = "M6.5 6.5l11 11M17.5 6.5l-11 11"
+        const val BOX = "M5 5h14v14H5z"
+        const val BOX_TICK = "M5 5h14v14H5zM8 12.5l3 3 5-6"
+
+        /** Profile pictures, drawn (they were emoji). Kept by the emoji each profile already has saved. */
+        val pictures = linkedMapOf(
+            "🙂" to ("Smile" to "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM8.5 14.5c1 1.4 2.2 2 3.5 2s2.5-.6 3.5-2M9 9.5v1M15 9.5v1"),
+            "🦊" to ("Fox" to "M4 4l4 5h8l4-5-1 9-7 7-7-7zM9.5 12.5v.5M14.5 12.5v.5M11 16h2"),
+            "🐼" to ("Panda" to "M12 20a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM5 8a2 2 0 1 1 3-2.5M19 8a2 2 0 1 0-3-2.5M8.5 11.5l2 1.5M15.5 11.5l-2 1.5M11 16h2"),
+            "🦁" to ("Lion" to "M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10zM12 2.5l2 2.2 3-.8.4 3 2.8 1.3-1.3 2.8 1.3 2.8-2.8 1.3-.4 3-3-.8-2 2.2-2-2.2-3 .8-.4-3-2.8-1.3 1.3-2.8-1.3-2.8 2.8-1.3.4-3 3 .8zM10 11v.5M14 11v.5M11 14h2"),
+            "🐸" to ("Frog" to "M4 15c0-4 3.5-6 8-6s8 2 8 6-3.5 5-8 5-8-1-8-5zM8 6.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM16 6.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM8.5 15.5c2 1.3 5 1.3 7 0"),
+            "🐙" to ("Octopus" to "M6 11a6 6 0 0 1 12 0v2H6zM7 13c0 3-2 4-3 5M10 13v5c0 1-1 2-2 2M14 13v5c0 1 1 2 2 2M17 13c0 3 2 4 3 5M10 9.5v.5M14 9.5v.5"),
+            "🚀" to ("Rocket" to "M12 2.5c3 2 4.5 5.5 4.5 9.5l-2 4h-5l-2-4c0-4 1.5-7.5 4.5-9.5zM12 8a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3zM7.5 12.5L5 15v3l4.5-2M16.5 12.5L19 15v3l-4.5-2M10.5 18.5L12 21.5l1.5-3"),
+            "⚽" to ("Football" to "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 8l3.3 2.4-1.3 3.8h-4l-1.3-3.8zM12 3v5M15.3 10.4l5-1.6M14 14.2l3 4.2M10 14.2l-3 4.2M8.7 10.4l-5-1.6"),
+            "🎮" to ("Game" to "M7 8h10a4 4 0 0 1 4 4v3a3 3 0 0 1-5.4 1.8L14.5 15h-5l-1.1 1.8A3 3 0 0 1 3 15v-3a4 4 0 0 1 4-4zM7.5 11v3M6 12.5h3M15.5 12h.5M17.5 13.5h.5"),
+            "🎸" to ("Guitar" to "M14 10l6.5-6.5M18.5 2.5l3 3M12.8 8.7a3.5 3.5 0 0 0-5.3.3c-.9 1.1-.4 2.6-1.6 3.4-1.4.9-3.4.9-3.4 3.4 0 2.7 2.4 5.2 5.2 5.2 2.5 0 2.5-2 3.4-3.4.8-1.2 2.3-.7 3.4-1.6a3.5 3.5 0 0 0 .3-5.3zM9 13.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3z"),
+            "🌟" to ("Star" to STAR),
+            "🍕" to ("Pizza" to "M4 6c5-2.7 11-2.7 16 0L12 21zM5.5 8.5c4-1.8 9-1.8 13 0M10 10.5v.5M14 12v.5M11.5 15v.5"),
+        )
+
+        /**
+         * A tick, cross, star or box written at the start of a line ("✓ working"), as a drawn icon and the words
+         * left: (icon, filled, words). No icon when the line starts with none of them.
+         */
+        fun lead(text: String): Triple<String?, Boolean, String> {
+            val marks = listOf("★" to (STAR to true), "✓" to (TICK to false), "✗" to (CROSS to false), "☑" to (BOX_TICK to false), "☐" to (BOX to false))
+            for ((m, icon) in marks) if (text.startsWith("$m ")) return Triple(icon.first, icon.second, text.removePrefix(m).trimStart())
+            return Triple(null, false, text)
+        }
     }
 
     // ---- Look and feel, kept on this phone and in Android's backup ----------------------------------------------
