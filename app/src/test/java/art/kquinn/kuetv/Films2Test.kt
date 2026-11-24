@@ -28,7 +28,7 @@ class Films2Test {
         val shown: (String) -> Boolean = { rule.onAllNodes(hasText(it, substring = true, ignoreCase = true)).fetchSemanticsNodes().isNotEmpty() }
         val all = rule.onAllNodes(androidx.compose.ui.test.hasText("", substring = true), useUnmergedTree = true).fetchSemanticsNodes()
             .mapNotNull { it.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.Text) { null }?.joinToString(" ") }
-        assertTrue("on screen: " + all.joinToString(" | "), shown("Favourite films") && shown("A Favourite Film"))
+        assertTrue("on screen: " + all.joinToString(" | "), shown("Favourite movies") && shown("A Favourite Film"))
         assertTrue(shown("Favourite series") && shown("A Favourite Show"))
     }
 }
