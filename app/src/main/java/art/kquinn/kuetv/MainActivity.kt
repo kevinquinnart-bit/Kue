@@ -375,6 +375,10 @@ private fun App() {
     var healthOpen by remember { mutableStateOf(false) }
     // A film or episode that can play from an add-on or from the provider's own copy, waiting for the user to pick.
     var choice by remember { mutableStateOf<Playing?>(null) }
+    // A live channel picked while a recording is using every screen the provider allows: asked about first.
+    var clash by remember { mutableStateOf<Playing?>(null) }
+    // How many screens the provider allows at once, asked when the lists are in; null when it doesn't say.
+    var screensAllowed by remember { mutableStateOf<Int?>(null) }
     // What the lists show: everything the provider sent, less the categories chosen to be hidden. Made away from the
     // screen, with the channels' rows and Live TV's lists, as [built] is: made on the screen it held the remote up for
     // 10 seconds at a time (Kevin's report, 23 November 2026: Versions.group under HomeScreen). The last lists stay up
@@ -740,6 +744,11 @@ private fun App() {
             for (t in SeriesLinks.showings(link, listing, System.currentTimeMillis())) if (t.id !in set) TimedStore.add(context, t)
         }
     }
+    // How many screens the provider allows at once, for the warning before watching while a recording is made.
+    LaunchedEffect(library?.account) {
+        val acc = library?.account ?: return@LaunchedEffect
+        screensAllowed = withContext(Dispatchers.IO) { runCatching { Provider.subscription(acc)?.screens }.getOrNull() }
+    }
     // Opening KueTV on a channel, as chosen in Settings › Watching: once, when the lists are first in.
     var openedOn by remember { mutableStateOf(false) }
     LaunchedEffect(library != null) {
@@ -866,6 +875,15 @@ private fun App() {
                     // offered above them (0.1.91) confused more than they helped.
                 )
             }
+            clash != null -> {
+                val c = clash!!
+                ScreenClashScreen(
+                    c.items.getOrNull(c.index)?.name.orEmpty(), TimedService.now(context), screensAllowed ?: 1,
+                    onStop = { recs -> recs.forEach { TimedService.stop(it.id) }; clash = null; playing = c },
+                    onWatch = { clash = null; playing = c },
+                    onCancel = { clash = null },
+                )
+            }
             choice != null -> {
                 val c = choice!!
                 CopyChoiceScreen(
@@ -969,6 +987,10 @@ private fun App() {
                         // From a catalogue, with no copy at the provider and no add-on that gives streams.
                         kueToast(context, "Nothing to play this from yet. Add an add-on that gives streams, in Settings › Add-ons.")
                     } else if (!live && item?.find != null && item.url.isNotEmpty()) choice = Playing(items, index, false)
+                    // From the provider while recordings fill every screen it allows: warned first (Kevin, 24 November 2026).
+                    else if (live && item != null && (item.streams.isEmpty() || item.streams.any { s -> !s.label.startsWith("Free ") }) && screensAllowed.let { n -> n != null && TimedService.now(context).size >= n }) {
+                        clash = Playing(items, index, true)
+                    }
                     else playing = Playing(items, index, live)
                 },
                 onEdit = { editing = true },
@@ -4412,6 +4434,37 @@ private fun DriveSignInScreen(onDone: () -> Unit) {
 private fun streamFinder(addOns: List<AddOn>, type: String, name: String, season: Int?, episode: Int?, lang: Lang, knownId: String? = null): (suspend () -> Search)? {
     if (addOns.none { it.streams }) return null
     return { withContext(Dispatchers.IO) { AddOns.streamsFor(addOns, type, name, season, episode, lang, knownId) } }
+}
+
+/**
+ * Before a provider's channel plays while recordings take every screen the provider allows: what is recording, and
+ * the choice of stopping it to watch, watching anyway (it may keep stopping), or not.
+ */
+@Composable
+private fun ScreenClashScreen(name: String, recs: List<Timed>, screens: Int, onStop: (List<Timed>) -> Unit, onWatch: () -> Unit, onCancel: () -> Unit) {
+    val phone = LocalPhone.current
+    BackHandler { onCancel() }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        if (!phone) runCatching { first.requestFocus() }
+    }
+    val what = recs.joinToString(", ") { it.channel + if (it.title.isNotBlank() && it.title != "recorded by time") " · " + it.title else "" }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = if (phone) 12.dp else 220.dp, vertical = if (phone) 12.dp else 40.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text("● Recording now", color = Accent, fontSize = Sizes.TITLE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
+        Note(
+            what + (if (recs.size == 1) " is" else " are") + " being recorded. Your provider allows " + (if (screens == 1) "1 screen" else "$screens screens") +
+                " at once, and the recording is using " + (if (screens == 1) "it" else "them") + ", so $name may keep stopping and starting.",
+        )
+        Spacer(Modifier.height(8.dp))
+        FocusRow("Stop the recording and watch $name", { onStop(recs) }, Modifier.focusRequester(first), look = Look.MAIN, below = "What it has recorded so far is kept in Recordings")
+        FocusRow("Watch anyway", onWatch, look = Look.OTHER, below = "The recording carries on; both may stop and start")
+        FocusRow("Cancel", onCancel, look = Look.OTHER)
+        Note("What is set to record is in Recordings. In the TV Guide, OK on a later programme sets a reminder; OK again records it; a third time records every showing; a fourth sets nothing.")
+    }
 }
 
 /** A film or episode that can play from two places: the user picks which. It opens on the one picked last time. */

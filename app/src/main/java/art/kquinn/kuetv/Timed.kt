@@ -186,6 +186,11 @@ class TimedService : Service() {
         val http = Provider.http.newBuilder().readTimeout(20, TimeUnit.SECONDS).build()
         Recordings.timedNow += file
         Report.note("Timed recording", "started: " + timed.channel + " · " + timed.title)
+        // Said on screen too, so a recording set earlier (or every showing of a series) doesn't go unnoticed (Kevin, 24 November 2026).
+        val app = applicationContext
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            if (Screen.visible) kueToast(app, "● Recording now: " + timed.channel + (if (timed.title.isNotBlank()) " · " + timed.title else "") + ". It uses one of your provider's screens.")
+        }
         var failures = 0
         var lastFailure = ""
         var written = 0L
@@ -193,12 +198,14 @@ class TimedService : Service() {
         try {
             BufferedOutputStream(FileOutputStream(file), 64 * 1024).use { out ->
                 val buffer = ByteArray(64 * 1024)
-                while (System.currentTimeMillis() < end && failures < 40) {
+                while (System.currentTimeMillis() < end && failures < 40 && timed.id !in stopping) {
                     try {
                         http.newCall(Request.Builder().url(timed.url).header("User-Agent", Provider.USER_AGENT).build()).execute().use { response ->
                             if (!response.isSuccessful) throw IOException("The provider answered " + response.code)
                             val input = response.body.byteStream()
                             while (System.currentTimeMillis() < end) {
+                                // Stopped from the warning before watching a channel: what was recorded is kept.
+                                if (timed.id in stopping) return
                                 val count = input.read(buffer)
                                 // A saved catch-up programme is finished when the provider's copy of it ends.
                                 if (count < 0 && timed.whole && written > 0) return
@@ -225,9 +232,10 @@ class TimedService : Service() {
             // The file couldn't be written. What was written is kept.
         } finally {
             Recordings.timedNow -= file
+            val stopped = stopping.remove(timed.id)
             Report.note(
                 "Timed recording",
-                "ended: " + timed.title + ", " + file.length() / (1024 * 1024) + " MB" + if (lastFailure.isEmpty()) "" else ", last problem: $lastFailure",
+                (if (stopped) "stopped early: " else "ended: ") + timed.title + ", " + file.length() / (1024 * 1024) + " MB" + if (lastFailure.isEmpty()) "" else ", last problem: $lastFailure",
             )
             if (file.length() == 0L) file.delete()
         }
@@ -241,6 +249,17 @@ class TimedService : Service() {
 
         /** The recordings being made right now, by their number. */
         val running: MutableSet<Int> = ConcurrentHashMap.newKeySet()
+
+        /** Recordings asked to stop early, by their number. */
+        private val stopping: MutableSet<Int> = ConcurrentHashMap.newKeySet()
+
+        /** The programmes being recorded right now. */
+        fun now(context: Context): List<Timed> = TimedStore.all(context).filter { it.id in running }
+
+        /** Stops a recording being made; what it has recorded so far is kept and goes to Recordings. */
+        fun stop(id: Int) {
+            if (id in running) stopping += id
+        }
 
         fun start(context: Context, id: Int) {
             runCatching { context.startForegroundService(Intent(context, TimedService::class.java).putExtra("id", id)) }
