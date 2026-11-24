@@ -1923,7 +1923,7 @@ private fun MainScreen(
             val favGroups = withContext(Dispatchers.Default) { library.liveIndex.favourites(favs) }
             val liveFavs = favGroups.isNotEmpty()
             // Catch-up only when a favourite has catch-up, so it never opens on an empty list.
-            val catchUpFavs = favGroups.any { g -> g.versions.any { it.channel.catchupDays > 0 } }
+            val catchUpFavs = liveFavs
             when (section) {
                 Section.LIVE -> if (liveFavs && state.liveCategory != FAVOURITES) {
                     state.liveCategory = FAVOURITES
@@ -2860,6 +2860,11 @@ private fun MainScreen(
                             )
                             val shiftOn = remember(Choices.changes) { Choices.timeShift(context) }
                             FocusRow("Pause and rewind live TV: " + if (shiftOn) "on" else "off", { Choices.timeShift(context, !shiftOn) }, look = Look.OTHER)
+                            val appFirst = remember(Choices.changes) { Choices.catchUpAppFirst(context) }
+                            FocusRow(
+                                "Catch-up plays: " + if (appFirst) "in the channel's own app first" else "from your provider first", { Choices.catchUpAppFirst(context, !appFirst) },
+                                look = Look.OTHER, below = "OK to switch. When one hasn't got the programme, the other is tried",
+                            )
                             if (!phone) {
                                 val smallTv = remember(Choices.changes) { Choices.smallTv(context) }
                                 FocusRow("Small TV while browsing: " + if (smallTv) "on" else "off", { Choices.smallTv(context, !smallTv) }, look = Look.OTHER)
@@ -3392,8 +3397,9 @@ private fun Pane.ChannelGuide(
         Column(fill()) { Note("The guide and catch-up need a login: server address, username and password. A playlist link on its own doesn't give them.") }
         return
     }
-    // One row for each channel, as in Live TV. For catch-up: the channels with a version the provider keeps.
-    val channels = remember(library, catchUp) { if (catchUp) library.groups.filter { g -> g.versions.any { it.channel.catchupDays > 0 } } else library.groups }
+    // One row for each channel, as in Live TV. Catch-up has every channel too (Kevin, 24 November 2026): past programmes
+    // are shown from the guide, and play in the channel's own app or from the provider, whichever has them.
+    val channels = library.groups
     if (channels.isEmpty()) {
         Column(fill()) { Note(if (catchUp) "Your provider marks no channel as having catch-up." else "Your provider listed no channels.") }
         return
@@ -3407,9 +3413,16 @@ private fun Pane.ChannelGuide(
         return
     }
     val scope = rememberCoroutineScope()
-    val categories = remember(library, channels) {
-        val used = channels.flatMapTo(HashSet()) { g -> g.versions.map { it.channel.categoryId } }
-        library.liveCategories.filter { it.id in used }
+    val context = LocalContext.current
+    // Catch-up's categories are Live TV's: its topics (Sport, News, …) when Live TV is grouped, otherwise the provider's own.
+    val grouped = remember(Choices.changes) { Choices.groupedLive(context) }
+    val index = library.liveIndex
+    val categories = remember(library, channels, catchUp, grouped) {
+        if (catchUp && grouped) index.topicCats
+        else {
+            val used = channels.flatMapTo(HashSet()) { g -> g.versions.map { it.channel.categoryId } }
+            library.liveCategories.filter { it.id in used }
+        }
     }
     Categories(categories, pick.category, pick.categoryList) {
         if (it != pick.category) {
@@ -3421,9 +3434,10 @@ private fun Pane.ChannelGuide(
         val isFav: (ChannelGroup) -> Boolean = { g -> g.versions.any { Favourites.key(it.channel, true) in favs } }
         // In the order set in Live TV's Favourites.
         val rank: (ChannelGroup) -> Int = { g -> favourites?.rank(g.versions.map { Favourites.key(it.channel, true) }) ?: 0 }
-        when (pick.category) {
-            ALL -> channels
-            FAVOURITES -> channels.filter(isFav)
+        when {
+            pick.category == ALL -> channels
+            pick.category == FAVOURITES -> channels.filter(isFav)
+            pick.category.startsWith(Topics.PREFIX) -> index.byTopic[pick.category.removePrefix(Topics.PREFIX)].orEmpty()
             else -> channels.filter { g -> g.versions.any { it.channel.categoryId == pick.category } }
         }.let { list ->
             // Favourites first, in that order, in every category; the rest as before.
@@ -3443,7 +3457,7 @@ private fun Pane.ChannelGuide(
         pick.pickDay = null
         scope.launch { pick.programmeList.scrollToItem(0) }
         // The version asked about: for catch-up the best one the provider keeps, else the one that plays first.
-        val version = if (catchUp) channel.versions.first { it.channel.catchupDays > 0 } else channel.versions[channel.start]
+        val version = if (catchUp) channel.versions.firstOrNull { it.channel.catchupDays > 0 } ?: channel.versions[channel.start] else channel.versions[channel.start]
         pick.open = version.channel.copy(name = channel.name)
     }
     if (!catchUp && !LocalPhone.current) {
@@ -3532,11 +3546,42 @@ private fun Pane.ProgrammePage(
     val timed = remember(TimedStore.changes) { TimedStore.all(context) }
     val reminders = remember(Reminders.changes) { Reminders.all(context) }
     val linksNow = SeriesLinks.changes
+    // Catch-up: where a past programme plays. The channel's own app when it can open the programme, and the provider when
+    // it keeps it, in the order set in Settings › Watching; failing both, the app on its home page (Kevin, 24 November 2026).
+    if (catchUp) LaunchedEffect(Unit) { RteCatchUp.load() }
+    val appFirst = remember(Choices.changes) { Choices.catchUpAppFirst(context) }
+    val app = remember(channel.name) { CatchUpApps.appFor(channel.name) }
+    val rteNow = RteCatchUp.list
+    val providerHas: (Programme) -> Boolean = { p -> channel.catchupDays > 0 && p.startMs >= now - windowMs }
+    val inApp: (Programme) -> Boolean = { p -> rteNow.size >= 0 && CatchUpApps.programmeLink(channel.name, p.title) != null }
+    val whereText: (Programme) -> String = { p ->
+        val appName = app?.title?.substringBefore(" (").orEmpty()
+        when {
+            appFirst && inApp(p) -> "in " + appName
+            providerHas(p) -> "from your provider"
+            inApp(p) -> "in " + appName
+            app != null -> "in " + appName + " (find it there)"
+            else -> "not kept anywhere"
+        }
+    }
+    val playPast: (Programme, String) -> Unit = { p, key ->
+        val provider = { onPlay(listOf(catchupPlayable(channel.name, account, channel.id, p, serverAheadSec)), 0, false, key) }
+        when {
+            appFirst && CatchUpApps.openProgramme(context, channel.name, p.title) -> Unit
+            providerHas(p) -> provider()
+            CatchUpApps.openProgramme(context, channel.name, p.title) -> Unit
+            app != null -> {
+                kueToast(context, "Opening " + app.title.substringBefore(" (") + ". Find \"" + p.title.ifBlank { "the programme" } + "\" there.")
+                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { CatchUpApps.openApp(context, app) }
+            }
+            else -> kueToast(context, "Your provider doesn't keep this channel, and it has no app to watch it in.")
+        }
+    }
     Column(fill()) {
         Heading(
             channel.name + when {
                 byTime -> " · record by time"
-                catchUp -> " · catch-up · hold OK on a programme to save it to Recordings"
+                catchUp -> " · catch-up" + if (channel.catchupDays > 0) " · hold OK on one from your provider to save it to Recordings" else ""
                 else -> " · guide · OK on a later programme: ◆ reminder, then ● record, then neither"
             },
         )
@@ -3610,12 +3655,14 @@ private fun Pane.ProgrammePage(
                 val all = result.getOrNull()
                 val rows = when {
                     all == null -> emptyList()
-                    catchUp -> all.filter { it.startMs < now && it.startMs >= now - windowMs }.sortedByDescending { it.startMs }
+                    // Every past programme in the guide, kept by the provider or not (at most a week back).
+                    catchUp -> all.filter { it.startMs < now && it.startMs >= now - maxOf(windowMs, 7 * DAY_MS) }.sortedByDescending { it.startMs }
                     else -> all.filter { it.stopMs > now }
                 }
-                val lead = if (catchUp) 1 else 0
+                val lead = if (catchUp && channel.catchupDays > 0) 1 else 0
                 LazyColumn(Modifier.fillMaxSize(), state = pick.programmeList) {
-                    if (catchUp) item(key = "pick") {
+                    // Picking a time needs the provider's own catch-up.
+                    if (catchUp && channel.catchupDays > 0) item(key = "pick") {
                         FocusRow("Pick a date and time", { pick.pickDay = CHOOSING_DAY }, Modifier.focusRequester(first))
                     }
                     if (!catchUp) item(key = "bytime") {
@@ -3623,7 +3670,11 @@ private fun Pane.ProgrammePage(
                     }
                     if (all == null) item(key = "problem") { Note(result.exceptionOrNull()?.message ?: "Couldn't load the guide for this channel.") }
                     else if (rows.isEmpty()) item(key = "none") {
-                        Note(if (catchUp) "Your provider sent no past programmes for this channel. Pick a date and time instead." else "Your provider sent no guide for this channel.")
+                        Note(
+                            if (!catchUp) "Your provider sent no guide for this channel."
+                            else if (channel.catchupDays > 0) "Your provider sent no past programmes for this channel. Pick a date and time instead."
+                            else "The guide has no past programmes for this channel.",
+                        )
                     }
                     if (!catchUp && rows.isEmpty()) item(key = "watch") {
                         FocusRow("Watch " + channel.name, { onPlay(listOf(watch), 0, true, rowKey) }, Modifier.focusRequester(first))
@@ -3637,12 +3688,13 @@ private fun Pane.ProgrammePage(
                         val remind = Reminder.make(channel.id, channel.name, programme.title.ifBlank { "Programme" }, programme.startMs, programme.stopMs)
                         val reminded = reminders.any { it.id == remind.id }
                         ProgrammeRow(
-                            whenText = (if (linksNow >= 0 && SeriesLinks.has(context, channel.name, programme.title)) "●● Every showing · " else if (set) "● Will record · " else "") + (if (reminded) "◆ Reminder · " else "") + (if (onNow) "Now · " else day(programme.startMs) + " · ") + time(programme.startMs) + " to " + time(programme.stopMs),
+                            whenText = (if (linksNow >= 0 && SeriesLinks.has(context, channel.name, programme.title)) "●● Every showing · " else if (set) "● Will record · " else "") + (if (reminded) "◆ Reminder · " else "") + (if (onNow) "Now · " else day(programme.startMs) + " · ") + time(programme.startMs) + " to " + time(programme.stopMs) +
+                                (if (catchUp) " · " + whereText(programme) else ""),
                             title = programme.title.ifBlank { "No title" },
                             description = programme.description,
                             onClick = {
                                 if (catchUp) {
-                                    onPlay(listOf(catchupPlayable(channel.name, account, channel.id, programme, serverAheadSec)), 0, false, key)
+                                    playPast(programme, key)
                                 } else if (later) {
                                     // A programme that hasn't started: OK sets a reminder, again sets it to record, again sets neither.
                                     stepLater(context, plan, remind, reminded, set, day(programme.startMs) + " " + time(programme.startMs), channel.id)
@@ -3653,7 +3705,7 @@ private fun Pane.ProgrammePage(
                             modifier = (if (i == 0 && lead == 0) Modifier.focusRequester(first) else Modifier)
                                 .then(if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier),
                             // Catch-up: holding OK saves the whole programme to Recordings, without watching it.
-                            onHold = if (!catchUp) null else ({
+                            onHold = if (!catchUp || !providerHas(programme)) null else ({
                                 val p = catchupPlayable(channel.name, account, channel.id, programme, serverAheadSec)
                                 TimedStore.add(context, Timed.whole(channel.name, programme.title.ifBlank { "Programme" }, p.url, programme.startMs, programme.stopMs - programme.startMs, System.currentTimeMillis()))
                                 kueToast(context, "Saving \"" + programme.title.ifBlank { "this programme" } + "\" to Recordings. It carries on with the app closed.")

@@ -354,6 +354,75 @@ object LiveInApps {
 }
 
 /**
+ * Catch-up in the channel's own app (Kevin, 24 November 2026): which app holds a channel's past programmes, and the
+ * programme's own page in it where a link is known. RTÉ Player's programme pages were tried on Kevin's TV on
+ * 20-23 November 2026. Channel 4's programme pages (channel4.com/programmes/<name>) haven't been tried on the TV yet.
+ * ITVX, iPlayer, 5, Virgin Media Play, TG4 and the rest take no link to a programme, so they open on their home page.
+ */
+object CatchUpApps {
+    private val marks = Regex("\\p{Mn}+")
+    private val tag = Regex("^[a-z]{2,3}\\s*[:|]\\s*")
+    private val versionWords = Regex("\\b(hd|fhd|uhd|4k|sd|uk|london|ni|\\(.*?\\))\\b")
+
+    private fun plain(text: String): String =
+        java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace("&", "and").replace(Regex("[^a-z0-9]"), "")
+
+    private fun channelKey(name: String): String =
+        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace(tag, "").replace(versionWords, " ")
+            .replace("&", "").replace(Regex("[^a-z0-9+]"), "")
+
+    /** The app a channel's past programmes are in, by its name in [TvAppList]. Null for +1 channels and channels with no app. */
+    fun appFor(channelName: String): TvAppList.TvApp? {
+        val n = channelKey(channelName)
+        if (n.contains("+1") || n.contains("plus1")) return null
+        val title = when (n) {
+            "bbcone", "bbc1", "bbctwo", "bbc2", "bbcthree", "bbc3", "bbcfour", "bbc4", "bbcnews", "bbcscotland", "bbcalba", "cbbc", "cbeebies", "bbcparliament" -> "BBC iPlayer"
+            "itv", "itv1", "utv", "itv2", "itv3", "itv4", "itvquiz", "itvbe", "stv" -> if (n == "stv") "STV Player" else "ITVX"
+            "channel4", "c4", "ch4", "4seven", "e4", "more4", "film4" -> "Channel 4"
+            "channel5", "5", "5star", "5usa", "5action", "5select", "5drama" -> "5 (Channel 5)"
+            "rteone", "rte1", "rteonehd", "rte2", "rtetwo", "rtenews", "rtenewsnow", "rtejr", "rtejunior" -> "RTÉ Player"
+            "virginmediaone", "virginmedia1", "virginone", "virginmediatwo", "virginmedia2", "virginmediathree", "virginmedia3", "virginmediamore" -> "Virgin Media Play"
+            "tg4" -> "TG4 Player"
+            "dave", "udave", "yesterday", "uyesterday", "alibi", "ualibi", "eden", "ueden", "gold", "ugold", "w", "uw", "drama", "udrama" -> "U (UKTV)"
+            else -> return null
+        }
+        return TvAppList.all.firstOrNull { it.title == title }
+    }
+
+    /** The programme's own page in its app, as (link, app package), or null where no link is known. */
+    fun programmeLink(channelName: String, title: String): Pair<String, String>? {
+        val app = appFor(channelName) ?: return null
+        val want = plain(title)
+        if (want.isEmpty()) return null
+        return when (app.title) {
+            "RTÉ Player" -> RteCatchUp.list.firstOrNull { plain(it.title) == want }?.let { RteCatchUp.link(it) to "com.twentyfouri.tvbridge.rte" }
+            "Channel 4" -> {
+                val slug = java.text.Normalizer.normalize(title, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace("&", "and")
+                    .replace("'", "").replace(Regex("[^a-z0-9]+"), "-").trim('-')
+                if (slug.isEmpty()) null else ("https://www.channel4.com/programmes/" + slug) to "com.channel4.ondemand"
+            }
+            else -> null
+        }
+    }
+
+    /** Opens the programme's page in its app. False when there is no link, or the app isn't on the TV. */
+    fun openProgramme(context: Context, channelName: String, title: String): Boolean {
+        val (link, pkg) = programmeLink(channelName, title) ?: return false
+        return runCatching {
+            context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        }.isSuccess
+    }
+
+    /** Opens the channel's app on its home page; if it isn't on the TV, the app store on a search for it. Call off the screen's thread. */
+    fun openApp(context: Context, app: TvAppList.TvApp): Boolean {
+        val at = TvAppList.all.indexOf(app)
+        val pkg = TvAppsOnDevice.find(context).getOrNull(at)?.packageName
+        if (pkg != null && TvAppsOnDevice.open(context, pkg)) return true
+        return TvAppsOnDevice.openStore(context, app.storeSearch)
+    }
+}
+
+/**
  * RTÉ Player catch-up: the series RTÉ One and RTÉ2 showed in the last 8 days, newest first, from RTÉ's own
  * programme feeds. Each opens its page in RTÉ Player, with Watch now and All Episodes: the series link was tried
  * on Kevin's TV on 20 November 2026 (Fair City, The Late Late Show, Prime Time). RTÉ marks each programme for

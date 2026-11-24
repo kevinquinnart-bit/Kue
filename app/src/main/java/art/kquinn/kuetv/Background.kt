@@ -140,6 +140,16 @@ object Choices {
     }
 
     /** Pause and rewind for live TV: the channel is kept in a copy on the device while it plays. */
+    /**
+     * Catch-up: true plays a past programme in the channel's own app first (RTÉ Player, Channel 4) and from the
+     * provider second; false the other way round (Kevin, 24 November 2026: the app first, with a switch).
+     */
+    fun catchUpAppFirst(context: Context): Boolean = prefs(context).getBoolean("catchUpAppFirst", true)
+    fun catchUpAppFirst(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("catchUpAppFirst", on).apply()
+        changes++
+    }
+
     fun timeShift(context: Context): Boolean = prefs(context).getBoolean("timeShift", true)
     fun timeShift(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("timeShift", on).apply()
