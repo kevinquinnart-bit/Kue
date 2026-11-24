@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android's own backup of KueSounds (Android 11 and older): the same as the backup kept in the music Drive,
+     the music's details as read and looked up, changes, podcast shows and where each episode got to, settings.
+     Not the Google sign-in. Free, private, and not counted against the person's Drive space. -->
+<full-backup-content>
+    <include domain="file" path="library.json" />
+    <include domain="file" path="changes.json" />
+    <include domain="file" path="podcast-shows.json" />
+    <include domain="sharedpref" path="podcasts.xml" />
+    <include domain="sharedpref" path="podcast-positions.xml" />
+    <include domain="sharedpref" path="notices.xml" />
+</full-backup-content>
