@@ -2157,10 +2157,11 @@ object Pip {
 
 /**
  * Words in at most [lines] lines. When there are more, they scroll up slowly by themselves, wait at the
- * end, and start again from the top.
+ * end, and start again from the top. [msPerDot]: how slowly (Kevin asked for the Home banner and the Films and
+ * Series box to go a touch slower, 24 November 2026).
  */
 @Composable
-internal fun AutoScrollText(text: String, color: Color, fontSize: androidx.compose.ui.unit.TextUnit, lines: Int) {
+internal fun AutoScrollText(text: String, color: Color, fontSize: androidx.compose.ui.unit.TextUnit, lines: Int, msPerDot: Int = 30) {
     val scroll = rememberScrollState()
     val lineHeight = fontSize * 1.3f
     val most = with(androidx.compose.ui.platform.LocalDensity.current) { lineHeight.toDp() } * lines
@@ -2172,7 +2173,7 @@ internal fun AutoScrollText(text: String, color: Color, fontSize: androidx.compo
         if (scroll.maxValue <= 0) return@LaunchedEffect
         while (true) {
             delay(3_000)
-            scroll.animateScrollTo(scroll.maxValue, androidx.compose.animation.core.tween(durationMillis = (scroll.maxValue * 30).coerceAtLeast(1_500), easing = androidx.compose.animation.core.LinearEasing))
+            scroll.animateScrollTo(scroll.maxValue, androidx.compose.animation.core.tween(durationMillis = (scroll.maxValue * msPerDot).coerceAtLeast(1_500), easing = androidx.compose.animation.core.LinearEasing))
             delay(3_000)
             scroll.scrollTo(0)
         }

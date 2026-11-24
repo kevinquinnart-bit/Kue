@@ -5432,8 +5432,9 @@ private fun AboutStrip(name: String?, about: About?, poster: String = "", catalo
         Column(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 14.dp, vertical = 8.dp)) {
             Text(name, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (shown != null && shown.line.isNotBlank()) Text(shown.line, color = AccentInk, fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // Four lines, and the rest scrolls up slowly by itself instead of being cut off (Kevin, 24 November 2026).
             if (shown != null && shown.plot.isNotBlank()) {
-                Text(shown.plot, color = Soft, fontSize = 15.sp, lineHeight = 19.sp, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+                Box(Modifier.padding(top = 2.dp).weight(1f, fill = false)) { AutoScrollText(shown.plot, Soft, 15.sp, 4, msPerDot = 45) }
             }
         }
     }
@@ -5665,7 +5666,8 @@ private fun HomeScreen(
             // Until it has been fetched (or with no internet): the channel last watched, as before.
             LaunchedEffect(Unit) { Trending.load(context) }
             val slides = Trending.slides
-            if (slides.isNotEmpty()) TrendingBanner(slides, clock, Modifier.fillMaxWidth().height(216.dp))
+            // 256 tall (216 before 24 November 2026), for 2 or 3 more lines of what each one is about.
+            if (slides.isNotEmpty()) TrendingBanner(slides, clock, Modifier.fillMaxWidth().height(256.dp))
             else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6122,8 +6124,14 @@ private fun TrendingBanner(slides: List<Trending.Slide>, clock: String, modifier
                     // Nothing cut off (Kevin, 23 November 2026): a long name takes two lines, and words that don't fit
                     // scroll up by themselves.
                     Text(s.title, color = Ink, fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    if (s.about.isNotBlank()) Box(Modifier.padding(top = 2.dp).weight(1f, fill = false)) { AutoScrollText(s.about, Soft, 15.sp, if (s.title.length > 26) 3 else 4) }
-                    Spacer(Modifier.weight(1f))
+                    // The words take all the room down to the bottom, in whole lines, up to 7 (Kevin, 24 November 2026:
+                    // 2 or 3 more lines, and a touch slower), and scroll up by themselves when there are more.
+                    if (s.about.isNotBlank()) {
+                        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.padding(top = 2.dp).weight(1f).fillMaxWidth()) {
+                            val line = with(androidx.compose.ui.platform.LocalDensity.current) { (15.sp * 1.3f).toDp() }
+                            AutoScrollText(s.about, Soft, 15.sp, (maxHeight / line).toInt().coerceIn(1, 7), msPerDot = 45)
+                        }
+                    } else Spacer(Modifier.weight(1f))
                     if (focused) Text("◀ ▶ more · OK opens the app", color = Soft, fontSize = 13.sp, maxLines = 1)
                 }
             }
