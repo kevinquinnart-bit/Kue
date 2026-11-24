@@ -4,6 +4,8 @@ name: KueVault
 on:
   push:
     branches: [ kuevault ]
+    # KueVault Shrink (the PC program) has its own build.
+    paths-ignore: [ 'pc/**', '.github/workflows/kuevault-shrink.yml' ]
   workflow_dispatch:
 
 permissions:

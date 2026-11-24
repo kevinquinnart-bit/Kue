@@ -1,0 +1,8 @@
+dist/
+build/
+ffmpeg/
+unzipped/
+*.spec
+__pycache__/
+.pytest_cache/
+selftest.txt

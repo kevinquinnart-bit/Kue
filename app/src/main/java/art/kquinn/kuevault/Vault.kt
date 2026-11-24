@@ -11,7 +11,7 @@ import com.google.gson.JsonParser
 enum class Section(val title: String, val colour: Long, val ready: Boolean, val coming: String) {
     PHOTOS("Photos", 0xFFFFD23F, false, "Photos come with KuePhotos"),
     MUSIC("Music", 0xFFF28C38, false, "Music opens in KueSounds"),
-    FILMS("Films", 0xFF6BD08A, false, "Films open in KueTV"),
+    FILMS("Films", 0xFF6BD08A, false, "Films open in KueTV. Make them smaller first with KueVault Shrink on your PC (Settings)"),
     DOCUMENTS("Documents", 0xFFC9A3FF, true, ""),
     /** Everything the person owns, each with its receipt, warranty, manual and photos. */
     THINGS("My things", 0xFF4FD1C5, true, ""),

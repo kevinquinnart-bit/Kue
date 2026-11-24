@@ -4,6 +4,8 @@ One safe home for your files, across the storage you own: Google Drive (any numb
 
 My things keeps a file for everything you own: its receipt or invoice, warranty, manual and photos. Receipts and labels are scanned and read on the phone (make, model, serial number, shop, date, price, warranty); a product barcode is looked up in Open Products Facts; Amazon's order history (from "Request your data") brings in past orders. Manuals can be asked questions, typed or spoken, and the answer (the manual's own words, with its page) read out. A warranty reminder comes 30 and 7 days before it ends.
 
+KueVault Shrink (pc/shrink) is a Windows program that makes films smaller before they go in: the picture re-made in H.265, sound and subtitles copied, every copy checked (length, tracks, three parts played through) before it takes the film's place, and the old film sent to the Recycle Bin or a "Before Shrink" folder, never deleted. Download: https://github.com/kevinquinnart-bit/Kue/releases/download/kueshrink/KueVaultShrink.exe
+
 The home-computer test runs against a real shared folder when one is given: KUEVAULT_SMB=host/share/user/password.
 
 Every push to the `kuevault` branch builds the app and publishes it as `KueVault.apk` on the `kuevault` download:

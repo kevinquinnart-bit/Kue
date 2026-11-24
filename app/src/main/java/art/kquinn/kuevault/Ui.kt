@@ -144,6 +144,9 @@ internal fun Title(text: String, onBack: (() -> Unit)? = null) {
     }
 }
 
+/** Where KueVault Shrink, the Windows program, is downloaded. */
+const val SHRINK = "https://github.com/kevinquinnart-bit/Kue/releases/download/kueshrink/KueVaultShrink.exe"
+
 object Ui {
     @Composable
     fun App(asks: Asks) {
@@ -627,6 +630,14 @@ object Ui {
                 Words("KueVault " + BuildConfig.VERSION_NAME, 15, bold = true)
                 Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
                 Button("Moving to a new phone", modifier = Modifier.fillMaxWidth(), onClick = onNewPhone)
+                Spacer(Modifier.height(6.dp))
+                Words("Make films smaller first", 15, bold = true)
+                Words("KueVault Shrink, on your Windows PC, makes films about half the size before they go in, looking the same and still playing on phones, Fire TV and KueTV. Download it on the PC from: " + SHRINK, 13, K.Soft, lines = 6)
+                Button("Copy the PC download link", modifier = Modifier.fillMaxWidth()) {
+                    val clip = context.getSystemService(android.content.ClipboardManager::class.java)
+                    clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault Shrink", SHRINK))
+                    Work.told = "Link copied. Send it to yourself and open it on the PC."
+                }
                 Button("Copy report for Claude", modifier = Modifier.fillMaxWidth()) {
                     val clip = context.getSystemService(android.content.ClipboardManager::class.java)
                     clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault report", Report.text(context)))

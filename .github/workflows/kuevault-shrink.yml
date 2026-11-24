@@ -1,0 +1,82 @@
+name: KueVault Shrink
+
+# KueVault Shrink, the Windows program that makes films smaller before they go into KueVault.
+# Every change to it: checked with real ffmpeg on Windows, packed into one KueVaultShrink.exe, the packed
+# program run start to finish on a made-up film, then put on the "kueshrink" download.
+on:
+  push:
+    branches: [ kuevault ]
+    paths: [ 'pc/shrink/**', '.github/workflows/kuevault-shrink.yml' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: kueshrink-build
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: pc/shrink
+    env:
+      SHRINK_VERSION: 1.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Tools
+        run: python -m pip install pyinstaller send2trash pytest
+
+      # ffmpeg for Windows from BtbN's builds (8.1 release line, with x265 and the graphics-card makers).
+      - name: ffmpeg
+        run: |
+          $zip = "ffmpeg.zip"
+          Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-gpl-shared-8.1.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath unzipped
+          $bin = Get-ChildItem unzipped -Recurse -Directory -Filter bin | Select-Object -First 1
+          New-Item -ItemType Directory ffmpeg | Out-Null
+          Copy-Item "$($bin.FullName)\ffmpeg.exe", "$($bin.FullName)\ffprobe.exe" ffmpeg
+          Copy-Item "$($bin.FullName)\*.dll" ffmpeg
+          $lic = Get-ChildItem unzipped -Recurse -Filter LICENSE.txt | Select-Object -First 1
+          if ($lic) { Copy-Item $lic.FullName ffmpeg\FFMPEG-LICENSE.txt }
+          .\ffmpeg\ffmpeg.exe -hide_banner -version | Select-Object -First 1
+
+      - name: Check
+        run: python -m pytest -q test_shrink.py
+
+      - name: Pack
+        run: |
+          python -m PyInstaller --noconfirm --onefile --windowed --name KueVaultShrink --icon kueshrink.ico `
+            --add-data "kueshrink.ico;." --add-data "ffmpeg;ffmpeg" --hidden-import send2trash kueshrink.py
+          Get-Item dist\KueVaultShrink.exe | Select-Object Name, Length
+
+      # The packed program itself, start to finish: the window, ffmpeg inside it, the check, the Recycle Bin.
+      - name: Run the packed program
+        run: |
+          $p = Start-Process -FilePath dist\KueVaultShrink.exe -ArgumentList "--selftest" -Wait -PassThru
+          if (Test-Path selftest.txt) { $said = Get-Content selftest.txt -Raw } else { $said = "no answer" }
+          Write-Host "Self-test: $said"
+          if ($p.ExitCode -ne 0) { Write-Host "::error title=Self-test::$said"; exit 1 }
+
+      - name: Notes
+        run: |
+          "KueVault Shrink $env:SHRINK_VERSION`n`nMakes films smaller (H.265) before they go into KueVault. Windows 10 and 11.`nffmpeg inside it is from https://github.com/BtbN/FFmpeg-Builds (GPL)." | Out-File -Encoding utf8 dist\NOTES.md
+
+      - name: Publish
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: kueshrink
+          target_commitish: ${{ github.sha }}
+          name: KueVault Shrink (${{ env.SHRINK_VERSION }})
+          files: pc/shrink/dist/KueVaultShrink.exe
+          body_path: pc/shrink/dist/NOTES.md
+          prerelease: false
+          make_latest: false
