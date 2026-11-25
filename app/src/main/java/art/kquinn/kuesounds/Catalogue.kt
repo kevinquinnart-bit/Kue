@@ -162,14 +162,44 @@ object Catalogue {
                 else -> sameArtist(r.artist, artist)
             }
         }
-        return fits.minWithOrNull(
-            compareBy<Release>(
-                { if (it.type.equals("Album", true)) 0 else if (it.type.isEmpty()) 1 else 2 },
-                { if (it.status.isEmpty() || it.status.equals("Official", true)) 0 else 1 },
-                { kotlin.math.abs(it.trackCount - songs) },
-                { if (it.year > 0) it.year else 9999 },
-            ),
-        )
+        return fits.minWithOrNull(best(songs))
+    }
+
+    /** A proper album over a single, official over a bootleg, the nearest number of songs, then the earliest. */
+    private fun best(songs: Int) = compareBy<Release>(
+        { if (it.type.equals("Album", true)) 0 else if (it.type.isEmpty()) 1 else 2 },
+        { if (it.status.isEmpty() || it.status.equals("Official", true)) 0 else 1 },
+        { kotlin.math.abs(it.trackCount - songs) },
+        { if (it.year > 0) it.year else 9999 },
+    )
+
+    /**
+     * The second try, for an album the exact search missed because its name is written a little differently in the
+     * files ("A Million Lovesongs" for "A Million Love Songs", "A Mothers Son" for "A Mother's Son"; both found no
+     * match on 25 November 2026 and so no cover). The artist's releases with any of the words, kept only when the
+     * name is the same once spaces and punctuation are left out, or differs by one or two letters in a long name.
+     */
+    fun chooseLoose(found: List<Release>, title: String, artist: String, songs: Int): Release? {
+        val want = compact(title)
+        if (want.length < 3) return null
+        return found.filter { r -> sameArtist(r.artist, artist) && nearlySame(compact(r.title), want) }.minWithOrNull(best(songs))
+    }
+
+    /** A name with only its letters and numbers, "&" read as "and": "A Million Love-Songs" is "amillionlovesongs". */
+    fun compact(name: String): String = Library.sortName(name).replace("&", "and").filter { it.isLetterOrDigit() }
+
+    private fun nearlySame(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (minOf(a.length, b.length) < 10 || kotlin.math.abs(a.length - b.length) > 2) return false
+        // Letters to change, add or take away to make one the other: 2 at most.
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1)
+            cur[0] = i
+            for (j in 1..b.length) cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            prev = cur
+        }
+        return prev[b.length] <= 2
     }
 
     /**
@@ -186,7 +216,14 @@ object Catalogue {
     fun findAlbum(title: String, artist: String, songs: Int): Match? {
         val known = artist.isNotBlank() && artist != Library.UNKNOWN_ARTIST
         val query = "release:" + quote(title) + if (known) " AND artist:" + quote(if (isVarious(artist)) "Various Artists" else artist) else ""
-        val r = choose(parseReleases(ask("release/", query)), artist, songs) ?: return null
+        val r = choose(parseReleases(ask("release/", query)), artist, songs)
+            ?: if (known && !isVarious(artist)) {
+                // The words loose, not as one phrase; punctuation out, so nothing in the name is read as a search command.
+                val words = title.replace(Regex("""[^\p{L}\p{N}\s]+"""), " ").trim()
+                if (words.isEmpty()) null
+                else chooseLoose(parseReleases(ask("release/", "artist:" + quote(artist) + " AND release:(" + words + ")", 25)), title, artist, songs)
+            } else null
+        if (r == null) return null
         return Match(r.title, r.artist, r.year, r.id, r.groupId, compilation = r.otherTypes.any { it.equals("Compilation", true) })
     }
 

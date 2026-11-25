@@ -237,4 +237,19 @@ class LibraryTest {
         assertFalse(s.fixed)
         assertEquals(Library.albumKey("Berlin", "Take My Breath Away"), Library.albumKey(Library.albumArtistOf(s), s.album))
     }
+
+    @Test
+    fun theSameAlbumWrittenWithAndWithoutPunctuationIsOneAlbum() {
+        val tracks = listOf(
+            track("1", "One", "Derek Ryan", "A Mother's Son", 1, folder = "f1"),
+            track("2", "Two", "Derek Ryan", "A Mothers Son", 2, folder = "f2"),
+            track("3", "Three", "Derek Ryan", "A Mother’s Son", 3, folder = "f2"),
+        )
+        val albums = Library.albums(tracks)
+        assertEquals(1, albums.size)
+        assertEquals(listOf("One", "Two", "Three"), albums.single().tracks.map { it.title })
+        // A key kept before the change comes out the same as one made now.
+        assertEquals(Library.albumKey("Derek Ryan", "A Mother's Son"), Library.newKey(Library.sortName("Derek Ryan") + "\u0001" + Library.sortName("A Mother's Son")))
+        assertEquals(Library.albumKey("Simon & Garfunkel", "Bookends"), Library.albumKey("Simon and Garfunkel", "Bookends"))
+    }
 }

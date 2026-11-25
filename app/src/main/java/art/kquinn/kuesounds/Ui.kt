@@ -1202,8 +1202,10 @@ object Ui {
         val stamp = { at: Long -> java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(at)) }
         // Sections inside a group fold away too (Kevin, 25 November 2026); Search all settings opens the right one.
         var sections by rememberSaveable { mutableStateOf("") }
-        val sectionOpen = { id: String -> id in sections.split("|") }
-        val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("|").filter { it != id }.joinToString("|") else "$sections|$id" }
+        // One open section a line. Not "|" between them: a section's own id has a "|" in it ("app|Fix the files"),
+        // so split on "|" no section ever counted as open and none could be opened (Kevin, 25 November 2026).
+        val sectionOpen = { id: String -> id in sections.split("\n") }
+        val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("\n").filter { it != id }.joinToString("\n") else sections + "\n" + id }
         var query by rememberSaveable { mutableStateOf("") }
         val scroll = androidx.compose.foundation.rememberScrollState()
         Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {

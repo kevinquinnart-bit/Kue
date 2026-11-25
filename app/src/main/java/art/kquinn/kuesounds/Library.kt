@@ -201,8 +201,8 @@ object Library {
      */
     fun compilationSongs(tracks: List<Track>): Set<String> {
         val out = HashSet<String>()
-        for ((title, list) in tracks.groupBy { sortName(it.album) }) {
-            if (title.isEmpty() || title == sortName(UNKNOWN_ALBUM)) continue
+        for ((title, list) in tracks.groupBy { matchName(it.album) }) {
+            if (title.isEmpty() || title == matchName(UNKNOWN_ALBUM)) continue
             val byArtist = list.groupBy { mainArtist(it.artist) }
             if (byArtist.size < 3) continue
             for ((_, songs) in byArtist) if (songs.size <= 2) songs.forEach { out += it.id }
@@ -227,7 +227,24 @@ object Library {
         return t.copy(album = title, albumArtist = artist, trackNo = 1, discNo = 0, checked = true, fixed = t.fixed && same)
     }
 
-    fun albumKey(artist: String, album: String): String = sortName(artist) + "\u0001" + sortName(album)
+    /**
+     * An album's key: its artist and name with the punctuation left out, so "A Mother's Son" and "A Mothers Son" by
+     * the same artist are one album (Kevin, 25 November 2026). "&" counts as "and".
+     */
+    fun albumKey(artist: String, album: String): String = matchName(artist) + "\u0001" + matchName(album)
+
+    /** A name as albums are told apart: [sortName] with no punctuation, "&" as "and", one space between words. */
+    fun matchName(name: String): String = squash(sortName(name))
+
+    /** [matchName] from a name already put through [sortName]: kept libraries' keys are brought up to date with it. */
+    fun squash(sorted: String): String =
+        sorted.replace("&", " and ").replace(Regex("""[^\p{L}\p{N} ]+"""), "").replace(Regex("""\s+"""), " ").trim().ifEmpty { sorted }
+
+    /** An album key from before 25 November 2026 (punctuation kept) as it is now. Other keys are left as they are. */
+    fun newKey(old: String): String {
+        val parts = old.split('\u0001')
+        return if (parts.size == 2) squash(parts[0]) + "\u0001" + squash(parts[1]) else old
+    }
 
     /** The artist an album belongs to: the album artist when the songs name one. */
     fun albumArtistOf(t: Track): String = t.albumArtist.ifBlank { t.artist }.ifBlank { UNKNOWN_ARTIST }
@@ -236,17 +253,17 @@ object Library {
     fun albums(tracks: List<Track>): List<Album> {
         // Songs in one folder with one album name are one album, even if their artists differ
         // (a compilation without an album artist).
-        val byFolderAlbum = tracks.groupBy { (it.folderId ?: "") + "\u0001" + sortName(it.album) }
+        val byFolderAlbum = tracks.groupBy { (it.folderId ?: "") + "\u0001" + matchName(it.album) }
         val groups = mutableMapOf<String, MutableList<Track>>()
         for ((_, list) in byFolderAlbum) {
-            val artists = list.map { sortName(albumArtistOf(it)) }.distinct()
+            val artists = list.map { matchName(albumArtistOf(it)) }.distinct()
             val artist = if (artists.size == 1) albumArtistOf(list.first()) else "Various artists"
             val key = albumKey(artist, list.first().album)
             groups.getOrPut(key) { mutableListOf() }.addAll(list)
         }
         return groups.map { (key, list) ->
             val first = list.first()
-            val artists = list.map { sortName(albumArtistOf(it)) }.distinct()
+            val artists = list.map { matchName(albumArtistOf(it)) }.distinct()
             val artist = if (artists.size == 1) albumArtistOf(first) else "Various artists"
             Album(
                 key = key,
@@ -260,7 +277,7 @@ object Library {
 
     /** Artists with their albums, in name order. */
     fun artists(albums: List<Album>): List<Artist> =
-        albums.groupBy { sortName(it.artist) }.map { (_, list) ->
+        albums.groupBy { matchName(it.artist) }.map { (_, list) ->
             Artist(list.first().artist, list.sortedWith(compareBy({ it.year == 0 }, { it.year }, { sortName(it.title) })), list.sumOf { it.tracks.size })
         }.sortedWith(compareBy({ it.name == UNKNOWN_ARTIST }, { sortName(it.name) }))
 

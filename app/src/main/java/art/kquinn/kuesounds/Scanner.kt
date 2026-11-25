@@ -169,6 +169,9 @@ object Scanner {
         if (current.tracks.isEmpty()) data = Library.load(libraryFile())
         // Libraries kept before 0.1.5 had their albums looked up without keeping the catalogue's cover in
         // first place: every album is looked up once more.
+        // 25 November 2026: album keys leave punctuation out now ("A Mother's Son" and "A Mothers Son" are one album).
+        // Every kept key is brought up to date first, before anything below compares keys.
+        if (data.version < 8) rekey()
         if (data.version < 2) {
             data = data.copy(tracks = data.tracks.map { it.copy(checked = false) }, version = 2)
             save()
@@ -232,10 +235,38 @@ object Scanner {
             save()
             note("found " + hitKeys.size + " matched albums that are greatest hits or collections: their songs are looked up one by one")
         }
+        // 25 November 2026 (Kevin: covers still missing for an awful lot): an album whose name in the files is written a
+        // little differently from the catalogue's found no match, so no cover. Those are now tried a second way: every
+        // album without a match (and not a collection or a single of its own) is looked up once more.
+        if (data.version < 8) {
+            val again = data.tracks.count { t -> keyOf(t) !in data.releases && keyOf(t) !in data.collections && keyOf(t) !in data.ownSingles && t.checked }
+            data = data.copy(
+                tracks = data.tracks.map { t ->
+                    if (keyOf(t) !in data.releases && keyOf(t) !in data.collections && keyOf(t) !in data.ownSingles) t.copy(checked = false) else t
+                },
+                version = 8,
+            )
+            save()
+            note("album names now match without punctuation; $again songs on albums with no match are looked up once more")
+        }
         read = data.tracks.count { it.tagged }
     }
 
     private fun keyOf(t: Track): String = Library.albumKey(Library.albumArtistOf(t), t.album)
+
+    /** Every album key kept in the library, as [Library.newKey] has it now. Where two old keys become one, a match from the catalogue wins. */
+    private fun rekey() {
+        val d = data
+        val order = { m: Map<String, String> -> m.entries.sortedBy { if (it.key in d.catalogueCovers) 0 else 1 } }
+        val remap = { m: Map<String, String> -> LinkedHashMap<String, String>().also { out -> for ((k, v) in order(m)) out.putIfAbsent(Library.newKey(k), v) } }
+        data = d.copy(
+            art = remap(d.art),
+            releases = remap(d.releases),
+            catalogueCovers = d.catalogueCovers.mapTo(HashSet()) { Library.newKey(it) },
+            collections = d.collections.mapTo(HashSet()) { Library.newKey(it) },
+            ownSingles = d.ownSingles.mapTo(HashSet()) { Library.newKey(it) },
+        )
+    }
 
     /** Whether a scan is going on. Kept as screen state, so the screens change the moment it starts and ends. */
     var running by mutableStateOf(false)
