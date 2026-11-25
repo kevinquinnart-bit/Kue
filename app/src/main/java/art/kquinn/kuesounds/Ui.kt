@@ -2256,7 +2256,7 @@ object Ui {
     }
 
     /** Every Kue app's settings in the same eight groups (see KueSettings). One group open at a time. */
-    private val look = KueSettings.Look(
+    internal val look = KueSettings.Look(
         page = K.Page, panel = K.Panel, raised = K.Raised, accent = K.Accent, onAccent = K.Page, ink = K.Ink,
         soft = { K.Soft }, font = K.Poppins,
     )

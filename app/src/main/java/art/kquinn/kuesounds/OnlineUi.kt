@@ -55,10 +55,8 @@ object OnlineUi {
 
     @Composable
     private fun Chip(label: String, on: Boolean = false, onClick: () -> Unit) {
-        Box(
-            Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) K.Accent else K.Panel).clickable(onClick = onClick).padding(horizontal = 16.dp),
-            contentAlignment = Alignment.Center,
-        ) { Ui.Words(label, 15, if (on) K.Page else K.Ink, bold = on) }
+        // A second row of choices, under Radio, Spotify or YouTube: the Kue standard (Kevin, 25 November 2026).
+        KueSettings.SubChip(label, on, Ui.look, onClick = onClick)
     }
 
     @Composable
@@ -90,17 +88,39 @@ object OnlineUi {
     @Composable
     fun RadioTab() {
         val scope = rememberCoroutineScope()
-        var showing by rememberSaveable { mutableStateOf("GB") } // GB, IE, FAV or SEARCH
+        // GB, IE, MUSIC, TALK, SPORT, PLACES, LANGUAGES, FAV, SEARCH; a pick: "C:FR" (a country), "L:irish" (a
+        // language), "T:jazz" (a kind). CloudPlayer's Magic Radio as the least (Kevin, 25 November 2026).
+        var showing by rememberSaveable { mutableStateOf("GB") }
+        var groups by remember { mutableStateOf<List<Radio.Group>?>(null) }
         var words by rememberSaveable { mutableStateOf("") }
         var list by remember { mutableStateOf<List<Radio.Station>?>(null) }
         var problem by remember { mutableStateOf("") }
         val favs = remember(Sync.entries) { Radio.favourites() }
         LaunchedEffect(showing) {
-            if (showing == "FAV" || showing == "SEARCH") return@LaunchedEffect
+            if (showing == "FAV" || showing == "SEARCH" || showing == "MUSIC") return@LaunchedEffect
             list = null
+            groups = null
             problem = ""
-            list = withContext(Dispatchers.IO) { runCatching { Radio.country(showing) }.getOrNull() }
-            if (list == null) problem = "The radio directory didn't answer. Check the internet and try again."
+            val got: Any? = withContext(Dispatchers.IO) {
+                runCatching {
+                    when {
+                        showing == "PLACES" -> Radio.countries()
+                        showing == "LANGUAGES" -> Radio.languages()
+                        showing == "TALK" -> (Radio.byTag("talk", "GB") + Radio.byTag("news", "GB")).distinctBy { it.id }
+                        showing == "SPORT" -> Radio.byTag("sport", "GB").ifEmpty { Radio.byTag("sport") }
+                        showing.startsWith("C:") -> Radio.country(showing.removePrefix("C:"))
+                        showing.startsWith("L:") -> Radio.byLanguage(showing.removePrefix("L:"))
+                        showing.startsWith("T:") -> Radio.byTag(showing.removePrefix("T:"))
+                        else -> Radio.country(showing)
+                    }
+                }.getOrNull()
+            }
+            @Suppress("UNCHECKED_CAST")
+            when {
+                got == null -> problem = "The radio directory didn't answer. Check the internet and try again."
+                showing == "PLACES" || showing == "LANGUAGES" -> groups = got as List<Radio.Group>
+                else -> list = got as List<Radio.Station>
+            }
         }
         val find: () -> Unit = {
             if (words.isNotBlank()) {
@@ -121,11 +141,39 @@ object OnlineUi {
                     item { Chip("UK", showing == "GB") { showing = "GB" } }
                     item { Chip("Ireland", showing == "IE") { showing = "IE" } }
                     item { Chip("Favourites", showing == "FAV") { showing = "FAV" } }
+                    item { Chip("Music", showing == "MUSIC" || showing.startsWith("T:")) { showing = "MUSIC" } }
+                    item { Chip("Talk and news", showing == "TALK") { showing = "TALK" } }
+                    item { Chip("Sport", showing == "SPORT") { showing = "SPORT" } }
+                    item { Chip("By country", showing == "PLACES" || showing.startsWith("C:")) { showing = "PLACES" } }
+                    item { Chip("By language", showing == "LANGUAGES" || showing.startsWith("L:")) { showing = "LANGUAGES" } }
                     if (words.isNotBlank()) item { Chip("Search", showing == "SEARCH", onClick = find) }
                 }
             }
             if (problem.isNotEmpty()) item { Ui.Words(problem, 15, K.Accent, lines = 3) }
+            // Kinds of music to pick from.
+            if (showing == "MUSIC" || showing.startsWith("T:")) item {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(listOf("pop", "rock", "dance", "80s", "90s", "country", "jazz", "classical", "irish", "christmas", "chillout", "hip hop")) { k ->
+                        Chip(k.replaceFirstChar { it.uppercaseChar() }, showing == "T:$k") { showing = "T:$k" }
+                    }
+                }
+            }
+            val g = groups
             when {
+                showing == "MUSIC" -> item { Ui.Words("Pick a kind of music.", 16, K.Soft) }
+                showing == "PLACES" || showing == "LANGUAGES" -> when {
+                    g == null && problem.isEmpty() -> item { CircularProgressIndicator(color = K.Accent) }
+                    g != null -> items(g, key = { "g:" + it.code }) { x ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel)
+                                .clickable { showing = (if (showing == "PLACES") "C:" else "L:") + x.code }.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Ui.Words(x.name, 16, bold = true, modifier = Modifier.weight(1f))
+                            Ui.Words(String.format("%,d", x.stations) + " stations", 13, K.Soft)
+                        }
+                    }
+                }
                 shown == null -> item { CircularProgressIndicator(color = K.Accent) }
                 shown.isEmpty() -> item { Ui.Words(if (showing == "FAV") "Tap the star on a station to keep it here." else "No stations found.", 16, K.Soft, lines = 2) }
                 else -> items(shown, key = { "r:" + it.id }) { s -> StationRow(s) }

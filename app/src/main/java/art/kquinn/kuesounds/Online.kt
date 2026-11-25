@@ -61,6 +61,33 @@ object Radio {
         return (byName + parse(get("/json/stations/search?tag=$q&hidebroken=true&order=clickcount&reverse=true&limit=60"))).distinctBy { it.id }
     }
 
+    /** Stations of a kind ("pop", "talk", "sport"), in a country when [country] is given, most listened-to first. */
+    fun byTag(tag: String, country: String? = null): List<Station> {
+        val q = URLEncoder.encode(tag, "UTF-8")
+        return parse(get("/json/stations/search?tag=$q" + (country?.let { "&countrycode=$it" } ?: "") + "&hidebroken=true&order=clickcount&reverse=true&limit=80"))
+    }
+
+    /** Stations in a language ("english", "irish"), most listened-to first. */
+    fun byLanguage(language: String): List<Station> =
+        parse(get("/json/stations/bylanguageexact/" + URLEncoder.encode(language, "UTF-8").replace("+", "%20") + "?hidebroken=true&order=clickcount&reverse=true&limit=80"))
+
+    /** A place or language with how many stations it has. */
+    data class Group(val code: String, val name: String, val stations: Int)
+
+    /** Countries with the most stations first. */
+    fun countries(): List<Group> = JsonParser.parseString(get("/json/countries?order=stationcount&reverse=true&hidebroken=true&limit=80")).asJsonArray.mapNotNull { e ->
+        val o = e.asJsonObject
+        val code = o.get("iso_3166_1")?.asString.orEmpty()
+        if (code.isEmpty()) null else Group(code, o.get("name")?.asString.orEmpty(), o.get("stationcount")?.asInt ?: 0)
+    }
+
+    /** Languages with the most stations first. */
+    fun languages(): List<Group> = JsonParser.parseString(get("/json/languages?order=stationcount&reverse=true&hidebroken=true&limit=60")).asJsonArray.mapNotNull { e ->
+        val o = e.asJsonObject
+        val name = o.get("name")?.asString.orEmpty()
+        if (name.isBlank()) null else Group(name, name.replaceFirstChar { it.uppercaseChar() }, o.get("stationcount")?.asInt ?: 0)
+    }
+
     /** Tells the directory a station was played, as it asks of the apps that use it. */
     fun counted(s: Station) {
         Thread { runCatching { get("/json/url/" + s.id) } }.start()
