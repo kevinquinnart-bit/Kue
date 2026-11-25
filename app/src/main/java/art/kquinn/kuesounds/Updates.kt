@@ -50,12 +50,19 @@ object Updates {
 
     private val http by lazy { Drive.http.newBuilder().callTimeout(15, TimeUnit.SECONDS).build() }
 
+    /** When the download was last asked, and what it said: Update pressed soon after doesn't ask again. */
+    @Volatile private var lastChecked = 0L
+    @Volatile private var lastSeen: Latest? = null
+
     /** What is on the download now. Call off the main thread; throws when it can't be reached. */
     fun check(): Latest {
         val request = Request.Builder().url(VERSION_URL).cacheControl(CacheControl.FORCE_NETWORK).build()
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw java.io.IOException("the download answered " + response.code)
-            return parse(response.body.string()) ?: throw java.io.IOException("the version file had no build number")
+            val latest = parse(response.body.string()) ?: throw java.io.IOException("the version file had no build number")
+            lastChecked = android.os.SystemClock.elapsedRealtime()
+            lastSeen = latest
+            return latest
         }
     }
 
@@ -68,11 +75,11 @@ object Updates {
     private fun folder(context: Context) = File(context.cacheDir, "update").apply { mkdirs() }
 
     /** Downloads the newest app, telling [progress] how far it has got, 0 to 100. Call off the main thread. */
-    fun download(context: Context, progress: (Int) -> Unit): File {
+    fun download(context: Context, progress: (Int) -> Unit, url: String = APP_URL): File {
         val target = File(folder(context), "KueSounds.apk")
         val part = File(folder(context), "KueSounds.apk.part")
         val big = Drive.http.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
-        val request = Request.Builder().url(APP_URL).cacheControl(CacheControl.FORCE_NETWORK).build()
+        val request = Request.Builder().url(url).cacheControl(CacheControl.FORCE_NETWORK).build()
         big.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw java.io.IOException("the download answered " + response.code)
             val total = response.body.contentLength()
@@ -114,8 +121,11 @@ object Updates {
      * gives a newer app.
      */
     fun downloadChecked(context: Context, progress: (Int) -> Unit): File {
-        repeat(2) {
-            val file = download(context, progress)
+        // This phone's own half of the app first (the parts for other kinds of chip left out), else the whole app.
+        val half: String? = null
+        repeat(2) { attempt ->
+            val url = if (attempt == 0 && half != null) half else APP_URL
+            val file = runCatching { download(context, progress, url) }.getOrElse { if (attempt == 0) return@repeat else throw it }
             val inside = buildInside(context, file)
             if (inside != null && inside > BuildConfig.VERSION_CODE) return file
             file.delete()
@@ -147,6 +157,8 @@ object Updates {
     /** Clears a downloaded app once the newer version is the one running. */
     fun tidy(context: Context) {
         runCatching { File(context.cacheDir, "update").deleteRecursively() }
+        KueUpdate.tidy(context)
+        inInstaller = 0
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -158,11 +170,17 @@ object Updates {
     // new version is downloaded quietly and goes on the next time KueSounds is left (Home or another
     // app), never while music is playing.
 
-    /** A newer version downloaded and checked, waiting to go on when KueSounds is next left. */
+    /** A newer version downloaded and checked, kept in case writing it into the installer ahead didn't work. */
     var ready by mutableStateOf<File?>(null)
+
+    /** The build already written into Android's installer, waiting to go on (0 when none). See KueUpdate. */
+    var inInstaller by mutableStateOf(0)
+        private set
 
     /** What the update is doing, for the screen. Empty when nothing is happening. */
     var doing by mutableStateOf("")
+
+    @Volatile private var fetching = false
 
     /** Whether updates can now go on without asking. */
     fun quiet(context: Context): Boolean {
@@ -172,57 +190,93 @@ object Updates {
     }
 
     /**
-     * On opening: when a newer version is waiting and updates go on by themselves, downloads it
-     * quietly, ready for when KueSounds is left. Otherwise offers it on screen, as before. Call off
-     * the main thread.
+     * Downloads build [latest] and writes it straight into Android's installer, out of sight, so putting it on
+     * later takes no time (Kevin, 25 November 2026: updates as quick as they can be, in all the apps). The
+     * downloaded copy is kept only if that writing didn't work. Call off the main thread.
+     */
+    private fun fetch(context: Context, latest: Latest, progress: (Int) -> Unit = {}): Boolean {
+        if (inInstaller >= latest.code) return true
+        val kept = ready?.takeIf { it.exists() && (buildInside(context, it) ?: 0) >= latest.code }
+        val file = kept ?: runCatching { downloadChecked(context, progress) }.getOrNull() ?: return false
+        val build = buildInside(context, file)?.toInt() ?: latest.code
+        val written = runCatching { KueUpdate.prepare(context, file, build) }.isSuccess
+        if (written) {
+            inInstaller = build
+            file.delete()
+            ready = null
+        } else ready = file
+        return true
+    }
+
+    /**
+     * On opening: when a newer version is out, downloads it quietly and writes it into the installer, ready for
+     * when KueSounds is left (or, before updates go on by themselves, for one tap on the offer). Call off the main thread.
      */
     fun checkAndFetch(context: Context) {
         val latest = runCatching { check() }.getOrNull() ?: return
+        inInstaller = KueUpdate.waiting(context)
         if (!isNewer(latest, BuildConfig.VERSION_CODE)) {
             tidy(context)
             return
         }
-        if (!quiet(context)) {
-            if (latest.code != putOff) offer = latest
-            return
+        val asks = !quiet(context)
+        if (asks && latest.code == putOff) return
+        if (!fetching) {
+            fetching = true
+            if (!asks) doing = "Getting KueSounds " + latest.name
+            try { fetch(context, latest) } finally { fetching = false; doing = "" }
         }
-        if (ready != null) return
-        doing = "Getting KueSounds " + latest.name
-        ready = runCatching { downloadChecked(context) {} }.getOrNull()
-        doing = ""
+        if (asks) offer = latest
     }
 
     /**
-     * Settings › Check for updates: looks for a newer version and, when there is one, downloads it (or uses
-     * the one already downloaded) and puts it on now. [say] is told how it is going. Gives back the last word.
+     * Update pressed (the offer, or Settings › Check for updates): puts the newest version on now, at once when it
+     * is already in the installer. [say] is told how it is going. Gives back the last word.
      */
     suspend fun updateByHand(context: Context, say: (String) -> Unit): String {
-        say("Checking…")
-        val latest = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { check() }.getOrNull() }
+        // Asked within the last 5 minutes: not asked again.
+        val fresh = lastSeen?.takeIf { android.os.SystemClock.elapsedRealtime() - lastChecked < 5 * 60_000L }
+        if (fresh == null) say("Checking…")
+        val latest = fresh ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { check() }.getOrNull() }
             ?: return "Couldn't reach the download. Check the internet and try again."
         if (!isNewer(latest, BuildConfig.VERSION_CODE)) return "You have the newest version."
         if (!mayInstall(context)) {
             openInstallPermission(context)
             return "Version " + latest.name + " is ready. First allow KueSounds to install updates on the page that opened, then tap Check for updates again."
         }
-        say("Downloading version " + latest.name + " · 0%")
-        val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            ready?.takeIf { it.exists() && (buildInside(context, it) ?: 0) >= latest.code }
-                ?: runCatching { downloadChecked(context) { p -> say("Downloading version " + latest.name + " · $p%") } }.getOrNull()
-        } ?: return "The download didn't work. Try again later."
-        ready = null
+        offer = null
+        if (inInstaller < latest.code) {
+            say("Downloading version " + latest.name + " · 0%")
+            val got = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                fetch(context, latest) { p -> say("Downloading version " + latest.name + " · $p%") }
+            }
+            if (!got) return "The download didn't work. Try again later."
+        }
         say("Putting version " + latest.name + " on…")
-        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { installSession(context, file) }.isSuccess }
-        if (!ok) install(context, file)
-        return "Putting version " + latest.name + " on. Android may ask first. KueSounds closes while it goes on: open it again after."
+        Reopen.handed(context, latest)
+        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { putOn(context) }
+        if (!ok) return "The update didn't go on. Try again later."
+        return "Putting version " + latest.name + " on. Android may ask first. KueSounds closes while it goes on, then a notice opens it again."
     }
 
-    /** KueSounds has been left: a downloaded update goes on now, unless music is playing. */
-    fun installIfReady(context: Context) {
-        val file = ready ?: return
-        if (Playing.isPlaying || !quiet(context)) return
+    /** Puts on what is waiting: from the installer when it is there, otherwise from the kept download. */
+    private fun putOn(context: Context): Boolean {
+        if (runCatching { KueUpdate.putOn(context, UpdateReceiver::class.java) }.getOrDefault(false)) {
+            inInstaller = 0
+            return true
+        }
+        val file = ready?.takeIf { it.exists() } ?: return false
         ready = null
-        runCatching { installSession(context, file) }
+        return runCatching { installSession(context, file) }.isSuccess || runCatching { install(context, file) }.isSuccess
+    }
+
+    /** KueSounds has been left: a waiting update goes on now, away from the screen. */
+    fun installIfReady(context: Context) {
+        if (inInstaller <= 0 && ready == null) return
+        if (Playing.isPlaying) return
+        if (!quiet(context)) return
+        val app = context.applicationContext
+        Thread({ putOn(app) }, "update").start()
     }
 
     /**
@@ -263,5 +317,52 @@ class UpdateReceiver : android.content.BroadcastReceiver() {
             // Tried again the next time KueSounds opens.
             Scanner.note("update didn't go on: " + intent.getStringExtra(android.content.pm.PackageInstaller.EXTRA_STATUS_MESSAGE))
         }
+    }
+}
+
+/**
+ * After an update pressed by hand: KueSounds closes while it goes on, and the phone doesn't let an app open itself
+ * again, so a notice says it is on; a tap opens KueSounds (Kevin, 25 November 2026). Only within 10 minutes of Update.
+ */
+object Reopen {
+    private const val WITHIN_MS = 10 * 60_000L
+
+    fun handed(context: Context, latest: Updates.Latest) {
+        context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE).edit()
+            .putLong("at", System.currentTimeMillis()).putInt("build", latest.code).putString("name", latest.name).apply()
+    }
+
+    fun afterUpdate(context: Context) {
+        val prefs = context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE)
+        val at = prefs.getLong("at", 0L)
+        val name = prefs.getString("name", null) ?: BuildConfig.VERSION_NAME
+        if (BuildConfig.VERSION_CODE >= prefs.getInt("build", 0)) prefs.edit().clear().apply()
+        if (at == 0L || System.currentTimeMillis() - at > WITHIN_MS) return
+        val manager = context.getSystemService(android.app.NotificationManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            manager.createNotificationChannel(android.app.NotificationChannel("updates", "Updates", android.app.NotificationManager.IMPORTANCE_HIGH))
+        }
+        val open = android.app.PendingIntent.getActivity(
+            context, 0,
+            Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT,
+        )
+        val notice = androidx.core.app.NotificationCompat.Builder(context, "updates")
+            .setSmallIcon(R.drawable.kue_status)
+            .setContentTitle("KueSounds " + name + " is on")
+            .setContentText("Tap to open KueSounds.")
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setTimeoutAfter(WITHIN_MS)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+            .build()
+        runCatching { manager.notify(4242, notice) }.onFailure { Scanner.note("update on, but the notice couldn't show: " + it.message) }
+    }
+}
+
+/** Android saying a newer KueSounds is now on. */
+class UpdatedReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) Reopen.afterUpdate(context.applicationContext)
     }
 }

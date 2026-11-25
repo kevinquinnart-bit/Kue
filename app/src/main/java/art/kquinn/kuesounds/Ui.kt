@@ -462,18 +462,13 @@ object Ui {
                         if (!Updates.mayInstall(context)) {
                             Updates.openInstallPermission(context)
                         } else {
-                            updating = "Downloading · 0%"
+                            // Already downloaded and written into the installer out of sight, so it goes on at once.
+                            // Through Android's own installer, so from now on updates go on by themselves.
+                            updating = "Putting version " + offer.name + " on…"
                             scope.launch {
-                                val file = withContext(Dispatchers.IO) {
-                                    runCatching { Updates.downloadChecked(context) { p -> updating = "Downloading · $p%" } }.getOrNull()
-                                }
-                                if (file != null) {
-                                    updating = ""
-                                    // Through Android's own installer, so from now on updates go on by themselves.
-                                    runCatching { Updates.installSession(context, file) }.onFailure { Updates.install(context, file) }
-                                } else {
-                                    updating = "The download didn't work. Try again later."
-                                }
+                                val word = Updates.updateByHand(context) { updating = it }
+                                if (Updates.offer == null) Updates.offer = offer.takeIf { !word.startsWith("Putting") }
+                                updating = if (word.startsWith("Putting")) "" else word
                             }
                         }
                     }
