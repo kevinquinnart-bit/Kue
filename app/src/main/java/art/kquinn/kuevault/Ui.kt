@@ -676,9 +676,9 @@ object Ui {
         KueSettings.Place("privacy", "Privacy and storage", "Forget", "Forget everything on this phone"),
         KueSettings.Place("kue", "Your Kue apps", null, "KueTV"),
         KueSettings.Place("kue", "Your Kue apps", null, "KueSounds"),
-        KueSettings.Place("help", "Help and about", null, "Version"),
-        KueSettings.Place("help", "Help and about", null, "Check for updates"),
-        KueSettings.Place("help", "Help and about", null, "Copy report for Claude"),
+        KueSettings.Place("help", "Help and about", "Version and updates", "Version"),
+        KueSettings.Place("help", "Help and about", "Version and updates", "Check for updates"),
+        KueSettings.Place("help", "Help and about", "Report for Claude", "Copy report for Claude"),
     )
 
     @Composable
@@ -777,12 +777,16 @@ object Ui {
 
                 // 8. Help and about
                 KueSettings.Group(KueSettings.Icons.HELP, "Help and about", "Version " + BuildConfig.VERSION_NAME, open == "help", look, { toggle("help") }) {
+                    KueSettings.Section("Version and updates", sectionOpen("help|Version and updates"), look, { flip("help|Version and updates") }) {
                     KueSettings.Fact("Version", BuildConfig.VERSION_NAME, look)
                     if (!BuildConfig.STORE) Button("Check for updates", modifier = Modifier.fillMaxWidth()) { scope.launch { Work.told = Updates.updateByHand(context) { Work.doing = it }; Work.doing = "" } }
+                    }
+                    KueSettings.Section("Report for Claude", sectionOpen("help|Report for Claude"), look, { flip("help|Report for Claude") }) {
                     Button("Copy report for Claude", modifier = Modifier.fillMaxWidth()) {
                         val clip = context.getSystemService(android.content.ClipboardManager::class.java)
                         clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueVault report", Report.text(context)))
                         Work.told = "Report copied. Paste it into the chat."
+                    }
                     }
                 }
             }
