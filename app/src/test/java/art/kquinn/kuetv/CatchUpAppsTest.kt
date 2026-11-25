@@ -5,9 +5,11 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 
 /** Catch-up in the channel's own app: which app a channel's past programmes are in, and the links tried on Kevin's TV. */
 @RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
 class CatchUpAppsTest {
     @Test fun channelsFindTheirApp() {
         assertEquals("BBC iPlayer", CatchUpApps.appFor("UK: BBC One HD")?.title)
