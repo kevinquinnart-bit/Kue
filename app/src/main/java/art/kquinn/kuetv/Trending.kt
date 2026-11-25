@@ -37,8 +37,8 @@ object Trending {
         Service("ptv", "Pluto TV", listOf("pluto"), listOf("pluto")),
     )
 
-    /** One slide: a title trending on a service. */
-    data class Slide(val service: String, val title: String, val about: String, val picture: String, val poster: String, val show: Boolean)
+    /** One slide: a title trending on a service, or ([popular]) one of its most popular shows. */
+    data class Slide(val service: String, val title: String, val about: String, val picture: String, val poster: String, val show: Boolean, val popular: Boolean = false)
 
     /** The slides, a service at a time in turn; empty until they have been fetched. */
     var slides by mutableStateOf<List<Slide>>(emptyList())
@@ -49,11 +49,14 @@ object Trending {
 
     private const val KEEP_MS = 6 * 60 * 60_000L
     private const val PER_SERVICE = 3
+    /** Most popular shows put in among the trending ones (Kevin, 25 November 2026), from each service. */
+    private const val POPULAR_PER_SERVICE = 2
     private const val IMAGES = "https://images.justwatch.com"
 
     private val http by lazy { Provider.http.newBuilder().callTimeout(20, TimeUnit.SECONDS).build() }
 
-    private fun file(context: Context) = File(context.filesDir, "trending.json")
+    // trending2: the kept list from before the most popular shows were mixed in is not used again.
+    private fun file(context: Context) = File(context.filesDir, "trending2.json")
 
     /** The kept slides at once, then fresh ones from the internet if the kept ones are more than six hours old. */
     suspend fun load(context: Context) {
@@ -73,16 +76,26 @@ object Trending {
             val shows = runCatching { fetch(s, "SHOW") }.onFailure { Report.note("Trending", s.name + ": " + it.message) }.getOrDefault(emptyList())
             val films = runCatching { fetch(s, "MOVIE") }.onFailure { Report.note("Trending", s.name + ": " + it.message) }.getOrDefault(emptyList())
             // Shows and films in turn, the most trending first.
-            (0 until maxOf(shows.size, films.size)).flatMap { i -> listOfNotNull(shows.getOrNull(i), films.getOrNull(i)) }.take(PER_SERVICE)
+            val trending = (0 until maxOf(shows.size, films.size)).flatMap { i -> listOfNotNull(shows.getOrNull(i), films.getOrNull(i)) }.take(PER_SERVICE)
+            // The service's most popular shows, not already trending, put in between them.
+            val popular = runCatching { fetch(s, "SHOW", "POPULAR") }.onFailure { Report.note("Trending", s.name + " popular: " + it.message) }.getOrDefault(emptyList())
+                .filter { p -> trending.none { it.title.equals(p.title, ignoreCase = true) } }.take(POPULAR_PER_SERVICE).map { it.copy(popular = true) }
+            mix(trending, popular)
         }
-        return (0 until PER_SERVICE).flatMap { i -> each.mapNotNull { it.getOrNull(i) } }
+        val most = each.maxOfOrNull { it.size } ?: 0
+        return (0 until most).flatMap { i -> each.mapNotNull { it.getOrNull(i) } }
     }
 
-    private fun fetch(service: Service, type: String): List<Slide> {
+    /** Trending and most popular in turn: trending first, so the newest talk of the town leads. */
+    internal fun mix(trending: List<Slide>, popular: List<Slide>): List<Slide> =
+        (0 until maxOf(trending.size, popular.size)).flatMap { i -> listOfNotNull(trending.getOrNull(i), popular.getOrNull(i)) }
+    }
+
+    private fun fetch(service: Service, type: String, sortBy: String = "TRENDING"): List<Slide> {
         val body = JSONObject()
             .put("operationName", "GetPopularTitles")
             .put("variables", JSONObject()
-                .put("popularTitlesSortBy", "TRENDING")
+                .put("popularTitlesSortBy", sortBy)
                 .put("first", PER_SERVICE + 2)
                 .put("sortRandomSeed", 0)
                 .put("platform", "WEB")
@@ -133,7 +146,7 @@ object Trending {
         if (path.isBlank() || path == "null") "" else IMAGES + path.replace("{profile}", size).replace("{format}", "jpg")
 
     private fun keep(at: Long, list: List<Slide>): String = JSONObject().put("at", at).put("slides", JSONArray().apply {
-        list.forEach { s -> put(JSONObject().put("service", s.service).put("title", s.title).put("about", s.about).put("picture", s.picture).put("poster", s.poster).put("show", s.show)) }
+        list.forEach { s -> put(JSONObject().put("service", s.service).put("title", s.title).put("about", s.about).put("picture", s.picture).put("poster", s.poster).put("show", s.show).put("popular", s.popular)) }
     }).toString()
 
     private fun parseKept(text: String): Pair<Long, List<Slide>> {
@@ -141,7 +154,7 @@ object Trending {
         val a = o.getJSONArray("slides")
         return o.getLong("at") to (0 until a.length()).map { i ->
             val s = a.getJSONObject(i)
-            Slide(s.getString("service"), s.getString("title"), s.optString("about"), s.getString("picture"), s.optString("poster"), s.optBoolean("show"))
+            Slide(s.getString("service"), s.getString("title"), s.optString("about"), s.getString("picture"), s.optString("poster"), s.optBoolean("show"), s.optBoolean("popular"))
         }
     }
 

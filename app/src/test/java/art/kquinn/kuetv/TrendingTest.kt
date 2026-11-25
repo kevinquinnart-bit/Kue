@@ -43,4 +43,11 @@ class TrendingTest {
         assertTrue(shown("A Trending Show") && shown("Trending · Netflix") && shown("What it is about."))
         Trending.setForChecks(emptyList())
     }
+
+    @Test fun mostPopularShowsComeInBetweenTheTrendingOnes() {
+        fun slide(t: String, popular: Boolean = false) = Trending.Slide("Netflix", t, "", "", "", true, popular)
+        val mixed = Trending.mix(listOf(slide("T1"), slide("T2"), slide("T3")), listOf(slide("P1", true), slide("P2", true)))
+        assertEquals(listOf("T1", "P1", "T2", "P2", "T3"), mixed.map { it.title })
+        assertEquals(listOf(false, true, false, true, false), mixed.map { it.popular })
+    }
 }

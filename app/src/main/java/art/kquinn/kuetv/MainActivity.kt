@@ -1625,7 +1625,7 @@ private class BrowseState(saved: Map<String, String> = emptyMap()) {
     var settingsGroup by mutableStateOf("KueTV")
 
     /** The sections open in Settings' parts, as "part|section". */
-    val settingsFolds = androidx.compose.runtime.mutableStateListOf<String>()
+    val settingsFolds = Folds.open
 
     /** Picking channels to hide in Live TV: the rows picked so far; null when not picking. */
     var hiding by mutableStateOf<Set<String>?>(null)
@@ -2529,7 +2529,10 @@ private fun MainScreen(
                                     settingsQuery = null
                                     when {
                                         e.page == "VPN" -> Vpn.screenOpen = true
-                                        e.page.isEmpty() -> state.settingsGroup = e.fold.orEmpty()
+                                        e.page.isEmpty() -> {
+                                            state.settingsGroup = e.fold.orEmpty()
+                                            if (e.label.startsWith("What leaves")) ("|What leaves this " + if (phone) "phone" else "TV").let { if (!Folds.isOpen(it)) Folds.flip(it) }
+                                        }
                                         else -> {
                                             if (e.fold != null) (e.page + "|" + e.fold).let { if (it !in state.settingsFolds) state.settingsFolds.add(it) }
                                             leftFrom[0] = null
@@ -2593,11 +2596,13 @@ private fun MainScreen(
                         // 6. Privacy and storage
                         groupRow("Privacy and storage", KueSettings.Icons.PRIVACY, "What leaves this " + (if (phone) "phone" else "TV") + ", permissions", null)
                         if (state.settingsGroup == "Privacy and storage") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
+                            Fold("|What leaves this " + (if (phone) "phone" else "TV"), "What leaves this " + (if (phone) "phone" else "TV")) {
                             Note(
                                 "KueTV talks only to what you see in it: your TV provider, the add-ons, free channel lists and guides you choose, " +
                                     "movie and TV listings, the weather for your rough area, the VPN when it is on, Google Drive for your backup and " +
                                     "recordings, and GitHub for updates. There is no KueTV server.",
                             )
+                            }
                             FocusRow("Permissions", { KueSettings.openPermissions(context) }, look = Look.OTHER, below = "KueTV's page in the " + (if (phone) "phone's" else "TV's") + " own settings")
                             if (!phone) FocusRow("Storage", { leftFrom[0] = null; state.settingsPage = "This TV" }, look = Look.OTHER, below = "In This TV, with the TV's space and apps")
                         }
@@ -2627,17 +2632,9 @@ private fun MainScreen(
                     val sub: @Composable (String) -> Unit = { Box(Modifier.padding(top = 14.dp)) { Heading(it) } }
                     // Each part's sections fold away (Kevin, 25 November 2026: too much scrolling): OK on a section's name
                     // opens it in place, OK again closes it. A section opened from Search all settings is open already.
-                    val fold: @Composable (String, @Composable () -> Unit) -> Unit = { title, content ->
-                        val id = page + "|" + title
-                        val open = id in state.settingsFolds
-                        FocusRow(
-                            title, { if (open) state.settingsFolds.remove(id) else state.settingsFolds.add(id) }, first(),
-                            look = Look.OTHER, chosen = open, drawn = KueSettings.Icons.CHEVRON, below = if (open) "OK to close" else null,
-                        )
-                        if (open) Column(Modifier.padding(start = if (phone) 14.dp else 24.dp), verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) { content() }
-                    }
+                    val fold: @Composable (String, @Composable () -> Unit) -> Unit = { title, content -> Fold(page + "|" + title, title, first(), content = content) }
                     when (page) {
-                        "Your things" -> YourThingsPage(first, sub) { e ->
+                        "Your things" -> YourThingsPage(fold) { e ->
                             when (e.kind) {
                                 History.LIVE -> {
                                     val group = library.groups.firstOrNull { g -> g.versions.any { it.channel.url == e.key } }
@@ -2672,9 +2669,9 @@ private fun MainScreen(
                                         )
                                     }
                                 }
-                                sub("This provider")
                             }
-                            FocusRow("Change provider details", onEdit, first(), look = Look.OTHER)
+                            fold("This provider") {
+                            FocusRow("Change provider details", onEdit, look = Look.OTHER)
                             FocusRow("Add another provider", extras.addProvider, look = Look.OTHER, below = "The one in use is kept, to switch back to")
                             FocusRow("Reload channels and movies", onReload, look = Look.OTHER, below = "Fetches everything afresh from your provider")
                             if (inUse?.isLogin == true) {
@@ -2692,6 +2689,8 @@ private fun MainScreen(
                                 "DNS server: " + KueDns.names[dns], { KueDns.set(context, (dns + 1) % KueDns.names.size) }, look = Look.OTHER,
                                 below = "If your internet blocks your provider, try another · OK to change",
                             )
+                            }
+                            fold("Channel names and categories") {
                             // Tidy names: the same words taken off the front, middle or end of every channel's name at once.
                             var tidyWords by remember { mutableStateOf<String?>(null) }
                             val tidyTyped = tidyWords
@@ -2731,6 +2730,7 @@ private fun MainScreen(
                             }
                             val hiddenCount = remember(Choices.changes) { listOf("live", "film", "show").sumOf { Choices.hidden(context, it).size } }
                             FocusRow("Categories: show, hide and order" + if (hiddenCount == 0) "" else " ($hiddenCount hidden)", onCategories, look = Look.OTHER)
+                            }
                             fold("Free channels") {
                                 FocusRow("Free channel lists ($freeCount)", onFree, look = Look.OTHER, below = "Free channels, tried when your provider's won't play")
                             }
@@ -2782,21 +2782,24 @@ private fun MainScreen(
                                 if (favChannels.isEmpty() && favFilms.isEmpty() && favShows.isEmpty()) Note("Nothing starred yet. Hold OK on a channel, movie or series to star it.")
                                 var given = false
                                 val firstOne: () -> Modifier = { if (given) Modifier else { given = true; first() } }
-                                if (favChannels.isNotEmpty()) sub("Channels")
                                 val livePlayables = remember(favChannels) { favChannels.map { livePlayable(it, library.account, library.serverAheadSec) } }
-                                favChannels.forEachIndexed { i, g ->
-                                    FocusRow(g.name, { onPlay(livePlayables, i, true, "fav:" + g.id) }, firstOne(), look = Look.OTHER, leading = { Logo(g.logo) },
-                                        below = "Hold OK to take off", onHold = { favourites.toggleAll(g.versions.map { Favourites.key(it.channel, login) }) })
+                                if (favChannels.isNotEmpty()) Fold("Your channels|Favourite channels", "Favourite channels", below = favChannels.size.toString()) {
+                                    favChannels.forEachIndexed { i, g ->
+                                        FocusRow(g.name, { onPlay(livePlayables, i, true, "fav:" + g.id) }, firstOne(), look = Look.OTHER, leading = { Logo(g.logo) },
+                                            below = "Hold OK to take off", onHold = { favourites.toggleAll(g.versions.map { Favourites.key(it.channel, login) }) })
+                                    }
                                 }
-                                if (favFilms.isNotEmpty()) sub("Movies")
-                                for (f in favFilms) {
-                                    FocusRow(f.name, { onPlay(listOf(Playable(f.name, f.url, find = finder("movie", f.name, null, null), poster = f.poster)), 0, false, "fav:" + f.id) }, firstOne(),
-                                        look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(f, login)) })
+                                if (favFilms.isNotEmpty()) Fold("Your channels|Favourite movies", "Favourite movies", below = favFilms.size.toString()) {
+                                    for (f in favFilms) {
+                                        FocusRow(f.name, { onPlay(listOf(Playable(f.name, f.url, find = finder("movie", f.name, null, null), poster = f.poster)), 0, false, "fav:" + f.id) }, firstOne(),
+                                            look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(f, login)) })
+                                    }
                                 }
-                                if (favShows.isNotEmpty()) sub("Series")
-                                for (sh in favShows) {
-                                    FocusRow(sh.name, { state.openShow = sh; section = Section.SERIES }, firstOne(),
-                                        look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(sh)) })
+                                if (favShows.isNotEmpty()) Fold("Your channels|Favourite series", "Favourite series", below = favShows.size.toString()) {
+                                    for (sh in favShows) {
+                                        FocusRow(sh.name, { state.openShow = sh; section = Section.SERIES }, firstOne(),
+                                            look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(sh)) })
+                                    }
                                 }
                             }
                         }
@@ -2883,9 +2886,13 @@ private fun MainScreen(
                         "Movies and series" -> {
                             // Three jobs, three screens.
                             val stremioEmail = remember(Stremio.changes) { if (Stremio.key(context).isEmpty()) "" else Stremio.email(context) }
-                            FocusRow("Stremio account", onStremio, first(), look = Look.OTHER, below = if (stremioEmail.isEmpty()) "Not signed in" else "Signed in as $stremioEmail")
-                            FocusRow("My add-ons (" + addOns.size + ")", onAddOns, look = Look.OTHER, below = addOnsSummary(addOns))
-                            FocusRow("Add an add-on or channel list by its link", onAddLink, look = Look.OTHER)
+                            fold("Stremio") {
+                                FocusRow("Stremio account", onStremio, look = Look.OTHER, below = if (stremioEmail.isEmpty()) "Not signed in" else "Signed in as $stremioEmail")
+                            }
+                            fold("Add-ons") {
+                                FocusRow("My add-ons (" + addOns.size + ")", onAddOns, look = Look.OTHER, below = addOnsSummary(addOns))
+                                FocusRow("Add an add-on or channel list by its link", onAddLink, look = Look.OTHER)
+                            }
                         }
                         "Watching" -> {
                             fold("Subtitles") {
@@ -2984,10 +2991,13 @@ private fun MainScreen(
                             }
                         }
                         "Look and feel" -> {
+                            fold("Language") {
                             FocusRow(
-                                "Language: " + UiLang.name(UiLang.code), { UiLang.set(context, UiLang.next()) }, first(), look = Look.OTHER,
+                                "Language: " + UiLang.name(UiLang.code), { UiLang.set(context, UiLang.next()) }, look = Look.OTHER,
                                 below = "KueTV's own words. OK for the next language",
                             )
+                            }
+                            fold("Colours") {
                             FocusRow(
                                 "Colour scheme: " + Looks.schemes[Looks.scheme].name, { Looks.nextScheme(context) }, look = Look.OTHER,
                                 below = Looks.schemes.joinToString(" · ") { it.name } + " · OK for the next",
@@ -2997,6 +3007,7 @@ private fun MainScreen(
                             FocusRow("Outline round what the remote is on: " + Looks.outlines[Looks.outline], { Looks.set(context, "outline", (Looks.outline + 1) % Looks.outlines.size) }, look = Look.OTHER, below = "Easier to spot from across the room")
                             FocusRow("Glass look: " + Looks.glasses[Looks.glass], { Looks.set(context, "glass", (Looks.glass + 1) % Looks.glasses.size) }, look = Look.OTHER, below = "See-through panels on a soft glow of the highlight colour")
                             FocusRow("Back to the usual look", { Looks.reset(context) }, look = Look.OTHER)
+                            }
                         }
                         "This TV" -> {
                             // The TV's own aerial channels, when it has a tuner.
@@ -3169,9 +3180,13 @@ private fun MainScreen(
                             }
                         }
                         "Help and about" -> {
-                            FocusRow("Health check" + if (notWorking == 0) "" else " · $notWorking not working", onHealth, first(), look = Look.OTHER, below = "Tries every source the app uses")
-                            FocusRow("Report for Claude", onReport, look = Look.OTHER)
-                            FocusRow("About and updates · version " + BuildConfig.VERSION_NAME, onAbout, look = Look.OTHER)
+                            fold("Checks") {
+                                FocusRow("Health check" + if (notWorking == 0) "" else " · $notWorking not working", onHealth, look = Look.OTHER, below = "Tries every source the app uses")
+                                FocusRow("Report for Claude", onReport, look = Look.OTHER)
+                            }
+                            fold("Version and updates") {
+                                FocusRow("About and updates · version " + BuildConfig.VERSION_NAME, onAbout, look = Look.OTHER)
+                            }
                         }
                     }
                     FocusRow("‹ Back to Settings", close, if (given) Modifier else Modifier.focusRequester(pageFirst), look = Look.OTHER)
@@ -5771,9 +5786,16 @@ private fun CategoriesScreen(library: Library, onDone: () -> Unit) {
                 // While one kind is being put in order, the others are out of the way.
                 if (sorting != null && sorting != kind.key) return@forEach
                 val off = hidden[kind.key].orEmpty()
+                // Each kind folds away (Kevin, 25 November 2026); open while its categories are being put in order.
+                val foldId = "Categories|" + kind.key
+                val kindOpen = sorting == kind.key || Folds.isOpen(foldId)
                 item(key = "h:" + kind.key) {
-                    Box(Modifier.padding(top = 16.dp)) { Heading(kind.title + " · " + (kind.categories.size - kind.categories.count { it.id in off }) + " of " + kind.categories.size + " showing") }
+                    FocusRow(
+                        kind.title, { if (sorting == null) Folds.flip(foldId) }, look = Look.OTHER, chosen = kindOpen, drawn = KueSettings.Icons.CHEVRON,
+                        below = (kind.categories.size - kind.categories.count { it.id in off }).toString() + " of " + kind.categories.size + " showing" + if (kindOpen && sorting == null) " · OK to close" else "",
+                    )
                 }
+                if (!kindOpen) return@forEach
                 if (sorting == null && kind.key == "live") {
                     item(key = "group:live") {
                         val on = Choices.groupedLive(context)
@@ -5823,10 +5845,12 @@ private fun CategoriesScreen(library: Library, onDone: () -> Unit) {
             if (sorting == null) {
                 val hiddenIds = HiddenChannels.all(context)
                 val hiddenNames = library.channels.filter { it.id in hiddenIds }.groupBy { it.name }
+                val hiddenOpen = Folds.isOpen("Categories|hidden")
                 item(key = "h:channels") {
-                    Box(Modifier.padding(top = 16.dp)) { Heading("Hidden channels · " + hiddenNames.size) }
+                    FocusRow("Hidden channels", { Folds.flip("Categories|hidden") }, look = Look.OTHER, chosen = hiddenOpen, drawn = KueSettings.Icons.CHEVRON,
+                        below = hiddenNames.size.toString() + " hidden" + if (hiddenOpen) " · OK to close" else "")
                 }
-                if (hiddenNames.isEmpty()) {
+                if (!hiddenOpen) Unit else if (hiddenNames.isEmpty()) {
                     item(key = "none:channels") { Note(if (phone) "None. Press and hold a channel in Live TV to hide it." else "None. Hold OK on a channel in Live TV to hide it.") }
                 } else {
                     item(key = "all:channels") { FocusRow("Show all hidden channels again", { HiddenChannels.show(context, hiddenIds) }, look = Look.OTHER) }
@@ -5909,8 +5933,9 @@ private fun HomeScreen(
             // Until it has been fetched (or with no internet): the channel last watched, as before.
             LaunchedEffect(Unit) { Trending.load(context) }
             val slides = Trending.slides
-            // 256 tall (216 before 24 November 2026), for 2 or 3 more lines of what each one is about.
-            if (slides.isNotEmpty()) TrendingBanner(slides, clock, Modifier.fillMaxWidth().height(256.dp))
+            // 222 tall (Kevin, 25 November 2026: at 256 the row under the tiles was pushed off the screen, with room
+            // spare under the words). The same lines of words as at 256: the clock and the service share one line now.
+            if (slides.isNotEmpty()) TrendingBanner(slides, clock, Modifier.fillMaxWidth().height(222.dp))
             else Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -6356,14 +6381,15 @@ private fun TrendingBanner(slides: List<Trending.Slide>, clock: String, modifier
                 // Cropped from the top, so heads and the tops of pictures are kept (cut from the middle, they were lost).
                 AsyncImage(model = s.picture, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxHeight().fillMaxWidth(0.66f).align(Alignment.CenterEnd))
                 Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(0f to Panel, 0.36f to Panel, 0.62f to Panel.copy(alpha = 0f))))
-                Column(Modifier.fillMaxHeight().fillMaxWidth(0.52f).padding(start = 20.dp, top = 14.dp, bottom = 12.dp, end = 8.dp)) {
+                Column(Modifier.fillMaxHeight().fillMaxWidth(0.52f).padding(start = 20.dp, top = 10.dp, bottom = 8.dp, end = 8.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         KueLogo(24.dp, 17.sp)
                         Spacer(Modifier.width(14.dp))
                         Text(clock, color = Soft, fontSize = 14.sp, maxLines = 1)
+                        Spacer(Modifier.width(14.dp))
+                        Text((if (s.popular) "Most popular · " else "Trending · ") + s.service, color = AccentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Text("Trending · " + s.service, color = AccentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    Spacer(Modifier.height(6.dp))
                     // Nothing cut off (Kevin, 23 November 2026): a long name takes two lines, and words that don't fit
                     // scroll up by themselves.
                     Text(s.title, color = Ink, fontSize = 24.sp, lineHeight = 28.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
@@ -6380,9 +6406,9 @@ private fun TrendingBanner(slides: List<Trending.Slide>, clock: String, modifier
             }
         }
         // Where this one is among them: a dot for each, along the bottom right.
-        Row(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        Row(Modifier.align(Alignment.BottomEnd).padding(end = 16.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             slides.indices.forEach { i ->
-                Box(Modifier.size(if (i == at) 8.dp else 6.dp).clip(RoundedCornerShape(50)).background(if (i == at) Accent else Ink.copy(alpha = 0.5f)))
+                Box(Modifier.size(if (i == at) 7.dp else 5.dp).clip(RoundedCornerShape(50)).background(if (i == at) Accent else Ink.copy(alpha = 0.5f)))
             }
         }
     }
@@ -7091,23 +7117,25 @@ private fun FreeListsScreen(channelCount: Int, onDone: () -> Unit, onWatch: () -
         }
         // One press adds a ready-made list.
         val ready = FreeStore.ready.filter { it.second !in lists }
-        if (ready.isNotEmpty()) Box(Modifier.padding(top = 10.dp)) { Heading("Add with one press") }
-        ready.forEach { (name, address) -> FocusRow("Add " + name, { add(address) }, look = Look.OTHER) }
-        Box(Modifier.padding(top = 10.dp)) { Heading("Or add any list by its link") }
+        val first = remember { FocusRequester() }
+        LaunchedEffect(Unit) {
+            withFrameNanos { }
+            if (!phone) runCatching { first.requestFocus() }
+        }
+        if (ready.isNotEmpty()) Fold("Free lists|Add with one press", "Add with one press", below = ready.size.toString() + " ready-made lists") {
+            ready.forEach { (name, address) -> FocusRow("Add " + name, { add(address) }, look = Look.OTHER) }
+        }
+        Fold("Free lists|Add any list by its link", "Add any list by its link", Modifier.focusRequester(first)) {
         phoneAddress?.let { address ->
             Note("Easiest: on your phone, on the same Wi-Fi, open")
             Text(address, color = AccentInk, fontSize = Sizes.CODE, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 16.dp))
             Note("and paste the link there.")
         }
         Field("Channel list or add-on link", link, onDone = { add(link) }) { link = it }
-        val first = remember { FocusRequester() }
-        LaunchedEffect(Unit) {
-            withFrameNanos { }
-            if (!phone) runCatching { first.requestFocus() }
+        FocusRow(if (busy) "Reading the list…" else "Add", { add(link) }, look = Look.MAIN)
         }
-        FocusRow(if (busy) "Reading the list…" else "Add", { add(link) }, Modifier.focusRequester(first), look = Look.MAIN)
         said?.let { StatusBox(Status(it, if (it.startsWith("Added") || it.startsWith("Removed")) Status.OK else Status.INFO)) }
-        if (lists.isNotEmpty()) Box(Modifier.padding(top = 14.dp)) { Heading("Added") }
+        if (lists.isNotEmpty()) Fold("Free lists|Added", "Added", below = lists.size.toString() + " lists") {
         lists.forEach { list ->
             val health = when (Health.stateOf("Free list: " + FreeStore.label(list))) {
                 Check.WORKING -> "✓ working · "
@@ -7116,6 +7144,7 @@ private fun FreeListsScreen(channelCount: Int, onDone: () -> Unit, onWatch: () -
                 else -> ""
             }
             FocusRow(health + "Remove " + FreeStore.label(list), { FreeStore.remove(context, list); said = "Removed." }, look = Look.OTHER, below = list)
+        }
         }
         FocusRow("Done", onDone, look = Look.OTHER)
     }
@@ -7177,12 +7206,13 @@ private fun AerialOwnScreen(onDone: () -> Unit) {
             below = "Lines of number and name, KueTV's own channel file, or a channel list (.m3u) with channel numbers. Read again every day")
         said?.let { StatusBox(Status(it, if (it.startsWith("Added")) Status.OK else Status.INFO)) }
         if (own != null) {
-            Box(Modifier.padding(top = 10.dp)) { Heading("In use (" + own.channels.map { it.number }.distinct().size + ")") }
+            Fold("Aerial own|In use", "In use (" + own.channels.map { it.number }.distinct().size + ")") {
             FocusRow("Remove your own numbers", { AerialLists.clearOwn(context); link = ""; said = "Removed. The list's numbers are used again." }, look = Look.OTHER)
             own.channels.distinctBy { it.number }.sortedBy { it.number }.forEach { c ->
                 FocusRow(c.number.toString() + "  " + c.name, {
                     if (!Aerial.openChannel(context, c.number)) kueToast(context, "Aerial channel " + c.number + " wouldn't open.")
                 }, look = Look.OTHER, below = "OK to check it on the aerial")
+            }
             }
         }
         FocusRow("Done", onDone, look = Look.OTHER)
@@ -7254,7 +7284,7 @@ private fun StremioScreen(onDone: () -> Unit) {
                 Stremio.signOut(context)
                 status = Status("Signed out. The add-ons already here stay.", Status.OK)
             }, look = Look.OTHER)
-            Heading("How it works")
+            Fold("Stremio|How it works", "How it works") {
             InfoPanel(
                 "Your Stremio account holds the list of add-ons.\n" +
                     "Adding or removing one in KueTV does the same in Stremio.\n" +
@@ -7262,6 +7292,7 @@ private fun StremioScreen(onDone: () -> Unit) {
                     "Your TV and phone share the list and this sign-in when they keep in step.",
             )
             Note("Which add-ons work: Settings › Movies and series › My add-ons.")
+            }
             FocusRow("‹ Back", onDone, look = Look.OTHER)
         }
     } else {
@@ -7446,18 +7477,20 @@ private fun VpnScreen(onDone: () -> Unit) {
             )
             // KueTV's answer, here by the buttons, so it is seen without going back to the top.
             said?.let { StatusBox(it) }
-            Heading("Another VPN")
+            Fold("VPN|Another VPN", "Another VPN") {
             if (phone) FocusRow("Choose its OpenVPN file on this phone", { pick.launch("*/*") }, look = Look.OTHER)
             Field("Or a link to its OpenVPN file", link) { link = it }
             FocusRow(if (busy) "Reading…" else "Add that link with this login", { keep("", link, user, pass) }, look = Look.OTHER)
             if (!details.isEmpty) FocusRow("Keep the file I have, with this username and password", { keep(details.config, "", user, pass) }, look = Look.OTHER)
-            Heading("Where to get a free Irish one")
+            }
+            Fold("VPN|Where to get a free Irish one", "Where to get a free Irish one") {
             InfoPanel(
                 "VPN Jantit has a free server in Dublin. On their page, make an account for the server called Ireland 1:\n" +
                     "https://www.vpnjantit.com/create-free-account?server=ie1&type=OpenVPN\n" +
                     "Type the username and password above exactly as their page shows them (they add -vpnjantit.com to the username), then choose \"Use VPN Jantit's Dublin server\".\n" +
                     "A free account there lasts 7 days. When it runs out, KueTV says so: make a new one and add it here again.",
             )
+            }
             FocusRow(if (details.isEmpty) "‹ Back" else "‹ Back, without changing anything", { if (editing) editing = false else onDone() }, look = Look.OTHER)
         }
     } else {
@@ -7481,12 +7514,13 @@ private fun VpnScreen(onDone: () -> Unit) {
                 Vpn.forget(context)
                 said = Status("Removed.", Status.OK)
             }, look = Look.OTHER)
-            Heading("How it works")
+            Fold("VPN|How it works", "How it works") {
             InfoPanel(
                 "While the VPN is on, everything on this $device goes through it, not just KueTV.\n" +
                     "Your home Wi-Fi stays reachable, so the phone page and keeping in step still work.\n" +
                     "A free account that runs out shows here as refused: make a new one and add it again.",
             )
+            }
             FocusRow("‹ Back", onDone, look = Look.OTHER)
         }
     }
@@ -7594,7 +7628,8 @@ internal fun AddOnsForChecks() {
  * a PIN, a kids profile). [first] lands the remote on the page's first row.
  */
 @Composable
-private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> Unit, play: (History.Entry) -> Unit) {
+private fun YourThingsPage(fold: @Composable (String, @Composable () -> Unit) -> Unit, play: (History.Entry) -> Unit) {
+    val first: () -> Modifier = { Modifier }
     val context = LocalContext.current
     val profiles = remember(Profiles.changes) { Profiles.all(context) }
     val current = remember(Profiles.changes) { Profiles.current(context) }
@@ -7608,7 +7643,7 @@ private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> U
     var settingPin by remember { mutableStateOf(false) }
     var newPin by remember { mutableStateOf("") }
 
-    sub("Profiles · using " + current.name)
+    fold("Profiles") {
     said?.let { StatusBox(it) }
     val asking = pinFor
     when {
@@ -7679,9 +7714,10 @@ private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> U
             FocusRow(if (current.pin.isEmpty()) "Set a PIN for " + current.name else "Change or remove " + current.name + "'s PIN", { settingPin = true; said = null }, look = Look.OTHER)
         }
     }
+    }
 
     val history = remember(History.changes, Profiles.changes) { History.all(context) }
-    sub("History" + if (history.isEmpty()) "" else " · " + history.size)
+    fold("History") {
     if (history.isEmpty()) Note("Nothing played yet in this profile.")
     val clock = remember { java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK) }
     for (e in history.take(40)) {
@@ -7691,6 +7727,7 @@ private fun YourThingsPage(first: () -> Modifier, sub: @Composable (String) -> U
         )
     }
     if (history.isNotEmpty()) FocusRow("Clear history", { History.clear(context) }, look = Look.OTHER, below = "Only this profile's")
+    }
 }
 
 /**
@@ -7866,4 +7903,23 @@ private object TvInputsHere {
         Report.note("TV tools", "input $id: " + (if (ok.isSuccess) "opened" else "refused: " + ok.exceptionOrNull()?.javaClass?.simpleName))
         return ok.isSuccess
     }
+}
+
+/**
+ * Sections that fold away (Kevin, 25 November 2026: "everything that can be closed up and filed, do it"): a heading
+ * is a row with an arrow; OK opens its rows underneath, OK again closes them. All closed until opened; Search all
+ * settings opens the one it goes to. [id] must be unique on its screen: "Screen|Heading".
+ */
+internal object Folds {
+    val open = androidx.compose.runtime.mutableStateListOf<String>()
+    fun isOpen(id: String) = id in open
+    fun flip(id: String) { if (id in open) open.remove(id) else open.add(id) }
+}
+
+@Composable
+private fun Fold(id: String, title: String, modifier: Modifier = Modifier, below: String? = null, content: @Composable () -> Unit) {
+    val phone = LocalPhone.current
+    val open = Folds.isOpen(id)
+    FocusRow(title, { Folds.flip(id) }, modifier, look = Look.OTHER, chosen = open, drawn = KueSettings.Icons.CHEVRON, below = if (open) "OK to close" else below)
+    if (open) Column(Modifier.padding(start = if (phone) 14.dp else 24.dp), verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) { content() }
 }

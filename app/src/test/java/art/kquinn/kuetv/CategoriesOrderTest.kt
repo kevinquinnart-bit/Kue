@@ -33,6 +33,7 @@ class CategoriesOrderTest {
     private fun where(): String = rule.onAllNodes(isFocused()).fetchSemanticsNodes().joinToString { n ->
         n.config.getOrElseNullable(androidx.compose.ui.semantics.SemanticsProperties.Text) { null }?.joinToString(" ") ?: "something with no words"
     }.ifEmpty { "nothing" }
+    private fun shows(text: String) = rule.onAllNodes(hasText(text, substring = true)).fetchSemanticsNodes().isNotEmpty()
     private fun top(text: String) = rule.onAllNodes(hasText(text)).fetchSemanticsNodes().first().boundsInRoot.top
 
     @Test fun liveTvCategoriesArePutInOrderWithTheRemote() {
@@ -42,12 +43,16 @@ class CategoriesOrderTest {
             listOf(Channel("10", "BBC One", "", "1", "http://tv.example/live/10.ts", 0)),
             emptyList(), emptyList(),
         )
+        Folds.open.clear()
         rule.setContent { CategoriesForChecks(library) }
         rule.waitForIdle()
         assertTrue("the remote starts on Done · remote on " + where(), remoteOn("Done"))
 
         press(Key.DirectionDown)
-        assertTrue("▼ moves onto Group by topic · remote on " + where(), remoteOn("Group by topic"))
+        assertTrue("▼ moves onto Live TV, folded · remote on " + where(), remoteOn("Live TV") && !shows("Group by topic"))
+        press(Key.DirectionCenter)
+        press(Key.DirectionDown)
+        assertTrue("OK opens it, ▼ moves onto Group by topic · remote on " + where(), remoteOn("Group by topic"))
         press(Key.DirectionDown)
         assertTrue("▼ moves onto Put Live TV's categories in order · remote on " + where(), remoteOn("Put Live TV"))
         press(Key.DirectionCenter)
