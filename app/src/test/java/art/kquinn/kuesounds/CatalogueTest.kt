@@ -155,6 +155,27 @@ class CatalogueTest {
     }
 
     @Test
+    fun aSongOnlyOnABestOfBorrowsThatRecordsCover() {
+        // Real answer of 25 November 2026: "A Moment With You" first came out on Ladies & Gentlemen, a best of.
+        val home = Catalogue.chooseSongHome(Catalogue.parseRecordings(saved("georgemichael_moment_song.json")), "A Moment With You", "George Michael")
+        assertNull(home.album)
+        assertNull(home.single)
+        assertEquals("Ladies & Gentlemen: The Best of George Michael", home.firstOut?.title)
+        assertEquals(1998, home.firstOut?.year)
+    }
+
+    @Test
+    fun editionWordsAreLeftOutOfTheAlbumName() {
+        assertEquals("Kite", Library.cleanAlbum("Kite (Deluxe Edition)", "Kirsty MacColl").first)
+        assertEquals("Driven By You", Library.cleanAlbum("Driven By You (2011 Remaster)", "Queen").first)
+        assertEquals("Breathe", Library.cleanAlbum("Breathe [Bonus Track]", "Faith Hill").first)
+        assertEquals("Give It Up", Library.cleanAlbum("Give It Up [Single]", "The Goodmen").first)
+        assertEquals("Peace And Love", Library.cleanAlbum("Peace And Love Remastered", "The Pogues").first)
+        assertEquals("If I Should Fall From Grace With God", Library.cleanAlbum("If I Should Fall From Grace With God (Expanded)", "The Pogues").first)
+        assertEquals("Hunting High And Low", Library.cleanAlbum("Hunting High And Low", "a-Ha").first)
+    }
+
+    @Test
     fun theLooseSearchNeverTakesADifferentRecord() {
         // George Michael has no "A Moment With You" in the catalogue: none of his other records is taken for it.
         assertNull(Catalogue.chooseLoose(Catalogue.parseReleases(saved("georgemichael_moment_loose.json")), "A Moment With You", "George Michael", 10))

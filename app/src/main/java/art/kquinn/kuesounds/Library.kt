@@ -183,11 +183,21 @@ object Library {
             t = t.replace(Regex("^\\s*" + Regex.escape(artist) + "\\s*[-\u2013:]\\s*", RegexOption.IGNORE_CASE), "")
         }
         t = t.replace(Regex("""\s*[\[(](?:19|20)\d\d[\])]\s*$"""), "")
+        // Words about the edition, not the album's name (Kevin's report, 25 November 2026: "Kite (Deluxe Edition)",
+        // "Driven By You (2011 Remaster)", "Breathe [Bonus Track]", "Give It Up [Single]" all found nothing in the catalogue).
+        t = t.replace(editionPart, "").replace(Regex("""\s+-\s+(?:single|ep)\s*$""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s+remaster(?:ed)?(?:\s+(?:19|20)\d\d)?\s*$""", RegexOption.IGNORE_CASE), "")
         t = t.replace(Regex("""^(?:19|20)\d\d\s*-\s+"""), "")
         t = t.trim().trimStart('-', '+', '_', '.', '~', '*', ' ').trimEnd('-', '+', '_', '~', '*', ' ')
         t = t.replace(Regex("""\s{2,}"""), " ").trim()
         return t.ifBlank { raw.trim() } to disc
     }
+
+    /** A part in brackets that only says which edition it is: remastered, deluxe, expanded, bonus tracks, a single. */
+    private val editionPart = Regex(
+        """\s*[\[(][^\])]*\b(?:remaster(?:ed)?|deluxe|expanded|edition|bonus|single|anniversary|special|legacy|reissue)\b[^\])]*[\])]""",
+        RegexOption.IGNORE_CASE,
+    )
 
     /** An artist without anyone featured ("Jay-Z feat. Alicia Keys" is "jay-z"), for telling artists apart. */
     fun mainArtist(artist: String): String =

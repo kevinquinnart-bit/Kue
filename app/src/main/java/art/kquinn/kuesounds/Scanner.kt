@@ -249,6 +249,21 @@ object Scanner {
             save()
             note("album names now match without punctuation; $again songs on albums with no match are looked up once more")
         }
+        // 25 November 2026 (Kevin's report: 121 of 129 albums not found, many with no cover): edition words such as
+        // "(Deluxe Edition)" and "(2011 Remaster)" are left out of the search now, and a song with no album or single of
+        // its own gets the cover of the record it first came out on. Albums still without a match are asked again,
+        // and their songs looked up once more for a cover where the album has none.
+        if (data.version < 9) {
+            val noArt = { t: Track -> data.art[keyOf(t)]?.let { File(it).exists() } != true }
+            val again = data.tracks.filter { t -> keyOf(t) !in data.releases && keyOf(t) !in data.ownSingles }
+            val ids = again.map { it.id }.toSet()
+            data = data.copy(
+                tracks = data.tracks.map { t -> if (t.id in ids) t.copy(checked = false, ownLook = t.ownLook && !noArt(t)) else t },
+                version = 9,
+            )
+            save()
+            note(again.size.toString() + " songs on albums with no match are looked up again, for a match or a cover")
+        }
         read = data.tracks.count { it.tagged }
     }
 
@@ -555,6 +570,7 @@ object Scanner {
                 al.tracks.filter { !it.ownLook && (it.id in loose || (each && (it.checked || onItsOwn(al)))) }.map { al to it }
             }
             var moved = 0
+            var borrowed = 0
             songs.forEachIndexed { i, (al, t) ->
                 say("Finding each song's own album", i + 1, songs.size)
                 val home = lookup(t.artist + " / " + t.title) { Catalogue.findSongHome(t.title, t.artist) }.getOrNull() ?: return@forEachIndexed
@@ -562,13 +578,13 @@ object Scanner {
                 if (target != null) {
                     apply(setOf(t.id), al, target, target.title, carryCover = false)
                     moved++
-                }
+                } else if (home.firstOut != null && borrowCover(t, home.firstOut)) borrowed++
                 keepSingle(t.id, home.single)
                 markSong(t.id) { it.copy(checked = true, ownLook = true, singleChecked = true) }
                 if (i % 10 == 9) save()
             }
             save()
-            if (songs.isNotEmpty()) note("looked up " + songs.size + " songs from compilations, greatest hits, unknown albums or with no album: " + moved + " given their own album or single")
+            if (songs.isNotEmpty()) note("looked up " + songs.size + " songs from compilations, greatest hits, unknown albums or with no album: " + moved + " given their own album or single, " + borrowed + " covers from the record the song first came out on")
 
             makeOwnSingles(loose)
 
@@ -632,6 +648,20 @@ object Scanner {
 
     private fun markSong(id: String, change: (Track) -> Track) {
         data = data.copy(tracks = data.tracks.map { if (it.id == id) change(it) else it })
+    }
+
+    /**
+     * A song with no album or single of its own in the catalogue keeps its place, and its album (if it has no
+     * picture yet) gets the cover of the record the song first came out on, a best of included (Kevin, 25 November
+     * 2026: "A Moment With You" is on George Michael's Ladies & Gentlemen, as Google and Shazam show). True when a
+     * cover was kept. Never put in place of a cover the album already has.
+     */
+    private fun borrowCover(t: Track, from: Catalogue.Match): Boolean {
+        val key = keyOf(data.tracks.firstOrNull { it.id == t.id } ?: t)
+        if (data.art[key]?.let { File(it).exists() } == true) return false
+        val path = runCatching { Catalogue.cover(from) }.getOrNull()?.let { keepPicture(it, key + "\u0002firstout") } ?: return false
+        data = data.copy(art = data.art + (key to path))
+        return true
     }
 
     /** Keeps the single a song came out as, with its cover. True when there was one. */

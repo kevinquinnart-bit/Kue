@@ -258,7 +258,7 @@ object Catalogue {
      * Where a song properly belongs: the artist's own studio album it first came out on, and the single
      * it came out as (if it did). Either can be missing.
      */
-    data class SongHome(val album: Match?, val single: Match?)
+    data class SongHome(val album: Match?, val single: Match?, val firstOut: Match? = null)
 
     /** Reads a song search: each found release with the found song's own title and its score. */
     fun parseRecordings(json: String): List<Triple<Int, String, Release>> {
@@ -289,7 +289,18 @@ object Catalogue {
         val byYear = compareBy<Release> { if (it.year > 0) it.year else 9999 }
         val album = plain.filter { it.type.equals("Album", true) }.minWithOrNull(byYear)
         val single = plain.filter { it.type.equals("Single", true) && bare(it.title).startsWith(name) }.minWithOrNull(byYear)
-        return SongHome(album?.let { Match(it.title, it.artist, it.year, it.id, it.groupId) }, single?.let { Match(it.title, it.artist, it.year, it.id, it.groupId) })
+        // Where the song first came out at all, a collection included: when it has no album or single of its own,
+        // that record's cover is its picture (Kevin, 25 November 2026: George Michael's "A Moment With You" first came
+        // out on Ladies & Gentlemen, a best of, so it found no home and no cover).
+        val first = found.filter { (score, song, r) ->
+            score >= 85 && bare(song) == name && sameArtist(r.artist, artist) && (r.status.isEmpty() || r.status.equals("Official", true)) &&
+                r.otherTypes.none { it.equals("Live", true) || it.equals("Remix", true) }
+        }.map { it.third }.minWithOrNull(byYear)
+        return SongHome(
+            album?.let { Match(it.title, it.artist, it.year, it.id, it.groupId) },
+            single?.let { Match(it.title, it.artist, it.year, it.id, it.groupId) },
+            first?.let { Match(it.title, it.artist, it.year, it.id, it.groupId, compilation = it.otherTypes.any { t -> t.equals("Compilation", true) }) },
+        )
     }
 
     /** Looks a song up, to find the album it first came out on and the single it came out as. Call off the main thread. */
