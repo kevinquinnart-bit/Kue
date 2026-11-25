@@ -166,6 +166,7 @@ object Scanner {
             if (notes.isEmpty()) runCatching { notesFile().readLines().filter { it.isNotBlank() }.takeLast(200).forEach { notes.addLast(it) } }
         }
         note("KueSounds opened, version " + BuildConfig.VERSION_NAME)
+        SoundMatch.init(context)
         if (current.tracks.isEmpty()) data = Library.load(libraryFile())
         // Libraries kept before 0.1.5 had their albums looked up without keeping the catalogue's cover in
         // first place: every album is looked up once more.
@@ -330,6 +331,8 @@ object Scanner {
                         readDetails()
                         stage = 3
                         matchAlbums()
+                        // Then the ones the catalogue still doesn't know, by their sound; any put right are looked up again.
+                        if (matchBySound()) matchAlbums()
                         status = ""
                         note("scan finished")
                         break
@@ -517,6 +520,63 @@ object Scanner {
         // before the next, which keeps a long outage (about three quarters of an hour) from stopping the scan.
         Thread.sleep(if (failsInARow >= 3) 300_000L else 10_000L)
         return r
+    }
+
+    /**
+     * Match by sound, by itself (Kevin, 25 November 2026: "should find these"): every song on an album the catalogue
+     * didn't find, or with no known artist, is listened to once and asked about in AcoustID's free database. A sure
+     * match (75% or more) puts its name and artist right here, and the songs of one album on the album most of them
+     * are on; the files get it at the next Fix. Needs the AcoustID key; only on Wi-Fi (it reads two minutes of each
+     * song). True when any song was changed.
+     */
+    private fun matchBySound(): Boolean {
+        if (SoundMatch.key.isBlank()) return false
+        val d = data
+        val missed = notFound(view, d).flatMap { it.tracks } +
+            d.tracks.filter { Library.sortName(it.artist) == Library.sortName(Library.UNKNOWN_ARTIST) || it.artist.isBlank() }
+        val todo = missed.distinctBy { it.id }.filter { it.id !in d.soundChecked }
+        if (todo.isEmpty()) return false
+        if (!Net.unmetered(app)) { note("matching by sound waits for Wi-Fi: " + todo.size + " songs"); waitingForWifi = true; return false }
+        note("matching by sound: " + todo.size + " songs")
+        val best = HashMap<String, SoundMatch.Found>()
+        var failsInRow = 0
+        for ((i, t) in todo.withIndex()) {
+            say("Matching by sound", i + 1, todo.size)
+            val got = runCatching { SoundMatch.identify(t) }
+            got.onFailure { e ->
+                note("not matched by sound: " + t.fileName + ": " + (e.message ?: e.javaClass.simpleName))
+                if ("key" in (e.message ?: "")) return false
+                failsInRow++
+            }.onSuccess { failsInRow = 0 }
+            got.getOrNull()?.firstOrNull()?.takeIf { it.score >= 0.75 }?.let { best[t.id] = it }
+            data = data.copy(soundChecked = data.soundChecked + t.id)
+            if (i % 10 == 9) save()
+            if (failsInRow >= 8) { note("matching by sound stopped: 8 failures in a row"); break }
+        }
+        if (best.isEmpty()) { save(); note("matched by sound: none of " + todo.size); return false }
+        // Each album's songs go together to the album most of them are on, or each to its own first album or single.
+        val byAlbum = todo.filter { it.id in best }.groupBy { Library.albumKey(Library.albumArtistOf(it), it.album) }
+        val moves = HashMap<String, Pair<String, String>>()
+        for ((_, songs) in byAlbum) {
+            val common = songs.mapNotNull { best[it.id]?.albums }.flatten().groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+            for (t in songs) {
+                val f = best.getValue(t.id)
+                val album = when { common != null && common in f.albums -> common; f.albums.isNotEmpty() -> f.albums.first(); else -> f.single }
+                if (album != null) moves[t.id] = album to f.artist
+            }
+        }
+        data = data.copy(tracks = data.tracks.map { t ->
+            val f = best[t.id] ?: return@map t
+            val move = moves[t.id]
+            t.copy(
+                title = f.title, artist = f.artist,
+                album = move?.first ?: t.album, albumArtist = move?.second ?: t.albumArtist,
+                checked = move == null && t.checked, ownLook = false, fixed = false,
+            )
+        })
+        save()
+        note("matched by sound: " + best.size + " of " + todo.size + " songs, " + moves.size + " put on their album")
+        return true
     }
 
     private fun matchAlbums() {

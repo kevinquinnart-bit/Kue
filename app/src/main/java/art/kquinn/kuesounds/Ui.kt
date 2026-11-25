@@ -1677,7 +1677,13 @@ object Ui {
                     KueSettings.Icon(KueSettings.Icons.CHEVRON, 18.dp, K.Soft, 2.2f)
                 }
             }
-            if (showMissed) AlbumListBox("Not found in the catalogue", "Tap one to open it. Its ⋮ has Edit album name and artist.", missed, { showMissed = false }) { al ->
+            if (showMissed) AlbumListBox(
+                "Not found in the catalogue",
+                if (SoundMatch.key.isBlank()) "Add the AcoustID key in Match by sound below, and these are matched by their sound. Tap one to open it."
+                else "These are matched by their sound on Wi-Fi, by themselves. Tap one to open it; its ⋮ has Edit album name and artist.",
+                missed, { showMissed = false },
+                action = if (SoundMatch.key.isNotBlank() && !Scanner.running) ("Match these by sound now" to { showMissed = false; Scanner.scan() }) else null,
+            ) { al ->
                 showMissed = false
                 go(Screen.AlbumPage(al.key))
             }
@@ -1686,12 +1692,13 @@ object Ui {
 
     /** A list of albums in a box: tapping one opens it. */
     @Composable
-    private fun AlbumListBox(title: String, below: String, albums: List<Album>, onClose: () -> Unit, onPick: (Album) -> Unit) {
+    private fun AlbumListBox(title: String, below: String, albums: List<Album>, onClose: () -> Unit, action: Pair<String, () -> Unit>? = null, onPick: (Album) -> Unit) {
         Dialog(onDismissRequest = onClose) {
             Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Words(title, 19, bold = true, lines = 2)
                 Words(below, 14, K.Soft, lines = 3)
-                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
+                if (action != null) Button(action.first, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth(), onClick = action.second)
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp)) {
                     items(albums, key = { it.key }) { al ->
                         Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onPick(al) }.padding(vertical = 8.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
                             Cover(Scanner.artFor(al), Modifier.size(44.dp), corner = 8.dp, glyphSize = 20.dp)

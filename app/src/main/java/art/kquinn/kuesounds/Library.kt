@@ -80,6 +80,8 @@ data class LibraryData(
     val fixFailures: Map<String, Int> = emptyMap(),
     /** Song id to why its file couldn't be fixed last time, in plain words. Listed in Settings until it is fixed. */
     val fixProblems: Map<String, String> = emptyMap(),
+    /** Songs already listened to by Match by sound (found or not), so each is asked about once. */
+    val soundChecked: Set<String> = emptySet(),
 )
 
 object Library {
@@ -381,7 +383,7 @@ object Library {
             tracks, d.folders ?: emptyList(), d.art ?: emptyMap(), d.folderCovers ?: emptyMap(), d.scannedAt,
             d.releases ?: emptyMap(), d.catalogueCovers ?: emptySet(), d.version,
             d.singleTitles ?: emptyMap(), d.singleArt ?: emptyMap(), d.collections ?: emptySet(), d.ownSingles ?: emptySet(),
-            d.fixFailures ?: emptyMap(), d.fixProblems ?: emptyMap(),
+            d.fixFailures ?: emptyMap(), d.fixProblems ?: emptyMap(), d.soundChecked ?: emptySet(),
         )
     }
 
