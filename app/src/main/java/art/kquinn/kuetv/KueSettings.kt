@@ -255,6 +255,78 @@ object KueSettings {
         }
     }
 
+    /**
+     * A section inside a group: its name as a row that opens in place, and closes again (Kevin, 25 November 2026: too
+     * much scrolling). Closed until tapped, unless Search all settings opened it.
+     */
+    @Composable
+    fun Section(title: String, open: Boolean, look: Look, onToggle: () -> Unit, content: @Composable () -> Unit) {
+        val turn by animateFloatAsState(if (open) 90f else 0f, tween(220), label = "section")
+        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(look.raised)) {
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClickLabel = title, onClick = onToggle).padding(horizontal = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Say(title, 15, look.ink, look, bold = true, modifier = Modifier.weight(1f))
+                Box(Modifier.rotate(turn)) { Icon(Icons.CHEVRON, 16.dp, look.soft(), 2.2f) }
+            }
+            AnimatedVisibility(open, enter = expandVertically(tween(220)) + fadeIn(tween(220)), exit = shrinkVertically(tween(180)) + fadeOut(tween(140))) {
+                Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() }
+            }
+        }
+    }
+
+    /** One setting for Search all settings: the group it is in ([group] is the group's own id), its section if any, its name. */
+    class Place(val group: String, val groupTitle: String, val section: String?, val label: String) {
+        /** Where it lives, as Settings shows it: "Look and feel › Text size". */
+        val trail: String get() = listOfNotNull(groupTitle, section).joinToString(" › ")
+    }
+
+    /** The settings among [all] whose name, section or group hold every word typed, those named for it first. */
+    fun find(all: List<Place>, typed: String): List<Place> {
+        val words = typed.lowercase().split(Regex("\\s+")).filter { it.isNotBlank() }
+        if (words.isEmpty()) return emptyList()
+        return all.filter { p -> val text = (p.label + " " + p.trail).lowercase(); words.all { it in text } }
+            .sortedBy { p -> if (words.all { it in p.label.lowercase() }) 0 else 1 }.take(20)
+    }
+
+    /**
+     * Search all settings (Kevin, 25 November 2026): a box at the top of Settings; each setting found shows where it
+     * lives, and tapping it opens its group and section.
+     */
+    @Composable
+    fun Search(query: String, all: List<Place>, look: Look, onQuery: (String) -> Unit, onPick: (Place) -> Unit) {
+        Row(
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(look.panel).padding(horizontal = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Icons.SEARCH, 20.dp, look.soft())
+            Spacer(Modifier.width(10.dp))
+            Box(Modifier.weight(1f)) {
+                if (query.isEmpty()) Say("Search all settings", 15, look.soft(), look)
+                androidx.compose.foundation.text.BasicTextField(
+                    value = query, onValueChange = onQuery, singleLine = true,
+                    textStyle = androidx.compose.ui.text.TextStyle(color = look.ink, fontSize = 15.sp, fontFamily = look.font),
+                    cursorBrush = androidx.compose.ui.graphics.SolidColor(look.accent), modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            if (query.isNotEmpty()) Box(Modifier.clickable(role = Role.Button, onClickLabel = "Clear") { onQuery("") }.padding(6.dp)) { Icon(Icons.CROSS, 16.dp, look.soft(), 2.2f) }
+        }
+        if (query.isNotBlank()) {
+            val hits = find(all, query)
+            if (hits.isEmpty()) Note("No setting has that word in it.", look)
+            for (p in hits) {
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(look.raised)
+                        .clickable(role = Role.Button, onClickLabel = p.label) { onPick(p) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                ) {
+                    Say(p.label, 15, look.ink, look, bold = true)
+                    Say("Settings › " + p.trail, 13, look.soft(), look)
+                }
+            }
+        }
+    }
+
     /** A small heading inside a group. */
     @Composable
     fun Heading(text: String, look: Look) {
