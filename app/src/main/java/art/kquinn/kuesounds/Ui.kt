@@ -615,9 +615,13 @@ object Ui {
             items(albums, key = { it.key }) { al ->
                 Column(Modifier.combinedClickable(onClick = { go(Screen.AlbumPage(al.key)) }, onLongClick = { heldAlbum = al }), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Cover(Scanner.artFor(al), Modifier.fillMaxWidth().aspectRatio(1f))
-                    Spacer(Modifier.height(2.dp))
-                    Words(al.title, 15, bold = true)
-                    Words(al.artist, 13, K.Soft)
+                    Row(verticalAlignment = Alignment.Top) {
+                        Column(Modifier.weight(1f).padding(top = 2.dp)) {
+                            Words(al.title, 15, bold = true)
+                            Words(listOfNotNull(al.artist, al.year.takeIf { it > 0 }?.toString()).joinToString(" · "), 13, K.Soft)
+                        }
+                        MoreButton("Everything you can do with it") { heldAlbum = al }
+                    }
                 }
             }
         }
