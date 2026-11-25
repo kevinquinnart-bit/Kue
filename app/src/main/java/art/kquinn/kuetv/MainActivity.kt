@@ -1624,6 +1624,9 @@ private class BrowseState(saved: Map<String, String> = emptyMap()) {
     /** The Kue settings group open on Settings' first page: KueTV's own, each time (see the eight groups). */
     var settingsGroup by mutableStateOf("KueTV")
 
+    /** The sections open in Settings' parts, as "part|section". */
+    val settingsFolds = androidx.compose.runtime.mutableStateListOf<String>()
+
     /** Picking channels to hide in Live TV: the rows picked so far; null when not picking. */
     var hiding by mutableStateOf<Set<String>?>(null)
 
@@ -2511,6 +2514,32 @@ private fun MainScreen(
                                 }
                             }, look = Look.OTHER, below = "The TV with KueTV on this Wi-Fi goes to standby")
                         }
+                        // Search all settings (Kevin, 25 November 2026): type a word, and every setting it is in is listed with
+                        // where it lives; OK goes straight there, with its section open.
+                        var settingsQuery by remember { mutableStateOf<String?>(null) }
+                        val typedQuery = settingsQuery
+                        if (typedQuery == null) {
+                            FocusRow("Search all settings", { settingsQuery = "" }, look = Look.OTHER, drawn = KueSettings.Icons.SEARCH, below = "Type a word: subtitles, guide, backup…")
+                        } else {
+                            Field("Search all settings", typedQuery) { settingsQuery = it }
+                            val hits = remember(typedQuery) { SettingsIndex.find(typedQuery) }
+                            if (typedQuery.isNotBlank() && hits.isEmpty()) Note("No setting has that word in it.")
+                            for (e in hits) {
+                                FocusRow(e.label, {
+                                    settingsQuery = null
+                                    when {
+                                        e.page == "VPN" -> Vpn.screenOpen = true
+                                        e.page.isEmpty() -> state.settingsGroup = e.fold.orEmpty()
+                                        else -> {
+                                            if (e.fold != null) (e.page + "|" + e.fold).let { if (it !in state.settingsFolds) state.settingsFolds.add(it) }
+                                            leftFrom[0] = null
+                                            state.settingsPage = e.page
+                                        }
+                                    }
+                                }, look = Look.OTHER, below = "Settings › " + e.trail.ifBlank { e.label })
+                            }
+                            FocusRow("Close the search", { settingsQuery = null }, look = Look.OTHER)
+                        }
                         // THE EIGHT KUE GROUPS (Kevin, 24 November 2026): the same order and drawn icons in every Kue app
                         // (KueSettings). KueTV's own parts sit in the KueTV group, which is open every time Settings opens,
                         // so the most used are still first. A group holding one part opens that part straight away.
@@ -2596,6 +2625,17 @@ private fun MainScreen(
                     var given = false
                     val first: () -> Modifier = { if (given) Modifier else { given = true; Modifier.focusRequester(pageFirst) } }
                     val sub: @Composable (String) -> Unit = { Box(Modifier.padding(top = 14.dp)) { Heading(it) } }
+                    // Each part's sections fold away (Kevin, 25 November 2026: too much scrolling): OK on a section's name
+                    // opens it in place, OK again closes it. A section opened from Search all settings is open already.
+                    val fold: @Composable (String, @Composable () -> Unit) -> Unit = { title, content ->
+                        val id = page + "|" + title
+                        val open = id in state.settingsFolds
+                        FocusRow(
+                            title, { if (open) state.settingsFolds.remove(id) else state.settingsFolds.add(id) }, first(),
+                            look = Look.OTHER, chosen = open, drawn = KueSettings.Icons.CHEVRON, below = if (open) "OK to close" else null,
+                        )
+                        if (open) Column(Modifier.padding(start = if (phone) 14.dp else 24.dp), verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) { content() }
+                    }
                     when (page) {
                         "Your things" -> YourThingsPage(first, sub) { e ->
                             when (e.kind) {
@@ -2612,23 +2652,25 @@ private fun MainScreen(
                             // Other providers used before: OK switches the whole app to one.
                             val inUse = library.account ?: AccountStore.load(context)
                             if (savedProviders.size > 1) {
-                                sub("Switch provider")
-                                for (a in savedProviders) {
-                                    val using = a == inUse
-                                    FocusRow(
-                                        (if (using) "● " else "") + Providers.label(a), { if (!using) extras.switchProvider(a) },
-                                        look = Look.OTHER, below = if (using) "In use" else "OK to switch to this one · hold OK to take it off the list",
-                                        onHold = if (using) null else ({ Providers.remove(context, a) }),
-                                    )
+                                fold("Switch provider") {
+                                    for (a in savedProviders) {
+                                        val using = a == inUse
+                                        FocusRow(
+                                            (if (using) "● " else "") + Providers.label(a), { if (!using) extras.switchProvider(a) },
+                                            look = Look.OTHER, below = if (using) "In use" else "OK to switch to this one · hold OK to take it off the list",
+                                            onHold = if (using) null else ({ Providers.remove(context, a) }),
+                                        )
+                                    }
                                 }
-                                sub("Also in your lists")
-                                for (a in savedProviders) {
-                                    if (a == inUse) continue
-                                    val on = remember(Combined.changes) { Combined.isOn(context, a) }
-                                    FocusRow(
-                                        Providers.label(a) + ": " + if (on) "on" else "off", { Combined.setOn(context, a, !on) },
-                                        look = Look.OTHER, below = "Its channels, movies and series shown with these ones · OK to change",
-                                    )
+                                fold("Also in your lists") {
+                                    for (a in savedProviders) {
+                                        if (a == inUse) continue
+                                        val on = remember(Combined.changes) { Combined.isOn(context, a) }
+                                        FocusRow(
+                                            Providers.label(a) + ": " + if (on) "on" else "off", { Combined.setOn(context, a, !on) },
+                                            look = Look.OTHER, below = "Its channels, movies and series shown with these ones · OK to change",
+                                        )
+                                    }
                                 }
                                 sub("This provider")
                             }
@@ -2689,148 +2731,155 @@ private fun MainScreen(
                             }
                             val hiddenCount = remember(Choices.changes) { listOf("live", "film", "show").sumOf { Choices.hidden(context, it).size } }
                             FocusRow("Categories: show, hide and order" + if (hiddenCount == 0) "" else " ($hiddenCount hidden)", onCategories, look = Look.OTHER)
-                            sub("Free channels")
-                            FocusRow("Free channel lists ($freeCount)", onFree, look = Look.OTHER, below = "Free channels, tried when your provider's won't play")
-                            sub("TV guide")
-                            val offset = remember(Choices.changes) { GuideOffset.minutes(context) }
-                            FocusRow(
-                                "Guide times: " + GuideOffset.words(offset), {
-                                    val i = GuideOffset.choices.indexOf(offset)
-                                    GuideOffset.set(context, GuideOffset.choices[(i + 1) % GuideOffset.choices.size])
-                                }, look = Look.OTHER, below = "For a guide that is out by an hour or more · OK to change",
-                            )
-                            sub("Free TV guides")
-                            val guidesNow = FreeGuides.changes
-                            for (g in FreeGuides.all(context)) {
-                                val on = guidesNow >= 0 && FreeGuides.isOn(context, g.id)
-                                val added = g.id.startsWith("own-")
+                            fold("Free channels") {
+                                FocusRow("Free channel lists ($freeCount)", onFree, look = Look.OTHER, below = "Free channels, tried when your provider's won't play")
+                            }
+                            fold("TV guide") {
+                                val offset = remember(Choices.changes) { GuideOffset.minutes(context) }
                                 FocusRow(
-                                    g.name + ": " + if (on) "on" else "off", { FreeGuides.setOn(context, g.id, !on) }, look = Look.OTHER,
-                                    onHold = if (added) ({ FreeGuides.removeOwn(context, g.id); kueToast(context, g.name + " taken out.") }) else null,
-                                    below = if (added) g.url + if (phone) " · press and hold to take it out" else " · hold OK to take it out" else null,
+                                    "Guide times: " + GuideOffset.words(offset), {
+                                        val i = GuideOffset.choices.indexOf(offset)
+                                        GuideOffset.set(context, GuideOffset.choices[(i + 1) % GuideOffset.choices.size])
+                                    }, look = Look.OTHER, below = "For a guide that is out by an hour or more · OK to change",
                                 )
                             }
-                            var guideAddress by remember { mutableStateOf<String?>(null) }
-                            val typedAddress = guideAddress
-                            if (typedAddress == null) {
-                                FocusRow("Add a guide by its web address", { guideAddress = "" }, look = Look.OTHER, below = "Any XMLTV guide, plain or .gz")
-                            } else {
-                                Field("The guide's web address", typedAddress, onDone = null) { guideAddress = it }
-                                FocusRow("Add this guide", {
-                                    if (typedAddress.isNotBlank()) {
-                                        val made = FreeGuides.addOwn(context, typedAddress)
-                                        kueToast(context, made.name + " added. Its programmes follow in a minute or so.")
-                                    }
-                                    guideAddress = null
-                                }, look = Look.MAIN)
-                                FocusRow("Cancel", { guideAddress = null }, look = Look.OTHER)
-                            }
-                            Note(
-                                "Used for channels your provider has no guide for, and for free channels. " +
-                                    if (FreeGuides.lastFetchedMs(context) == 0L) "Not read yet." else FreeGuides.matched.toString() + " of your channels have one.",
-                            )
-                            sub("Favourites")
-                            val favChannels = library.groups.filter { g -> g.versions.any { Favourites.key(it.channel, login) in favs } }
-                                .sortedBy { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
-                            val favFilms = library.films.filter { Favourites.key(it, login) in favs }
-                            val favShows = library.shows.filter { Favourites.key(it) in favs }
-                            if (favChannels.isEmpty() && favFilms.isEmpty() && favShows.isEmpty()) Note("Nothing starred yet. Hold OK on a channel, movie or series to star it.")
-                            var given = false
-                            val firstOne: () -> Modifier = { if (given) Modifier else { given = true; first() } }
-                            if (favChannels.isNotEmpty()) sub("Channels")
-                            val livePlayables = remember(favChannels) { favChannels.map { livePlayable(it, library.account, library.serverAheadSec) } }
-                            favChannels.forEachIndexed { i, g ->
-                                FocusRow(g.name, { onPlay(livePlayables, i, true, "fav:" + g.id) }, firstOne(), look = Look.OTHER, leading = { Logo(g.logo) },
-                                    below = "Hold OK to take off", onHold = { favourites.toggleAll(g.versions.map { Favourites.key(it.channel, login) }) })
-                            }
-                            if (favFilms.isNotEmpty()) sub("Movies")
-                            for (f in favFilms) {
-                                FocusRow(f.name, { onPlay(listOf(Playable(f.name, f.url, find = finder("movie", f.name, null, null), poster = f.poster)), 0, false, "fav:" + f.id) }, firstOne(),
-                                    look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(f, login)) })
-                            }
-                            if (favShows.isNotEmpty()) sub("Series")
-                            for (sh in favShows) {
-                                FocusRow(sh.name, { state.openShow = sh; section = Section.SERIES }, firstOne(),
-                                    look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(sh)) })
-                            }
-                                                }
-                        "Backup and sync" -> {
-                            sub("Google Drive")
-                            when {
-                                !drive.isSetUp -> Note("Google Drive isn't set up in this copy of the app.")
-                                drive.signedIn -> FocusRow(
-                                    "Sign out of Google Drive", { drive.signOut(); Recordings.changed() }, first(), look = Look.OTHER,
-                                    below = drive.email.ifBlank { null },
-                                )
-                                else -> FocusRow("Sign in to Google Drive", onDriveSignIn, first(), look = Look.OTHER, below = "Your backup and recordings are kept there")
-                            }
-                            if (drive.signedIn) {
-                                sub("Backup")
-                                val last = remember(Backup.changes) { Backup.lastMs(context) }
-                                val how = remember(Backup.changes) { Backup.how(context) }
-                                if (extras.driveNote.isNotEmpty()) StatusBox(
-                                    Status(
-                                        extras.driveNote,
-                                        when {
-                                            extras.driveNote.endsWith("…") -> Status.BUSY
-                                            extras.driveNote.startsWith("Couldn't") || extras.driveNote.startsWith("There is no") || extras.driveNote.startsWith("Sign in") -> Status.FAIL
-                                            else -> Status.OK
-                                        },
-                                    ),
-                                )
-                                FocusRow(
-                                    "Back up now", extras.backUp, look = Look.OTHER,
-                                    below = if (last == 0L) "Not backed up yet" else "Last backed up " + java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK).format(java.util.Date(last)),
-                                )
-                                FocusRow("Back up by itself: " + Backup.hows[how], { Backup.how(context, (how + 1) % Backup.hows.size) }, look = Look.OTHER, below = "OK to change")
-                                var sure by remember { mutableStateOf(false) }
-                                if (!sure) {
-                                    FocusRow("Restore from Google Drive", { sure = true }, look = Look.OTHER, below = "Puts back favourites, add-ons, provider details and choices from the backup")
+                            fold("Free TV guides") {
+                                val guidesNow = FreeGuides.changes
+                                for (g in FreeGuides.all(context)) {
+                                    val on = guidesNow >= 0 && FreeGuides.isOn(context, g.id)
+                                    val added = g.id.startsWith("own-")
+                                    FocusRow(
+                                        g.name + ": " + if (on) "on" else "off", { FreeGuides.setOn(context, g.id, !on) }, look = Look.OTHER,
+                                        onHold = if (added) ({ FreeGuides.removeOwn(context, g.id); kueToast(context, g.name + " taken out.") }) else null,
+                                        below = if (added) g.url + if (phone) " · press and hold to take it out" else " · hold OK to take it out" else null,
+                                    )
+                                }
+                                var guideAddress by remember { mutableStateOf<String?>(null) }
+                                val typedAddress = guideAddress
+                                if (typedAddress == null) {
+                                    FocusRow("Add a guide by its web address", { guideAddress = "" }, look = Look.OTHER, below = "Any XMLTV guide, plain or .gz")
                                 } else {
-                                    FocusRow("Yes, restore: what is here is replaced", { sure = false; extras.restore() }, look = Look.OTHER)
-                                    FocusRow("No, keep what is here", { sure = false }, look = Look.OTHER)
+                                    Field("The guide's web address", typedAddress, onDone = null) { guideAddress = it }
+                                    FocusRow("Add this guide", {
+                                        if (typedAddress.isNotBlank()) {
+                                            val made = FreeGuides.addOwn(context, typedAddress)
+                                            kueToast(context, made.name + " added. Its programmes follow in a minute or so.")
+                                        }
+                                        guideAddress = null
+                                    }, look = Look.MAIN)
+                                    FocusRow("Cancel", { guideAddress = null }, look = Look.OTHER)
+                                }
+                                Note(
+                                    "Used for channels your provider has no guide for, and for free channels. " +
+                                        if (FreeGuides.lastFetchedMs(context) == 0L) "Not read yet." else FreeGuides.matched.toString() + " of your channels have one.",
+                                )
+                            }
+                            fold("Favourites") {
+                                val favChannels = library.groups.filter { g -> g.versions.any { Favourites.key(it.channel, login) in favs } }
+                                    .sortedBy { g -> favourites.rank(g.versions.map { Favourites.key(it.channel, login) }) }
+                                val favFilms = library.films.filter { Favourites.key(it, login) in favs }
+                                val favShows = library.shows.filter { Favourites.key(it) in favs }
+                                if (favChannels.isEmpty() && favFilms.isEmpty() && favShows.isEmpty()) Note("Nothing starred yet. Hold OK on a channel, movie or series to star it.")
+                                var given = false
+                                val firstOne: () -> Modifier = { if (given) Modifier else { given = true; first() } }
+                                if (favChannels.isNotEmpty()) sub("Channels")
+                                val livePlayables = remember(favChannels) { favChannels.map { livePlayable(it, library.account, library.serverAheadSec) } }
+                                favChannels.forEachIndexed { i, g ->
+                                    FocusRow(g.name, { onPlay(livePlayables, i, true, "fav:" + g.id) }, firstOne(), look = Look.OTHER, leading = { Logo(g.logo) },
+                                        below = "Hold OK to take off", onHold = { favourites.toggleAll(g.versions.map { Favourites.key(it.channel, login) }) })
+                                }
+                                if (favFilms.isNotEmpty()) sub("Movies")
+                                for (f in favFilms) {
+                                    FocusRow(f.name, { onPlay(listOf(Playable(f.name, f.url, find = finder("movie", f.name, null, null), poster = f.poster)), 0, false, "fav:" + f.id) }, firstOne(),
+                                        look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(f, login)) })
+                                }
+                                if (favShows.isNotEmpty()) sub("Series")
+                                for (sh in favShows) {
+                                    FocusRow(sh.name, { state.openShow = sh; section = Section.SERIES }, firstOne(),
+                                        look = Look.OTHER, below = "Hold OK to take off", onHold = { favourites.toggle(Favourites.key(sh)) })
+                                }
+                            }
+                        }
+                        "Backup and sync" -> {
+                            fold("Google Drive") {
+                                when {
+                                    !drive.isSetUp -> Note("Google Drive isn't set up in this copy of the app.")
+                                    drive.signedIn -> FocusRow(
+                                        "Sign out of Google Drive", { drive.signOut(); Recordings.changed() }, first(), look = Look.OTHER,
+                                        below = drive.email.ifBlank { null },
+                                    )
+                                    else -> FocusRow("Sign in to Google Drive", onDriveSignIn, first(), look = Look.OTHER, below = "Your backup and recordings are kept there")
+                                }
+                                if (drive.signedIn) {
+                                    fold("Backup") {
+                                        val last = remember(Backup.changes) { Backup.lastMs(context) }
+                                        val how = remember(Backup.changes) { Backup.how(context) }
+                                        if (extras.driveNote.isNotEmpty()) StatusBox(
+                                            Status(
+                                                extras.driveNote,
+                                                when {
+                                                    extras.driveNote.endsWith("…") -> Status.BUSY
+                                                    extras.driveNote.startsWith("Couldn't") || extras.driveNote.startsWith("There is no") || extras.driveNote.startsWith("Sign in") -> Status.FAIL
+                                                    else -> Status.OK
+                                                },
+                                            ),
+                                        )
+                                        FocusRow(
+                                            "Back up now", extras.backUp, look = Look.OTHER,
+                                            below = if (last == 0L) "Not backed up yet" else "Last backed up " + java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK).format(java.util.Date(last)),
+                                        )
+                                        FocusRow("Back up by itself: " + Backup.hows[how], { Backup.how(context, (how + 1) % Backup.hows.size) }, look = Look.OTHER, below = "OK to change")
+                                        var sure by remember { mutableStateOf(false) }
+                                        if (!sure) {
+                                            FocusRow("Restore from Google Drive", { sure = true }, look = Look.OTHER, below = "Puts back favourites, add-ons, provider details and choices from the backup")
+                                        } else {
+                                            FocusRow("Yes, restore: what is here is replaced", { sure = false; extras.restore() }, look = Look.OTHER)
+                                            FocusRow("No, keep what is here", { sure = false }, look = Look.OTHER)
+                                        }
+                                    }
                                 }
                             }
                             // Devices sync: three choices, each saying what it does (Kevin, 23 November 2026).
                             val here = if (phone) "phone" else "TV"
                             val other = if (phone) "TV" else "phone"
-                            sub("Devices sync")
-                            Note("Copy this $here's set-up to the $other, copy the $other's to here, or keep the two in step from now on.")
-                            FocusRow(
-                                (if (phone) "Phone to TV" else "TV to phone") + ": send this $here's set-up", onSendSetUp, first(), look = Look.OTHER,
-                                below = "The $other's provider details, favourites, add-ons and free lists are replaced by this $here's. Turns on keep in step",
-                            )
-                            FocusRow(
-                                (if (phone) "TV to phone" else "Phone to TV") + ": take the $other's set-up", onTakeSetUp, look = Look.OTHER,
-                                below = "This $here's provider details, favourites, add-ons and free lists are replaced by the $other's. Turns on keep in step",
-                            )
-                            val met = Sync.lastMetMs
-                            if (paired) {
+                            fold("Devices sync") {
+                                Note("Copy this $here's set-up to the $other, copy the $other's to here, or keep the two in step from now on.")
                                 FocusRow(
-                                    "Keep in step: on · press to stop",
-                                    {
-                                        Sync.setKey(context, "")
-                                        kueToast(context, "Keep in step is off on this $here. Nothing was changed on either device. To turn it on again, send or take the set-up above.")
-                                    },
-                                    look = Look.OTHER,
-                                    below = if (met == 0L) "Not met the $other since opening" else "Last met the $other at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(met)),
+                                    (if (phone) "Phone to TV" else "TV to phone") + ": send this $here's set-up", onSendSetUp, first(), look = Look.OTHER,
+                                    below = "The $other's provider details, favourites, add-ons and free lists are replaced by this $here's. Turns on keep in step",
                                 )
-                                // What was last taken from the other device, so it can be seen working.
-                                Note(Sync.lastTook.ifEmpty { "Nothing taken from the $other since opening: the two already match, or haven't met yet." })
-                            } else {
                                 FocusRow(
-                                    "Keep in step: off", { kueToast(context, "To turn on keep in step, send or take the set-up above. That pairs the two devices.") }, look = Look.OTHER,
-                                    below = "Turns on when the set-up is sent or taken above",
+                                    (if (phone) "TV to phone" else "Phone to TV") + ": take the $other's set-up", onTakeSetUp, look = Look.OTHER,
+                                    below = "This $here's provider details, favourites, add-ons and free lists are replaced by the $other's. Turns on keep in step",
                                 )
+                                val met = Sync.lastMetMs
+                                if (paired) {
+                                    FocusRow(
+                                        "Keep in step: on · press to stop",
+                                        {
+                                            Sync.setKey(context, "")
+                                            kueToast(context, "Keep in step is off on this $here. Nothing was changed on either device. To turn it on again, send or take the set-up above.")
+                                        },
+                                        look = Look.OTHER,
+                                        below = if (met == 0L) "Not met the $other since opening" else "Last met the $other at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(met)),
+                                    )
+                                    // What was last taken from the other device, so it can be seen working.
+                                    Note(Sync.lastTook.ifEmpty { "Nothing taken from the $other since opening: the two already match, or haven't met yet." })
+                                } else {
+                                    FocusRow(
+                                        "Keep in step: off", { kueToast(context, "To turn on keep in step, send or take the set-up above. That pairs the two devices.") }, look = Look.OTHER,
+                                        below = "Turns on when the set-up is sent or taken above",
+                                    )
+                                }
+                                Note(
+                                    "How keep in step works: it goes both ways, by itself. About once a minute, while KueTV is open on both on the same Wi-Fi, " +
+                                        "each device checks the other. For each item, the one changed most recently wins and is copied across: add a favourite on the phone " +
+                                        "and an add-on on the TV, and both end up with both. Items: provider details, favourites and their order, add-ons, free channel lists, " +
+                                        "hidden categories and their order, subtitles, the Stremio sign-in, the VPN details, Carry on watching, watched marks, " +
+                                        "Recently watched, your own categories, channel names you changed, and reminders. Text size and the small TV stay each device's own.",
+                                )
+                                                    }
                             }
-                            Note(
-                                "How keep in step works: it goes both ways, by itself. About once a minute, while KueTV is open on both on the same Wi-Fi, " +
-                                    "each device checks the other. For each item, the one changed most recently wins and is copied across: add a favourite on the phone " +
-                                    "and an add-on on the TV, and both end up with both. Items: provider details, favourites and their order, add-ons, free channel lists, " +
-                                    "hidden categories and their order, subtitles, the Stremio sign-in, the VPN details, Carry on watching, watched marks, " +
-                                    "Recently watched, your own categories, channel names you changed, and reminders. Text size and the small TV stay each device's own.",
-                            )
-                                                }
                         "Movies and series" -> {
                             // Three jobs, three screens.
                             val stremioEmail = remember(Stremio.changes) { if (Stremio.key(context).isEmpty()) "" else Stremio.email(context) }
@@ -2839,95 +2888,100 @@ private fun MainScreen(
                             FocusRow("Add an add-on or channel list by its link", onAddLink, look = Look.OTHER)
                         }
                         "Watching" -> {
-                            sub("Subtitles")
-                            val subtitlesOn = remember(Choices.changes) { Choices.subtitles(context) }
-                            FocusRow("Subtitles: " + if (subtitlesOn) "on" else "off", { Choices.subtitles(context, !subtitlesOn) }, first(), look = Look.OTHER)
-                            FocusRow("Subtitle language: " + subtitleLang.name, { Choices.subtitleLang(context, Langs.after(subtitleLang).code) }, look = Look.OTHER)
-                            val look = Choices.changes
-                            val sSize = if (look >= 0) SubtitleLook.size(context) else 0
-                            val sColour = SubtitleLook.colour(context)
-                            val sBack = SubtitleLook.background(context)
-                            val sHeight = SubtitleLook.height(context)
-                            FocusRow("Subtitle size: " + SubtitleLook.sizes[sSize], { SubtitleLook.set(context, "size", (sSize + 1) % SubtitleLook.sizes.size) }, look = Look.OTHER)
-                            FocusRow("Subtitle colour: " + SubtitleLook.colours[sColour], { SubtitleLook.set(context, "colour", (sColour + 1) % SubtitleLook.colours.size) }, look = Look.OTHER)
-                            FocusRow("Subtitle background: " + SubtitleLook.backgrounds[sBack], { SubtitleLook.set(context, "background", (sBack + 1) % SubtitleLook.backgrounds.size) }, look = Look.OTHER)
-                            FocusRow("Subtitle position: " + SubtitleLook.heights[sHeight], { SubtitleLook.set(context, "height", (sHeight + 1) % SubtitleLook.heights.size) }, look = Look.OTHER)
-                            sub("Live TV")
-                            // When KueTV opens: Home, the channel watched last, or one of the favourite channels.
-                            val openOn = remember(Choices.changes) { OpenOn.get(context) }
-                            val favChannels = remember(library, favs) { library.groups.filter { g -> g.versions.any { Favourites.key(it.channel, true) in favs } } }
-                            val openChoices = listOf("", "last") + favChannels.map { it.id }
-                            FocusRow(
-                                "When KueTV opens: " + when (openOn) { "" -> "Home"; "last" -> "the channel watched last"; else -> library.groups.firstOrNull { it.id == openOn }?.name ?: "Home" },
-                                { OpenOn.set(context, openChoices[(openChoices.indexOf(openOn) + 1) % openChoices.size]) },
-                                look = Look.OTHER, below = "OK to change: Home, the channel watched last, or one of your favourite channels",
-                            )
-                            val shiftOn = remember(Choices.changes) { Choices.timeShift(context) }
-                            FocusRow("Pause and rewind live TV: " + if (shiftOn) "on" else "off", { Choices.timeShift(context, !shiftOn) }, look = Look.OTHER)
-                            val autoNext = remember(Choices.changes) { Choices.autoNext(context) }
-                            FocusRow("Play the next episode by itself: " + if (autoNext) "on" else "off", { Choices.autoNext(context, !autoNext) }, look = Look.OTHER, below = "After a 10 second countdown. Off: OK starts it")
-                            val appFirst = remember(Choices.changes) { Choices.catchUpAppFirst(context) }
-                            FocusRow(
-                                "Catch-up plays: " + if (appFirst) "in the channel's own app first" else "from your provider first", { Choices.catchUpAppFirst(context, !appFirst) },
-                                look = Look.OTHER, below = "OK to switch. When one hasn't got the programme, the other is tried",
-                            )
-                            if (!phone) {
-                                val smallTv = remember(Choices.changes) { Choices.smallTv(context) }
-                                FocusRow("Small TV while browsing: " + if (smallTv) "on" else "off", { Choices.smallTv(context, !smallTv) }, look = Look.OTHER)
-                                val sounds = remember(Choices.changes) { UiSounds.on(context) }
-                                FocusRow("Sounds as you move around: " + if (sounds) "on" else "off", { UiSounds.on(context, !sounds) }, look = Look.OTHER, below = "Quiet ticks for moving, OK and Back. Never over a programme")
+                            fold("Subtitles") {
+                                val subtitlesOn = remember(Choices.changes) { Choices.subtitles(context) }
+                                FocusRow("Subtitles: " + if (subtitlesOn) "on" else "off", { Choices.subtitles(context, !subtitlesOn) }, first(), look = Look.OTHER)
+                                FocusRow("Subtitle language: " + subtitleLang.name, { Choices.subtitleLang(context, Langs.after(subtitleLang).code) }, look = Look.OTHER)
+                                val look = Choices.changes
+                                val sSize = if (look >= 0) SubtitleLook.size(context) else 0
+                                val sColour = SubtitleLook.colour(context)
+                                val sBack = SubtitleLook.background(context)
+                                val sHeight = SubtitleLook.height(context)
+                                FocusRow("Subtitle size: " + SubtitleLook.sizes[sSize], { SubtitleLook.set(context, "size", (sSize + 1) % SubtitleLook.sizes.size) }, look = Look.OTHER)
+                                FocusRow("Subtitle colour: " + SubtitleLook.colours[sColour], { SubtitleLook.set(context, "colour", (sColour + 1) % SubtitleLook.colours.size) }, look = Look.OTHER)
+                                FocusRow("Subtitle background: " + SubtitleLook.backgrounds[sBack], { SubtitleLook.set(context, "background", (sBack + 1) % SubtitleLook.backgrounds.size) }, look = Look.OTHER)
+                                FocusRow("Subtitle position: " + SubtitleLook.heights[sHeight], { SubtitleLook.set(context, "height", (sHeight + 1) % SubtitleLook.heights.size) }, look = Look.OTHER)
                             }
-                            sub("The remote's spare buttons")
-                            val spareNow = Choices.changes
-                            for (k in SpareKeys.keys) {
-                                FocusRow(k.name + ": " + (if (spareNow >= 0) SpareKeys.action(context, k.code) else ""), { SpareKeys.next(context, k.code) }, look = Look.OTHER, below = "OK to change · only on remotes that have it")
-                            }
-                            sub("Sound and picture")
-                            val engineNow = Choices.changes
-                            val stereo = engineNow >= 0 && Sound.stereoOnly(context)
-                            FocusRow(
-                                "Surround sound: " + if (stereo) "off, stereo only" else "on, when your TV or speakers can", { Sound.stereoOnly(context, !stereo) }, look = Look.OTHER,
-                                below = "Dolby and DTS sent on to your TV or sound bar, or made into stereo here",
-                            )
-                            val night = engineNow >= 0 && Sound.night(context)
-                            FocusRow("Night mode: " + if (night) "on" else "off", { Sound.night(context, !night) }, look = Look.OTHER, below = "Loud bangs quieter, speech louder · from the next thing you play")
-                            val boostNow = if (engineNow >= 0) VolumeBoost.get(context) else 0
-                            FocusRow(
-                                "Volume boost: " + VolumeBoost.names[boostNow], { VolumeBoost.set(context, (boostNow + 1) % VolumeBoost.names.size) }, look = Look.OTHER,
-                                below = "Louder than full, for quiet channels · also in Options while watching",
-                            )
-                            val quality = if (engineNow >= 0) PictureQuality.get(context) else 0
-                            FocusRow(
-                                "Picture quality: " + PictureQuality.names[quality], { PictureQuality.set(context, (quality + 1) % PictureQuality.names.size) }, look = Look.OTHER,
-                                below = "Less detail uses less internet, for a slow connection · OK to change",
-                            )
-                            val engine = if (engineNow >= 0) PlayerEngine.get(context) else 0
-                            FocusRow(
-                                "Player: " + PlayerEngine.names[engine], { PlayerEngine.set(context, (engine + 1) % PlayerEngine.names.size) }, look = Look.OTHER,
-                                below = "VLC plays some streams the standard one can't, but without pause and rewind, recording or add-ons",
-                            )
-                            val smooth = engineNow >= 0 && Smoothing.always(context)
-                            FocusRow(
-                                "VLC smooths combed lines: " + if (smooth) "always" else "when the channel says so", { Smoothing.always(context, !smooth) }, look = Look.OTHER,
-                                below = "For broadcast channels whose movement shows fine lines · VLC only",
-                            )
-                            if (!phone) {
-                                val matchRate = engineNow >= 0 && FrameRate.on(context)
+                            fold("Live TV") {
+                                // When KueTV opens: Home, the channel watched last, or one of the favourite channels.
+                                val openOn = remember(Choices.changes) { OpenOn.get(context) }
+                                val favChannels = remember(library, favs) { library.groups.filter { g -> g.versions.any { Favourites.key(it.channel, true) in favs } } }
+                                val openChoices = listOf("", "last") + favChannels.map { it.id }
                                 FocusRow(
-                                    "Match the TV to the movie: " + if (matchRate) "on" else "off", { FrameRate.on(context, !matchRate) }, look = Look.OTHER,
-                                    below = "Smoother movement. The screen may go dark for a second as each one starts",
+                                    "When KueTV opens: " + when (openOn) { "" -> "Home"; "last" -> "the channel watched last"; else -> library.groups.firstOrNull { it.id == openOn }?.name ?: "Home" },
+                                    { OpenOn.set(context, openChoices[(openChoices.indexOf(openOn) + 1) % openChoices.size]) },
+                                    look = Look.OTHER, below = "OK to change: Home, the channel watched last, or one of your favourite channels",
+                                )
+                                val shiftOn = remember(Choices.changes) { Choices.timeShift(context) }
+                                FocusRow("Pause and rewind live TV: " + if (shiftOn) "on" else "off", { Choices.timeShift(context, !shiftOn) }, look = Look.OTHER)
+                                val autoNext = remember(Choices.changes) { Choices.autoNext(context) }
+                                FocusRow("Play the next episode by itself: " + if (autoNext) "on" else "off", { Choices.autoNext(context, !autoNext) }, look = Look.OTHER, below = "After a 10 second countdown. Off: OK starts it")
+                                val appFirst = remember(Choices.changes) { Choices.catchUpAppFirst(context) }
+                                FocusRow(
+                                    "Catch-up plays: " + if (appFirst) "in the channel's own app first" else "from your provider first", { Choices.catchUpAppFirst(context, !appFirst) },
+                                    look = Look.OTHER, below = "OK to switch. When one hasn't got the programme, the other is tried",
+                                )
+                                if (!phone) {
+                                    val smallTv = remember(Choices.changes) { Choices.smallTv(context) }
+                                    FocusRow("Small TV while browsing: " + if (smallTv) "on" else "off", { Choices.smallTv(context, !smallTv) }, look = Look.OTHER)
+                                    val sounds = remember(Choices.changes) { UiSounds.on(context) }
+                                    FocusRow("Sounds as you move around: " + if (sounds) "on" else "off", { UiSounds.on(context, !sounds) }, look = Look.OTHER, below = "Quiet ticks for moving, OK and Back. Never over a programme")
+                                }
+                            }
+                            fold("The remote's spare buttons") {
+                                val spareNow = Choices.changes
+                                for (k in SpareKeys.keys) {
+                                    FocusRow(k.name + ": " + (if (spareNow >= 0) SpareKeys.action(context, k.code) else ""), { SpareKeys.next(context, k.code) }, look = Look.OTHER, below = "OK to change · only on remotes that have it")
+                                }
+                            }
+                            fold("Sound and picture") {
+                                val engineNow = Choices.changes
+                                val stereo = engineNow >= 0 && Sound.stereoOnly(context)
+                                FocusRow(
+                                    "Surround sound: " + if (stereo) "off, stereo only" else "on, when your TV or speakers can", { Sound.stereoOnly(context, !stereo) }, look = Look.OTHER,
+                                    below = "Dolby and DTS sent on to your TV or sound bar, or made into stereo here",
+                                )
+                                val night = engineNow >= 0 && Sound.night(context)
+                                FocusRow("Night mode: " + if (night) "on" else "off", { Sound.night(context, !night) }, look = Look.OTHER, below = "Loud bangs quieter, speech louder · from the next thing you play")
+                                val boostNow = if (engineNow >= 0) VolumeBoost.get(context) else 0
+                                FocusRow(
+                                    "Volume boost: " + VolumeBoost.names[boostNow], { VolumeBoost.set(context, (boostNow + 1) % VolumeBoost.names.size) }, look = Look.OTHER,
+                                    below = "Louder than full, for quiet channels · also in Options while watching",
+                                )
+                                val quality = if (engineNow >= 0) PictureQuality.get(context) else 0
+                                FocusRow(
+                                    "Picture quality: " + PictureQuality.names[quality], { PictureQuality.set(context, (quality + 1) % PictureQuality.names.size) }, look = Look.OTHER,
+                                    below = "Less detail uses less internet, for a slow connection · OK to change",
+                                )
+                                val engine = if (engineNow >= 0) PlayerEngine.get(context) else 0
+                                FocusRow(
+                                    "Player: " + PlayerEngine.names[engine], { PlayerEngine.set(context, (engine + 1) % PlayerEngine.names.size) }, look = Look.OTHER,
+                                    below = "VLC plays some streams the standard one can't, but without pause and rewind, recording or add-ons",
+                                )
+                                val smooth = engineNow >= 0 && Smoothing.always(context)
+                                FocusRow(
+                                    "VLC smooths combed lines: " + if (smooth) "always" else "when the channel says so", { Smoothing.always(context, !smooth) }, look = Look.OTHER,
+                                    below = "For broadcast channels whose movement shows fine lines · VLC only",
+                                )
+                                if (!phone) {
+                                    val matchRate = engineNow >= 0 && FrameRate.on(context)
+                                    FocusRow(
+                                        "Match the TV to the movie: " + if (matchRate) "on" else "off", { FrameRate.on(context, !matchRate) }, look = Look.OTHER,
+                                        below = "Smoother movement. The screen may go dark for a second as each one starts",
+                                    )
+                                }
+                            }
+                            fold("Screen") {
+                                val textSize = remember(Choices.changes) { Choices.textSize(context) }
+                                FocusRow("Text size: " + Choices.textSizeNames[textSize], { Choices.textSize(context, (textSize + 1) % 3) }, look = Look.OTHER)
+                                FocusRow("Reset text size, subtitles and small TV", { Choices.resetDisplay(context) }, look = Look.OTHER)
+                                val pipOn = remember(Choices.changes) { Pip.on(context) }
+                                // On a TV, leaving KueTV closes it, so there is no small picture to choose.
+                                if (phone) FocusRow(
+                                    "Small picture when you leave KueTV: " + if (pipOn) "on" else "off", { Pip.on(context, !pipOn) }, look = Look.OTHER,
+                                    below = "What is playing carries on in a corner when you press Home, where the device allows it",
                                 )
                             }
-                            sub("Screen")
-                            val textSize = remember(Choices.changes) { Choices.textSize(context) }
-                            FocusRow("Text size: " + Choices.textSizeNames[textSize], { Choices.textSize(context, (textSize + 1) % 3) }, look = Look.OTHER)
-                            FocusRow("Reset text size, subtitles and small TV", { Choices.resetDisplay(context) }, look = Look.OTHER)
-                            val pipOn = remember(Choices.changes) { Pip.on(context) }
-                            // On a TV, leaving KueTV closes it, so there is no small picture to choose.
-                            if (phone) FocusRow(
-                                "Small picture when you leave KueTV: " + if (pipOn) "on" else "off", { Pip.on(context, !pipOn) }, look = Look.OTHER,
-                                below = "What is playing carries on in a corner when you press Home, where the device allows it",
-                            )
                         }
                         "Look and feel" -> {
                             FocusRow(
@@ -2948,162 +3002,168 @@ private fun MainScreen(
                             // The TV's own aerial channels, when it has a tuner.
                             val aerialName = remember(Resumes.count) { Aerial.name(context) }
                             if (aerialName != null) {
-                                sub("Aerial TV")
-                                FocusRow("Watch aerial TV", { if (!Aerial.open(context)) kueToast(context, "The TV's aerial channels wouldn't open.") },
-                                    first(), look = Look.OTHER, below = "The digital channels from the aerial plugged into the TV. They work with no internet")
-                                val offer = remember(Aerial.changes) { Aerial.offerWhenOffline(context) }
-                                FocusRow("Offer aerial TV when the internet goes: " + if (offer) "on" else "off", { Aerial.offerWhenOffline(context, !offer) },
-                                    look = Look.OTHER, below = "OK to change")
-                                // Which channel numbers the aerial uses here: picked by KueTV from the TV's country, or chosen.
-                                val aerialTick = Aerial.changes
-                                val plan = remember(aerialTick) { AerialLists.current }
-                                val choice = remember(aerialTick) { AerialLists.chosen(context) }
-                                FocusRow("Aerial channel list: " + (plan?.label ?: "none for this TV") + if (choice.isEmpty()) " (picked by KueTV)" else "",
-                                    {
-                                        // OK goes round: picked by KueTV, then each list in turn.
-                                        val ids = listOf("") + AerialLists.plans.map { it.id }
-                                        AerialLists.choose(context, ids[(ids.indexOf(choice) + 1) % ids.size])
-                                    },
-                                    look = Look.OTHER,
-                                    below = "OK to change. Lets On aerial in the player find each channel. Kept up to date online" +
-                                        (AerialLists.updated.takeIf { it.isNotBlank() }?.let { " (list of $it)" } ?: ""))
-                                val own = remember(aerialTick) { AerialLists.own }
-                                FocusRow("Your own aerial numbers" + (own?.let { " (" + it.channels.map { c -> c.number }.distinct().size + ")" } ?: ""),
-                                    { AerialLists.ownOpen = true }, look = Look.OTHER,
-                                    below = "For a country with no list, or to put a number right. Sent from your phone")
-                                var showAerial by remember { mutableStateOf(false) }
-                                if (plan != null) FocusRow((if (showAerial) "Hide" else "Check") + " the aerial channels (" + plan.channels.map { it.number }.distinct().size + ")",
-                                    { showAerial = !showAerial }, look = Look.OTHER, below = "Each opens on the aerial, to check it's the right channel")
-                                if (showAerial && plan != null) {
-                                    plan.channels.distinctBy { it.number }.sortedBy { it.number }.forEach { c ->
-                                        FocusRow(c.number.toString() + "  " + c.name, {
-                                            if (!Aerial.openChannel(context, c.number)) kueToast(context, "Aerial channel " + c.number + " wouldn't open.")
-                                        }, look = Look.OTHER)
+                                fold("Aerial TV") {
+                                    FocusRow("Watch aerial TV", { if (!Aerial.open(context)) kueToast(context, "The TV's aerial channels wouldn't open.") },
+                                        first(), look = Look.OTHER, below = "The digital channels from the aerial plugged into the TV. They work with no internet")
+                                    val offer = remember(Aerial.changes) { Aerial.offerWhenOffline(context) }
+                                    FocusRow("Offer aerial TV when the internet goes: " + if (offer) "on" else "off", { Aerial.offerWhenOffline(context, !offer) },
+                                        look = Look.OTHER, below = "OK to change")
+                                    // Which channel numbers the aerial uses here: picked by KueTV from the TV's country, or chosen.
+                                    val aerialTick = Aerial.changes
+                                    val plan = remember(aerialTick) { AerialLists.current }
+                                    val choice = remember(aerialTick) { AerialLists.chosen(context) }
+                                    FocusRow("Aerial channel list: " + (plan?.label ?: "none for this TV") + if (choice.isEmpty()) " (picked by KueTV)" else "",
+                                        {
+                                            // OK goes round: picked by KueTV, then each list in turn.
+                                            val ids = listOf("") + AerialLists.plans.map { it.id }
+                                            AerialLists.choose(context, ids[(ids.indexOf(choice) + 1) % ids.size])
+                                        },
+                                        look = Look.OTHER,
+                                        below = "OK to change. Lets On aerial in the player find each channel. Kept up to date online" +
+                                            (AerialLists.updated.takeIf { it.isNotBlank() }?.let { " (list of $it)" } ?: ""))
+                                    val own = remember(aerialTick) { AerialLists.own }
+                                    FocusRow("Your own aerial numbers" + (own?.let { " (" + it.channels.map { c -> c.number }.distinct().size + ")" } ?: ""),
+                                        { AerialLists.ownOpen = true }, look = Look.OTHER,
+                                        below = "For a country with no list, or to put a number right. Sent from your phone")
+                                    var showAerial by remember { mutableStateOf(false) }
+                                    if (plan != null) FocusRow((if (showAerial) "Hide" else "Check") + " the aerial channels (" + plan.channels.map { it.number }.distinct().size + ")",
+                                        { showAerial = !showAerial }, look = Look.OTHER, below = "Each opens on the aerial, to check it's the right channel")
+                                    if (showAerial && plan != null) {
+                                        plan.channels.distinctBy { it.number }.sortedBy { it.number }.forEach { c ->
+                                            FocusRow(c.number.toString() + "  " + c.name, {
+                                                if (!Aerial.openChannel(context, c.number)) kueToast(context, "Aerial channel " + c.number + " wouldn't open.")
+                                            }, look = Look.OTHER)
+                                        }
                                     }
                                 }
                             }
                             // The TV's own quick panel (Home held) and programme guide. Picture, sound and the sleep timer
                             // can't be opened one by one: Fire TV refuses that to other apps (tried on Kevin's TV, 23 November 2026).
-                            sub("Quick settings")
-                            FocusRow("Picture, sound and sleep timer", { if (!Launcher.openTvTool(context, "quick settings")) kueToast(context, "The TV's quick settings wouldn't open.") },
-                                if (aerialName == null) first() else Modifier, look = Look.OTHER, below = "The TV's own quick panel, as when Home is held")
-                            FocusRow("Put the TV to sleep", { if (!HomeGuard.sleepTv()) kueToast(context, "The TV didn't go to sleep: the Home button watcher isn't running.") },
-                                look = Look.OTHER, below = "Also from your phone: KueTV's Settings there, or the TV's address with :" + TvRemote.PORT + " in its browser")
-                            // Fire TV's quick panel's own entries, one by one where Fire TV lets another app open them.
-                            FocusRow("Display mirroring", {
-                                val app = DeviceApps.list(context).firstOrNull { it.name.contains("mirror", ignoreCase = true) }
-                                Report.note("TV tools", "display mirroring: " + (app?.let { it.name + " (" + it.packageName + ")" } ?: "not found among the TV's apps"))
-                                if (app == null || !Launcher.openLeavingHome(context, app.packageName)) kueToast(context, "The TV's display mirroring wouldn't open.")
-                            }, look = Look.OTHER, below = "Show your phone's screen on the TV")
-                            var showInputs by remember { mutableStateOf(false) }
-                            val inputs = remember { TvInputsHere.list(context) }
-                            if (inputs.isNotEmpty()) FocusRow((if (showInputs) "Hide" else "Show") + " the TV's inputs (" + inputs.size + ")", { showInputs = !showInputs },
-                                look = Look.OTHER, below = inputs.joinToString(", ") { it.second })
-                            if (showInputs) inputs.forEach { (id, label) ->
-                                FocusRow(label, { if (!TvInputsHere.open(context, id)) kueToast(context, "$label wouldn't open.") }, look = Look.OTHER, below = "Switch the TV to this input")
-                            }
-                            if (aerialName == null) FocusRow("The TV's programme guide", {
-                                HomeGuard.pause()
-                                val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
-                                Report.note("TV tools", "programme guide: " + if (ok) "opened" else "refused")
-                                if (!ok) kueToast(context, "The TV's programme guide wouldn't open.")
-                            }, look = Look.OTHER, below = "Fire TV's own guide")
-                            if (aerialName != null) FocusRow("The TV's programme guide", {
-                                HomeGuard.pause()
-                                val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
-                                if (!ok) kueToast(context, "The TV's programme guide wouldn't open.")
-                            }, look = Look.OTHER, below = "Freely's guide, aerial channels included")
-                            sub("The TV's settings")
-                            // The TV's own settings: each opens straight onto that screen, and Back comes back here.
-                            val tvParts = remember(Resumes.count) { Launcher.tvSettings(context) }
-                            tvParts.forEachIndexed { i, p ->
-                                FocusRow(p.label, { if (!Launcher.open(context, p)) kueToast(context, "That part of the TV's settings wouldn't open.") },
-                                    look = Look.OTHER)
-                            }
-                            // Fire TV's own tools, moved here from Home's Other apps row.
-                            val tools = remember(Resumes.count) { Launcher.tvTools(context) }
-                            tools.forEach { t ->
-                                FocusRow(t.name, { if (!Launcher.openLeavingHome(context, t.packageName)) kueToast(context, t.name + " wouldn't open.") },
-                                    look = Look.OTHER, below = if (t.name.lowercase().contains("quick")) "Also: hold the Home button" else null)
-                            }
-                            FocusRow("All Fire TV settings", { Launcher.openTvSettings(context) }, if (tvParts.isEmpty() && aerialName == null) first() else Modifier,
-                                look = Look.OTHER, below = "Amazon's own settings menu. Home or Back when done comes back to KueTV")
-                            FocusRow("Get more apps", { if (!Launcher.openAppstore(context)) kueToast(context, "Amazon's Appstore wouldn't open.") },
-                                look = Look.OTHER, below = "Amazon's Appstore. New apps land in the right row on Home by themselves")
-                            // What KueTV keeps on the TV, and clearing what can go: a TV short of storage stutters in every app.
-                            sub("Storage")
-                            var storeChanges by remember { mutableIntStateOf(0) }
-                            val store by produceState<Pair<Long, List<Storage.Part>>?>(null, storeChanges, Resumes.count) {
-                                value = withContext(Dispatchers.IO) { runCatching { Storage.free(context) to Storage.parts(context) }.getOrNull() }
-                            }
-                            store?.let { (free, parts) ->
-                                val kue = parts.sumOf { it.bytes }
-                                Note("Free on this TV: " + Storage.mb(free) + (if (free < 1_024L * 1024 * 1024) " · low: pause and rewind is off until there is more room" else "") +
-                                    "\nKueTV is keeping " + Storage.mb(kue) + ": " + parts.filter { it.bytes >= 1024 * 1024 }.joinToString(", ") { it.name.lowercase() + " " + Storage.mb(it.bytes) })
-                                FocusRow("Clear space", {
-                                    scope.launch {
-                                        withContext(Dispatchers.IO) { Storage.clear(context) }
-                                        storeChanges++
-                                        kueToast(context, "Cleared. Pictures come back as they are needed.")
-                                    }
-                                }, look = Look.OTHER, below = "Pause and rewind copies, downloaded updates, saved pictures and other short-term files. Recordings and your settings stay")
-                            } ?: Note("Working out what KueTV keeps…")
-                            // The TV's apps, biggest first: each opens the TV's own page for it, to clear its cache or uninstall it.
-                            sub("Apps on this TV, biggest first")
-                            val apps by produceState<List<Storage.App>?>(null, Resumes.count) {
-                                value = withContext(Dispatchers.IO) { runCatching { Storage.apps(context.applicationContext) }.getOrDefault(emptyList()) }
-                            }
-                            val appList = apps
-                            if (appList == null) Note("Measuring the apps on this TV…")
-                            else {
-                                if (appList.isNotEmpty() && !appList.first().withData) Note("Sizes are each app's own files; its saved data and cache are shown on its page.")
-                                appList.forEach { a ->
-                                    FocusRow(a.name + " · " + Storage.mb(a.bytes), {
-                                        if (!Storage.openAppPage(context, a.packageName)) kueToast(context, "That app's page wouldn't open.")
-                                    }, look = Look.OTHER, below = if (a.amazon) "Amazon's own: its cache can be cleared, it may not uninstall" else "OK: clear its cache, or uninstall it")
+                            fold("Quick settings") {
+                                FocusRow("Picture, sound and sleep timer", { if (!Launcher.openTvTool(context, "quick settings")) kueToast(context, "The TV's quick settings wouldn't open.") },
+                                    if (aerialName == null) first() else Modifier, look = Look.OTHER, below = "The TV's own quick panel, as when Home is held")
+                                FocusRow("Put the TV to sleep", { if (!HomeGuard.sleepTv()) kueToast(context, "The TV didn't go to sleep: the Home button watcher isn't running.") },
+                                    look = Look.OTHER, below = "Also from your phone: KueTV's Settings there, or the TV's address with :" + TvRemote.PORT + " in its browser")
+                                // Fire TV's quick panel's own entries, one by one where Fire TV lets another app open them.
+                                FocusRow("Display mirroring", {
+                                    val app = DeviceApps.list(context).firstOrNull { it.name.contains("mirror", ignoreCase = true) }
+                                    Report.note("TV tools", "display mirroring: " + (app?.let { it.name + " (" + it.packageName + ")" } ?: "not found among the TV's apps"))
+                                    if (app == null || !Launcher.openLeavingHome(context, app.packageName)) kueToast(context, "The TV's display mirroring wouldn't open.")
+                                }, look = Look.OTHER, below = "Show your phone's screen on the TV")
+                                var showInputs by remember { mutableStateOf(false) }
+                                val inputs = remember { TvInputsHere.list(context) }
+                                if (inputs.isNotEmpty()) FocusRow((if (showInputs) "Hide" else "Show") + " the TV's inputs (" + inputs.size + ")", { showInputs = !showInputs },
+                                    look = Look.OTHER, below = inputs.joinToString(", ") { it.second })
+                                if (showInputs) inputs.forEach { (id, label) ->
+                                    FocusRow(label, { if (!TvInputsHere.open(context, id)) kueToast(context, "$label wouldn't open.") }, look = Look.OTHER, below = "Switch the TV to this input")
                                 }
+                                if (aerialName == null) FocusRow("The TV's programme guide", {
+                                    HomeGuard.pause()
+                                    val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+                                    Report.note("TV tools", "programme guide: " + if (ok) "opened" else "refused")
+                                    if (!ok) kueToast(context, "The TV's programme guide wouldn't open.")
+                                }, look = Look.OTHER, below = "Fire TV's own guide")
+                                if (aerialName != null) FocusRow("The TV's programme guide", {
+                                    HomeGuard.pause()
+                                    val ok = runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("livetv://showEpg")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
+                                    if (!ok) kueToast(context, "The TV's programme guide wouldn't open.")
+                                }, look = Look.OTHER, below = "Freely's guide, aerial channels included")
                             }
-                            // The free channels' own player apps, by country: add a country's missing ones in one go, or
-                            // add or remove one at a time. Looked at again each time KueTV comes back to the front.
-                            sub("Channel player apps")
-                            val players by produceState<List<TvAppsOnDevice.Found?>?>(null, Resumes.count) {
-                                value = withContext(Dispatchers.IO) { TvAppsOnDevice.find(context.applicationContext) }
+                            fold("The TV's settings") {
+                                // The TV's own settings: each opens straight onto that screen, and Back comes back here.
+                                val tvParts = remember(Resumes.count) { Launcher.tvSettings(context) }
+                                tvParts.forEachIndexed { i, p ->
+                                    FocusRow(p.label, { if (!Launcher.open(context, p)) kueToast(context, "That part of the TV's settings wouldn't open.") },
+                                        look = Look.OTHER)
+                                }
+                                // Fire TV's own tools, moved here from Home's Other apps row.
+                                val tools = remember(Resumes.count) { Launcher.tvTools(context) }
+                                tools.forEach { t ->
+                                    FocusRow(t.name, { if (!Launcher.openLeavingHome(context, t.packageName)) kueToast(context, t.name + " wouldn't open.") },
+                                        look = Look.OTHER, below = if (t.name.lowercase().contains("quick")) "Also: hold the Home button" else null)
+                                }
+                                FocusRow("All Fire TV settings", { Launcher.openTvSettings(context) }, if (tvParts.isEmpty() && aerialName == null) first() else Modifier,
+                                    look = Look.OTHER, below = "Amazon's own settings menu. Home or Back when done comes back to KueTV")
+                                FocusRow("Get more apps", { if (!Launcher.openAppstore(context)) kueToast(context, "Amazon's Appstore wouldn't open.") },
+                                    look = Look.OTHER, below = "Amazon's Appstore. New apps land in the right row on Home by themselves")
+                                // What KueTV keeps on the TV, and clearing what can go: a TV short of storage stutters in every app.
                             }
-                            val here = players
-                            if (here == null) Note("Looking at the apps on this TV…")
-                            else {
-                                val onTv = TvAppList.all.filterIndexed { i, _ -> here.getOrNull(i) != null }.map { it.title }.toSet()
-                                // Adding a country's players: after each visit to the store, the next one opens.
-                                LaunchedEffect(here) {
+                            fold("Storage") {
+                                var storeChanges by remember { mutableIntStateOf(0) }
+                                val store by produceState<Pair<Long, List<Storage.Part>>?>(null, storeChanges, Resumes.count) {
+                                    value = withContext(Dispatchers.IO) { runCatching { Storage.free(context) to Storage.parts(context) }.getOrNull() }
+                                }
+                                store?.let { (free, parts) ->
+                                    val kue = parts.sumOf { it.bytes }
+                                    Note("Free on this TV: " + Storage.mb(free) + (if (free < 1_024L * 1024 * 1024) " · low: pause and rewind is off until there is more room" else "") +
+                                        "\nKueTV is keeping " + Storage.mb(kue) + ": " + parts.filter { it.bytes >= 1024 * 1024 }.joinToString(", ") { it.name.lowercase() + " " + Storage.mb(it.bytes) })
+                                    FocusRow("Clear space", {
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) { Storage.clear(context) }
+                                            storeChanges++
+                                            kueToast(context, "Cleared. Pictures come back as they are needed.")
+                                        }
+                                    }, look = Look.OTHER, below = "Pause and rewind copies, downloaded updates, saved pictures and other short-term files. Recordings and your settings stay")
+                                } ?: Note("Working out what KueTV keeps…")
+                                // The TV's apps, biggest first: each opens the TV's own page for it, to clear its cache or uninstall it.
+                            }
+                            fold("Apps on this TV, biggest first") {
+                                val apps by produceState<List<Storage.App>?>(null, Resumes.count) {
+                                    value = withContext(Dispatchers.IO) { runCatching { Storage.apps(context.applicationContext) }.getOrDefault(emptyList()) }
+                                }
+                                val appList = apps
+                                if (appList == null) Note("Measuring the apps on this TV…")
+                                else {
+                                    if (appList.isNotEmpty() && !appList.first().withData) Note("Sizes are each app's own files; its saved data and cache are shown on its page.")
+                                    appList.forEach { a ->
+                                        FocusRow(a.name + " · " + Storage.mb(a.bytes), {
+                                            if (!Storage.openAppPage(context, a.packageName)) kueToast(context, "That app's page wouldn't open.")
+                                        }, look = Look.OTHER, below = if (a.amazon) "Amazon's own: its cache can be cleared, it may not uninstall" else "OK: clear its cache, or uninstall it")
+                                    }
+                                }
+                                // The free channels' own player apps, by country: add a country's missing ones in one go, or
+                                // add or remove one at a time. Looked at again each time KueTV comes back to the front.
+                            }
+                            fold("Channel player apps") {
+                                val players by produceState<List<TvAppsOnDevice.Found?>?>(null, Resumes.count) {
+                                    value = withContext(Dispatchers.IO) { TvAppsOnDevice.find(context.applicationContext) }
+                                }
+                                val here = players
+                                if (here == null) Note("Looking at the apps on this TV…")
+                                else {
+                                    val onTv = TvAppList.all.filterIndexed { i, _ -> here.getOrNull(i) != null }.map { it.title }.toSet()
+                                    // Adding a country's players: after each visit to the store, the next one opens.
+                                    LaunchedEffect(here) {
+                                        if (PlayerApps.queue.isNotEmpty()) {
+                                            delay(3_000)
+                                            PlayerApps.next(context, onTv)
+                                        }
+                                    }
                                     if (PlayerApps.queue.isNotEmpty()) {
-                                        delay(3_000)
-                                        PlayerApps.next(context, onTv)
+                                        FocusRow("Stop adding · " + PlayerApps.queue.size + " still to go", { PlayerApps.queue = emptyList() },
+                                            look = Look.MAIN, below = "Next: " + PlayerApps.queue.first().title)
                                     }
-                                }
-                                if (PlayerApps.queue.isNotEmpty()) {
-                                    FocusRow("Stop adding · " + PlayerApps.queue.size + " still to go", { PlayerApps.queue = emptyList() },
-                                        look = Look.MAIN, below = "Next: " + PlayerApps.queue.first().title)
-                                }
-                                TvAppList.countries.forEach { country ->
-                                    val apps = TvAppList.all.withIndex().filter { it.value.country == country }
-                                    val missing = apps.filter { here.getOrNull(it.index) == null }.map { it.value }
-                                    FocusRow(
-                                        (if (missing.isEmpty()) "✓ " else "") + country + " channel players · " + (apps.size - missing.size) + " of " + apps.size + " on this TV",
-                                        { if (missing.isEmpty()) kueToast(context, "All the $country players are on this TV.") else PlayerApps.addAll(context, missing) },
-                                        look = Look.OTHER,
-                                        below = if (missing.isEmpty()) "All on this TV" else "OK adds the rest from the app store, one after another",
-                                    )
-                                    apps.forEach { (i, app) ->
-                                        val found = here.getOrNull(i)
+                                    TvAppList.countries.forEach { country ->
+                                        val apps = TvAppList.all.withIndex().filter { it.value.country == country }
+                                        val missing = apps.filter { here.getOrNull(it.index) == null }.map { it.value }
                                         FocusRow(
-                                            (if (found != null) "✓ " else "+ ") + app.title,
-                                            {
-                                                val ok = if (found != null) PlayerApps.remove(context, found.packageName, app.title) else PlayerApps.openStore(context, app)
-                                                if (!ok) kueToast(context, if (found != null) "The TV wouldn't remove it." else "The app store wouldn't open.")
-                                            },
+                                            (if (missing.isEmpty()) "✓ " else "") + country + " channel players · " + (apps.size - missing.size) + " of " + apps.size + " on this TV",
+                                            { if (missing.isEmpty()) kueToast(context, "All the $country players are on this TV.") else PlayerApps.addAll(context, missing) },
                                             look = Look.OTHER,
-                                            below = if (found != null) "On this TV · OK to remove it" else "Not on this TV · OK to add it",
+                                            below = if (missing.isEmpty()) "All on this TV" else "OK adds the rest from the app store, one after another",
                                         )
+                                        apps.forEach { (i, app) ->
+                                            val found = here.getOrNull(i)
+                                            FocusRow(
+                                                (if (found != null) "✓ " else "+ ") + app.title,
+                                                {
+                                                    val ok = if (found != null) PlayerApps.remove(context, found.packageName, app.title) else PlayerApps.openStore(context, app)
+                                                    if (!ok) kueToast(context, if (found != null) "The TV wouldn't remove it." else "The app store wouldn't open.")
+                                                },
+                                                look = Look.OTHER,
+                                                below = if (found != null) "On this TV · OK to remove it" else "Not on this TV · OK to add it",
+                                            )
+                                        }
                                     }
                                 }
                             }
