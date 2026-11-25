@@ -135,6 +135,20 @@ object KueSettings {
         const val OPEN = "M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"
         const val DISC = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
         const val PLAY = "M8 5l11 7-11 7z"
+        /** Sliders: the equaliser and sound settings. */
+        const val EQUALISER = "M6 4v16M12 4v16M18 4v16M4 14h4M10 8h4M16 16h4"
+        /** A crescent moon: the sleep timer. */
+        const val SLEEP = "M19 14.5A7.5 7.5 0 0 1 9.5 5a7.5 7.5 0 1 0 9.5 9.5z"
+        /** An "i" in a circle: details about something. */
+        const val INFO = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 11v6M12 7.5v.5"
+        /** How a list is shown: plain rows, rows with pictures, big covers. */
+        const val VIEW_LIST = "M4 6h16M4 12h16M4 18h16"
+        const val VIEW_PICTURES = "M4 4h5v5H4zM12 6.5h8M4 15h5v5H4zM12 17.5h8"
+        const val VIEW_COVERS = "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z"
+        /** A screen with a play mark: a video to watch. */
+        const val VIDEO = "M3 6h18v12H3zM10 9.5l5 2.5-5 2.5z"
+        /** A globe: the web. */
+        const val WEB = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.7 5.6 3.7 9s-1.2 6.4-3.7 9c-2.5-2.6-3.7-5.6-3.7-9S9.5 5.6 12 3z"
         const val SHUFFLE = "M4 7h3c4 0 6 10 10 10h3M17.5 14l2.5 3-2.5 3M4 17h3c1.5 0 2.6-1.3 3.6-3M13.4 10c1-1.7 2.1-3 3.6-3h3M17.5 4l2.5 3-2.5 3"
 
         /** Profile pictures, drawn (they were emoji). Kept by the emoji each profile already has saved. */
