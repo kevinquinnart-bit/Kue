@@ -750,6 +750,18 @@ object Scanner {
         save()
     }
 
+    /** Puts songs on an album (from Match by sound): kept at once, looked up again; the files get it on the next Fix. */
+    fun setSongsAlbum(ids: Set<String>, album: String, albumArtist: String) {
+        synchronized(this) {
+            data = data.copy(tracks = data.tracks.map { t ->
+                if (t.id !in ids) t else t.copy(album = album, albumArtist = albumArtist, checked = false, ownLook = false, fixed = false)
+            })
+            save()
+            note("put on an album by sound: " + ids.size + " songs to " + albumArtist + " / " + album)
+        }
+        scan()
+    }
+
     /** An album renamed by hand: its old key to one of its songs, so a page open on it follows it to its new name. */
     val renamed = java.util.concurrent.ConcurrentHashMap<String, String>()
 
@@ -797,7 +809,7 @@ object Scanner {
      * A song file read in pieces straight from the Drive, for the phone's own details reader. Pieces of
      * 64 KB are fetched as asked for and the last few kept, so the start and end of a file are read once.
      */
-    private class DriveSource(private val id: String, private val length: Long, private val token: String) : MediaDataSource() {
+    internal class DriveSource(private val id: String, private val length: Long, private val token: String) : MediaDataSource() {
         private val blockSize = 64 * 1024L
         private val blocks = object : LinkedHashMap<Long, ByteArray>(16, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?): Boolean = size > 48

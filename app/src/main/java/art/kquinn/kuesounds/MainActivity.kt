@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
         Podcasts.init(this)
         Sound.init(this)
         Views.init(this)
+        SoundMatch.init(this)
         Backup.init(this)
         SpotifyLink.init(this)
         takeShared(intent)

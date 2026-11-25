@@ -3,6 +3,7 @@ package art.kquinn.kuesounds
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -112,6 +113,12 @@ sealed class Screen {
     data class PlaylistPage(val id: String) : Screen()
     data class YouTubePlayer(val url: String) : Screen()
 }
+
+/** The parts of the music, shown under Music (Kevin, 25 November 2026: all music under one category). */
+val musicViews = listOf(Tab.ALBUMS, Tab.SINGLES, Tab.SONGS, Tab.ARTISTS, Tab.PLAYLISTS, Tab.FAVOURITES, Tab.ON_PHONE, Tab.FOLDERS)
+
+/** The categories along the top: Music, then everything that isn't your own music. */
+val topTabs = listOf(Tab.PODCASTS, Tab.RADIO, Tab.SPOTIFY, Tab.YOUTUBE)
 
 enum class Tab(val label: String) {
     // The music first (Kevin, 25 November 2026), then everything else, in the order it was before.
@@ -311,24 +318,48 @@ object Ui {
                 SearchBox(query) { query = it }
                 if (query.isBlank()) {
                     var choosingView by remember { mutableStateOf(false) }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(Tab.entries) { t ->
+                    // The music part last shown, so Music opens where it was left.
+                    var lastMusic by rememberSaveable { mutableStateOf(if (tab in musicViews) tab else Tab.ALBUMS) }
+                    if (tab in musicViews) lastMusic = tab
+                    val inMusic = tab in musicViews
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        item {
+                            Box(
+                                Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(if (inMusic) K.Accent else K.Panel)
+                                    .clickable { tab = lastMusic }.padding(horizontal = 16.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { Words("Music", 15, if (inMusic) K.Page else K.Ink, bold = inMusic) }
+                        }
+                        items(topTabs) { t ->
+                            val on = t == tab
+                            Box(
+                                Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) K.Accent else K.Panel)
+                                    .clickable { tab = t }.padding(horizontal = 16.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { Words(t.label, 15, if (on) K.Page else K.Ink, bold = on) }
+                        }
+                    }
+                    // Under Music: its parts, and how the one showing is laid out.
+                    if (inMusic) Row(verticalAlignment = Alignment.CenterVertically) {
+                        LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(musicViews) { t ->
                                 val on = t == tab
                                 Box(
-                                    Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) K.Accent else K.Panel)
-                                        .clickable { tab = t }.padding(horizontal = 16.dp),
+                                    Modifier.height(34.dp).clip(RoundedCornerShape(17.dp))
+                                        .background(if (on) K.Raised else Color.Transparent)
+                                        .then(if (on) Modifier else Modifier.border(1.dp, K.Raised, RoundedCornerShape(17.dp)))
+                                        .clickable { tab = t }.padding(horizontal = 14.dp),
                                     contentAlignment = Alignment.Center,
-                                ) { Words(t.label, 15, if (on) K.Page else K.Ink, bold = on) }
+                                ) { Words(t.label, 14, if (on) K.Accent else K.Soft, bold = on) }
                             }
                         }
                         // How this part is shown: a list, a list with small pictures, or large covers (Kevin, 25 Nov 2026).
                         if (tab in Views.defaults) {
                             Spacer(Modifier.width(8.dp))
                             Box(
-                                Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClickLabel = "How it's shown") { choosingView = true },
+                                Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(K.Panel).clickable(onClickLabel = "How it's shown") { choosingView = true },
                                 contentAlignment = Alignment.Center,
-                            ) { KueSettings.Icon(Views.layout(tab).icon, 20.dp, K.Ink, 2f) }
+                            ) { KueSettings.Icon(Views.layout(tab).icon, 18.dp, K.Ink, 2f) }
                         }
                     }
                     if (choosingView) HoldBox("Show " + tab.label.lowercase() + " as", "", { choosingView = false }) {
@@ -726,6 +757,7 @@ object Ui {
             "add" -> ListUi.AddBox("\"" + t.title + "\"", listOf(t.id), onClose)
             "edit" -> EditSong(t, onClose)
             "info" -> SongInfo(t, onClose)
+            "match" -> MatchBox(listOf(t), onClose)
             "delete" -> DeleteSong(t, onClose)
             else -> HoldBox(t.title, listOf(t.artist, t.album).filter { it.isNotBlank() }.joinToString(" · "), onClose) {
                 Button("Add to a playlist", icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) { doing = "add" }
@@ -746,6 +778,7 @@ object Ui {
                     if (Scanner.view.artists.any { it.name == artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(artist)) }
                 }
                 Button("Song info", main = false, icon = KueSettings.Icons.INFO, modifier = Modifier.fillMaxWidth()) { doing = "info" }
+                Button("Match by sound", main = false, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth()) { doing = "match" }
                 Button("Edit name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { doing = "edit" }
                 Button("Delete from your Drive", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.fillMaxWidth()) { doing = "delete" }
             }
@@ -805,6 +838,97 @@ object Ui {
         }
     }
 
+    /**
+     * Match by sound, for one song or every song on an album (Kevin, 25 November 2026): KueSounds listens to each file,
+     * says what it is and how sure it is, then Use these puts the names right in the files and the songs on their album.
+     */
+    @Composable
+    private fun MatchBox(songs: List<Track>, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val found = remember { androidx.compose.runtime.mutableStateMapOf<String, List<SoundMatch.Found>>() }
+        val problems = remember { androidx.compose.runtime.mutableStateMapOf<String, String>() }
+        var listening by remember { mutableStateOf(0) }
+        var saving by remember { mutableStateOf("") }
+        var done by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) {
+            for ((i, t) in songs.withIndex()) {
+                listening = i + 1
+                val got = withContext(Dispatchers.IO) { runCatching { SoundMatch.identify(t) } }
+                got.onSuccess { found[t.id] = it }.onFailure { problems[t.id] = it.message ?: "It didn't work." }
+                // A wrong key stops the lot: every song would say the same.
+                if (got.exceptionOrNull()?.message?.contains("key") == true) break
+            }
+            listening = 0
+        }
+        // The album most of the songs are on, for an album's worth: every matched song goes on it when it lists it.
+        val album = remember(found.size) {
+            found.values.mapNotNull { it.firstOrNull()?.albums }.flatten().groupingBy { it }.eachCount().maxByOrNull { it.value }?.key
+        }
+        Dialog(onDismissRequest = { if (saving.isEmpty()) onClose() }) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Words("Match by sound", 19, bold = true)
+                if (listening > 0) Working("Listening to " + (if (songs.size == 1) "the song" else "song $listening of ${songs.size}") + "…")
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 420.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(songs, key = { it.id }) { t ->
+                        val best = found[t.id]?.firstOrNull()
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).padding(12.dp)) {
+                            Words(t.title + " · " + t.artist, 13, K.Soft, lines = 2)
+                            when {
+                                best != null -> {
+                                    Words(best.title, 16, bold = true, lines = 2)
+                                    Words(best.artist, 14, K.Accent, lines = 2)
+                                    val on = when {
+                                        album != null && album in best.albums -> "On " + album
+                                        best.albums.isNotEmpty() -> "On " + best.albums.first()
+                                        best.single != null -> "Single: " + best.single
+                                        else -> ""
+                                    }
+                                    if (on.isNotEmpty()) Words(on, 13, K.Soft, lines = 2)
+                                    Words("Sure: " + (best.score * 100).toInt() + "%", 13, K.Soft)
+                                }
+                                t.id in problems -> Words(problems[t.id].orEmpty(), 13, K.Accent, lines = 3)
+                                t.id in found -> Words("Not in the sound database.", 13, K.Soft)
+                                else -> Words("Waiting", 13, K.Soft)
+                            }
+                        }
+                    }
+                }
+                if (saving.isNotEmpty()) Working(saving)
+                val usable = songs.filter { found[it.id]?.firstOrNull() != null }
+                if (listening == 0 && saving.isEmpty() && !done && usable.isNotEmpty()) {
+                    Words("Use these: puts each name and artist into its file in your Drive, and the songs on their album. Google keeps the old version for 30 days.", 13, K.Soft, lines = 4)
+                    Button("Use these", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) {
+                        val go = {
+                            scope.launch {
+                                for ((i, t) in usable.withIndex()) {
+                                    val best = found[t.id]!!.first()
+                                    saving = "Saving " + (i + 1) + " of " + usable.size + "…"
+                                    withContext(Dispatchers.IO) { Fixer.rename(context.applicationContext, t, best.title, best.artist) }
+                                }
+                                // Each song on the album most of them share, or its own first album, or its single.
+                                val byAlbum = usable.groupBy { t ->
+                                    val best = found[t.id]!!.first()
+                                    when { album != null && album in best.albums -> album; best.albums.isNotEmpty() -> best.albums.first(); else -> best.single }
+                                }
+                                for ((name, list) in byAlbum) if (name != null) Scanner.setSongsAlbum(list.map { it.id }.toSet(), name, found[list.first().id]!!.first().artist)
+                                saving = ""
+                                done = true
+                            }
+                            Unit
+                        }
+                        if (Google.canEdit) go() else Fixer.askPermission { go() }
+                    }
+                }
+                if (done) Words("Saved. The albums are looked up again with the right names.", 14, K.Accent, lines = 2)
+                Button("Close", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth()) { if (saving.isEmpty()) onClose() }
+            }
+        }
+    }
+
     /** Deletes a song: its file goes to the Drive's bin (kept 30 days there), and it leaves KueSounds. Asked first. */
     @Composable
     private fun DeleteSong(t: Track, onClose: () -> Unit) {
@@ -848,6 +972,8 @@ object Ui {
         var adding by remember { mutableStateOf(false) }
         var editing by remember { mutableStateOf(false) }
         if (editing) { EditAlbum(al, onClose); return }
+        var matching by remember { mutableStateOf(false) }
+        if (matching) { MatchBox(al.tracks, onClose); return }
         if (adding) { ListUi.AddBox("the album", al.tracks.map { it.id }, onClose); return }
         HoldBox(al.title, listOf(al.artist, count(al.tracks.size, "song")).joinToString(" · "), onClose) {
             Button("Play", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0); onClose() }
@@ -855,6 +981,7 @@ object Ui {
             CommonChoices(al.tracks, { adding = true }, onClose)
             if (Fixer.canFix(al) && !Fixer.isFixed(al)) Button("Fix the files", main = false, icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { Fixer.fix(context, listOf(al)); onClose() }
             Button("Edit album name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editing = true }
+            Button("Match every song by sound", main = false, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth()) { matching = true }
             if (Scanner.view.artists.any { it.name == al.artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(al.artist)) }
         }
     }
@@ -1057,6 +1184,10 @@ object Ui {
                     var editingAlbum by remember { mutableStateOf(false) }
                     Button("Edit album name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editingAlbum = true }
                     if (editingAlbum) EditAlbum(al) { editingAlbum = false }
+                    Spacer(Modifier.height(12.dp))
+                    var matchingAlbum by remember { mutableStateOf(false) }
+                    Button("Match every song by sound", main = false, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth()) { matchingAlbum = true }
+                    if (matchingAlbum) MatchBox(al.tracks) { matchingAlbum = false }
                     Spacer(Modifier.height(12.dp))
                     SaveToPhone(al)
                     if (Fixer.canFix(al)) {
@@ -1630,6 +1761,8 @@ object Ui {
         KueSettings.Place("app", "KueSounds", "Your music", "Look for new music"),
         KueSettings.Place("app", "KueSounds", "Fix the files", "Fix them"),
         KueSettings.Place("app", "KueSounds", "Fix the files", "Albums still to fix"),
+        KueSettings.Place("app", "KueSounds", "Match by sound", "AcoustID key"),
+        KueSettings.Place("app", "KueSounds", "Match by sound", "Match by sound, like Shazam"),
         KueSettings.Place("app", "KueSounds", "Sound for music", "Equaliser for music"),
         KueSettings.Place("app", "KueSounds", "Sound for music", "Bass, surround and louder for music"),
         KueSettings.Place("app", "KueSounds", "Sound for podcasts and radio", "Equaliser for podcasts and radio"),
@@ -1697,6 +1830,13 @@ object Ui {
                     if (!Scanner.running) Button("Look for new music", main = false, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
                 }
                 KueSettings.Section("Fix the files", sectionOpen("app|Fix the files"), look, { flip("app|Fix the files") }) { FixPanel(view, go) }
+                KueSettings.Section("Match by sound", sectionOpen("app|Match by sound"), look, { flip("app|Match by sound") }) {
+                    var key by remember { mutableStateOf(SoundMatch.key) }
+                    Words("KueSounds listens to a song and finds out what it is, as Shazam does. It uses AcoustID's free song database, which needs its key.", 14, K.Soft, lines = 4)
+                    Words("AcoustID key", 13, K.Soft)
+                    EditField(key) { key = it.trim(); SoundMatch.key = key }
+                    Words(if (key.isBlank()) "No key yet. Get it at acoustid.org, under Applications." else "Key saved.", 13, if (key.isBlank()) K.Accent else K.Soft, lines = 2)
+                }
                 KueSettings.Section("Sound for music", sectionOpen("app|Sound for music"), look, { flip("app|Sound for music") }) { SoundPanel(Sound.Kind.MUSIC) }
                 KueSettings.Section("Sound for podcasts and radio", sectionOpen("app|Sound for podcasts and radio"), look, { flip("app|Sound for podcasts and radio") }) {
                     SoundPanel(Sound.Kind.PODCASTS)
