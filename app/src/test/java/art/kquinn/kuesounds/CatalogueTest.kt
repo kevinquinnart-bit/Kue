@@ -144,6 +144,22 @@ class CatalogueTest {
         assertEquals(true, Catalogue.isVarious("Various artists"))
         assertEquals(false, Catalogue.isVarious("Oasis"))
     }
+
+    // Real answers of 25 November 2026 to the second, loose search: the exact one found nothing for either.
+    @Test
+    fun aNameWrittenALittleDifferentlyStillFindsItsRelease() {
+        val takeThat = Catalogue.chooseLoose(Catalogue.parseReleases(saved("takethat_million_loose.json")), "A Million Lovesongs", "Take That", 4)
+        assertEquals("A Million Love Songs", takeThat?.title)
+        val derek = Catalogue.chooseLoose(Catalogue.parseReleases(saved("derekryan_mothers_son_loose.json")), "A Mothers Son", "Derek Ryan", 12)
+        assertEquals("A Mother's Son", derek?.title)
+    }
+
+    @Test
+    fun theLooseSearchNeverTakesADifferentRecord() {
+        // George Michael has no "A Moment With You" in the catalogue: none of his other records is taken for it.
+        assertNull(Catalogue.chooseLoose(Catalogue.parseReleases(saved("georgemichael_moment_loose.json")), "A Moment With You", "George Michael", 10))
+        assertNull(Catalogue.chooseLoose(Catalogue.parseReleases(saved("takethat_million_loose.json")), "A Million Lovesongs", "George Michael", 4))
+    }
 }
 
 /** Checks on reading an album's own list of songs, and finding which one a file is. */
@@ -170,21 +186,5 @@ class ReleaseSongsTest {
         val songs = Catalogue.parseReleaseSongs(json)
         org.junit.Assert.assertEquals("Wonderwall", Catalogue.songFor(songs, "wonderwall (Remastered)")?.title)
         org.junit.Assert.assertEquals(null, Catalogue.songFor(songs, "Some Might Say"))
-    }
-
-    // Real answers of 25 November 2026 to the second, loose search: the exact one found nothing for either.
-    @Test
-    fun aNameWrittenALittleDifferentlyStillFindsItsRelease() {
-        val takeThat = Catalogue.chooseLoose(Catalogue.parseReleases(saved("takethat_million_loose.json")), "A Million Lovesongs", "Take That", 4)
-        assertEquals("A Million Love Songs", takeThat?.title)
-        val derek = Catalogue.chooseLoose(Catalogue.parseReleases(saved("derekryan_mothers_son_loose.json")), "A Mothers Son", "Derek Ryan", 12)
-        assertEquals("A Mother's Son", derek?.title)
-    }
-
-    @Test
-    fun theLooseSearchNeverTakesADifferentRecord() {
-        // George Michael has no "A Moment With You" in the catalogue: none of his other records is taken for it.
-        assertNull(Catalogue.chooseLoose(Catalogue.parseReleases(saved("georgemichael_moment_loose.json")), "A Moment With You", "George Michael", 10))
-        assertNull(Catalogue.chooseLoose(Catalogue.parseReleases(saved("takethat_million_loose.json")), "A Million Lovesongs", "George Michael", 4))
     }
 }
