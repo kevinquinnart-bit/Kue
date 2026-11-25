@@ -127,7 +127,8 @@ object KueSettings {
         const val DOT = "M12 8a4 4 0 1 1 0 8 4 4 0 0 1 0-8z"
         const val PLAY_NEXT = "M4 6h11M4 11h11M4 16h6M14 13.5l6 3.5-6 3.5z"
         const val QUEUE = "M4 6h14M4 11h14M4 16h7M17 13.5v7M13.5 17h7"
-        const val PLAYLIST = "M10 17V5.5l8-2M10 17a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM17.5 11v8M13.5 15h8"
+        // A whole note, stem and flag, with a plus (Kevin, 25 November 2026: the flag stopped short, "incomplete").
+        const val PLAYLIST = "M9 17V4c2.6.7 5 2.2 5 5.5M9 17a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0zM18 12v8M14 16h8"
         const val EDIT = "M4 20l1-4.5L15.5 5a2.1 2.1 0 0 1 3 3L8 18.5zM13.5 7l3 3"
         const val BIN = "M5 7h14M10 7V4.5h4V7M7 7l1 13h8l1-13M10.5 11v5.5M13.5 11v5.5"
         const val PHONE = "M7 3h10v18H7zM12 7v6.5M9.3 10.8L12 13.5l2.7-2.7M10.5 17.5h3"
@@ -149,6 +150,28 @@ object KueSettings {
         const val VIDEO = "M3 6h18v12H3zM10 9.5l5 2.5-5 2.5z"
         /** A globe: the web. */
         const val WEB = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.6 3.7 5.6 3.7 9s-1.2 6.4-3.7 9c-2.5-2.6-3.7-5.6-3.7-9S9.5 5.6 12 3z"
+        /** Lines of words with a note: lyrics. */
+        const val LYRICS = "M4 5h11M4 9.5h11M4 14h6M18 16V5.5l3 1M18 16a2 2 0 1 1-4 0 2 2 0 0 1 4 0z"
+        /** A tag: a kind of music. */
+        const val GENRE = "M4 4h7.5l8.5 8.5-7.5 7.5L4 11.5zM8.5 8.5v.5"
+        /** Up and down arrows with lines: sort. */
+        const val SORT = "M7 4v16M4 17l3 3 3-3M13 6h7M13 11h5M13 16h3"
+        /** A screen with waves: send to a TV or speaker. */
+        const val CAST = "M3 18.5a2.5 2.5 0 0 1 2.5 2.5M3 14.5a6.5 6.5 0 0 1 6.5 6.5M3 10.5A10.5 10.5 0 0 1 13.5 21M3 7V5h18v14h-5"
+        /** Three lines to hold and move: drag. */
+        const val DRAG = "M6 8h12M6 12h12M6 16h12"
+        /** A calendar: a date. */
+        const val CALENDAR = "M4 6h16v14H4zM4 10.5h16M8.5 3.5v5M15.5 3.5v5"
+        /** A bell with waves: a ringtone. */
+        const val RING = "M7 16V11a5 5 0 0 1 10 0v5l1.5 2h-13zM10.5 21h3M3 9c.4-2 1.3-3.6 2.6-4.8M21 9c-.4-2-1.3-3.6-2.6-4.8"
+        /** A person, round head over shoulders. */
+        const val PERSON = "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4.5 21c.6-3.8 3.6-6 7.5-6s6.9 2.2 7.5 6"
+        /** A pen nib with a line: who wrote it. */
+        const val COMPOSER = "M14.5 4.5l5 5-8 8-6 1.5 1.5-6zM12 7l5 5M4 21h16"
+        /** A radio: a box with a dial and an aerial. */
+        const val RADIO = "M4 9h16v11H4zM8 9l9-5M14.5 14.5a2.5 2.5 0 1 0 0 .01M7 13h3M7 16h3"
+        /** A padlock: kept upright. */
+        const val LOCK = "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3"
         const val SHUFFLE = "M4 7h3c4 0 6 10 10 10h3M17.5 14l2.5 3-2.5 3M4 17h3c1.5 0 2.6-1.3 3.6-3M13.4 10c1-1.7 2.1-3 3.6-3h3M17.5 4l2.5 3-2.5 3"
 
         /** Profile pictures, drawn (they were emoji). Kept by the emoji each profile already has saved. */
@@ -274,7 +297,7 @@ object KueSettings {
      * much scrolling). Closed until tapped, unless Search all settings opened it.
      */
     @Composable
-    fun Section(title: String, open: Boolean, look: Look, onToggle: () -> Unit, content: @Composable () -> Unit) {
+    fun Section(title: String, open: Boolean, look: Look, onToggle: () -> Unit, note: String = "", content: @Composable () -> Unit) {
         val turn by animateFloatAsState(if (open) 90f else 0f, tween(220), label = "section")
         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(look.raised)) {
             Row(
@@ -282,12 +305,44 @@ object KueSettings {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Say(title, 15, look.ink, look, bold = true, modifier = Modifier.weight(1f))
+                // What is waiting in it, kept up to date, so it can be seen without opening it (Kevin, 25 November 2026).
+                if (note.isNotEmpty()) {
+                    Say(note, 13, look.accent, look, bold = true)
+                    Spacer(Modifier.width(8.dp))
+                }
                 Box(Modifier.rotate(turn)) { Icon(Icons.CHEVRON, 16.dp, look.soft(), 2.2f) }
             }
             AnimatedVisibility(open, enter = expandVertically(tween(220)) + fadeIn(tween(220)), exit = shrinkVertically(tween(180)) + fadeOut(tween(140))) {
                 Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { content() }
             }
         }
+    }
+
+    // ---- The Kue rows of choices (Kevin, 25 November 2026: one standard across the apps) ---------------------------
+
+    /** The first row of choices: yellow with dark bold words when chosen, a dark panel with white words when not. */
+    @Composable
+    fun MainChip(text: String, on: Boolean, look: Look, modifier: Modifier = Modifier, onClick: () -> Unit) {
+        Box(
+            modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) look.accent else look.panel)
+                .clickable(role = Role.Tab, onClickLabel = text, onClick = onClick).padding(horizontal = 16.dp),
+            contentAlignment = Alignment.Center,
+        ) { Say(text, 15, if (on) look.onAccent else look.ink, look, bold = on) }
+    }
+
+    /**
+     * The second row, under the first: the reverse of it. Chosen is the dark raised colour with yellow bold words; the
+     * rest are an outline with soft words.
+     */
+    @Composable
+    fun SubChip(text: String, on: Boolean, look: Look, modifier: Modifier = Modifier, onClick: () -> Unit) {
+        Box(
+            modifier.height(34.dp).clip(RoundedCornerShape(17.dp))
+                .background(if (on) look.raised else Color.Transparent)
+                .then(if (on) Modifier else Modifier.border(1.dp, look.raised, RoundedCornerShape(17.dp)))
+                .clickable(role = Role.Tab, onClickLabel = text, onClick = onClick).padding(horizontal = 14.dp),
+            contentAlignment = Alignment.Center,
+        ) { Say(text, 14, if (on) look.accent else look.soft(), look, bold = on) }
     }
 
     /** One setting for Search all settings: the group it is in ([group] is the group's own id), its section if any, its name. */

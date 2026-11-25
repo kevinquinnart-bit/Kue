@@ -200,6 +200,7 @@ object Ui {
                             }
                         },
                         onSettings = { screen = Screen.Settings },
+                        onHome = { screen = Screen.Hub },
                     )
                     Screen.Library -> LibraryScreen()
                     Screen.Places -> Places(asks, onAdd = { screen = Screen.AddPlace(null) }, onChoose = { screen = Screen.ChooseHome(it) }, onPassword = { screen = Screen.HomeForm(null, it) })
@@ -278,15 +279,18 @@ object Ui {
     }
 
     @Composable
-    private fun Hub(onOpen: (Section) -> Unit, onSettings: () -> Unit) {
+    private fun Hub(onOpen: (Section) -> Unit, onSettings: () -> Unit, onHome: () -> Unit = {}) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.kue_mark), contentDescription = null, modifier = Modifier.size(36.dp))
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    buildAnnotatedString { append("Kue"); withStyle(SpanStyle(color = K.KueBlue)) { append("Vault") } },
-                    color = K.Ink, fontSize = 24.sp, fontFamily = K.Poppins, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f),
-                )
+                // The K and the name: home, the same in every Kue app (Kevin, 25 November 2026).
+                Row(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "Home", onClick = onHome), verticalAlignment = Alignment.CenterVertically) {
+                    Image(painterResource(R.drawable.kue_mark), contentDescription = null, modifier = Modifier.size(36.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        buildAnnotatedString { append("Kue"); withStyle(SpanStyle(color = K.KueBlue)) { append("Vault") } },
+                        color = K.Ink, fontSize = 24.sp, fontFamily = K.Poppins, fontWeight = FontWeight.SemiBold,
+                    )
+                }
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onSettings), contentAlignment = Alignment.Center) { KueSettings.Icon(KueSettings.Icons.GEAR, 24.dp, K.Ink) }
             }
             val known = Vault.places.mapNotNull { Vault.quotas[it.id] }
@@ -398,8 +402,10 @@ object Ui {
                 Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Words(found.size.toString() + " file" + (if (found.size == 1) "" else "s") + if (Work.reading) " · reading your places…" else "", 12, K.Soft, lines = 1, modifier = Modifier.weight(1f))
+                    // The second row of choices, in the Kue standard (Kevin, 25 November 2026).
                     for (o in Library.Order.entries) {
-                        Words(o.title, 12, if (o == order) K.Accent else K.Soft, bold = o == order, lines = 1, modifier = Modifier.clickable { order = o }.padding(horizontal = 6.dp, vertical = 8.dp))
+                        Spacer(Modifier.width(6.dp))
+                        KueSettings.SubChip(o.title, o == order, look) { order = o }
                     }
                 }
                 if (!Work.reading) Words("Read again", 12, K.Accent, bold = true, lines = 1, modifier = Modifier.clickable { scope.launch { Work.readLibrary(context) } }.padding(vertical = 6.dp))
