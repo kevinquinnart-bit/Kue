@@ -89,7 +89,6 @@ object Trending {
     /** Trending and most popular in turn: trending first, so the newest talk of the town leads. */
     internal fun mix(trending: List<Slide>, popular: List<Slide>): List<Slide> =
         (0 until maxOf(trending.size, popular.size)).flatMap { i -> listOfNotNull(trending.getOrNull(i), popular.getOrNull(i)) }
-    }
 
     private fun fetch(service: Service, type: String, sortBy: String = "TRENDING"): List<Slide> {
         val body = JSONObject()
