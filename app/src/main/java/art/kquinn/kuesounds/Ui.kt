@@ -270,11 +270,12 @@ object Ui {
             Box(Modifier.weight(1f)) {
                 when (val s = stack.last()) {
                     Screen.Home -> Home(albums, artists, songs, go)
-                    is Screen.AlbumPage -> view.byKey[s.key]?.let { AlbumPage(it, back, go) } ?: Gone(back)
+                    is Screen.AlbumPage -> (view.byKey[s.key] ?: Scanner.renamed[s.key]?.let { id -> albums.firstOrNull { al -> al.tracks.any { it.id == id } } })
+                        ?.let { AlbumPage(it, back, go) } ?: Gone(back)
                     is Screen.ArtistPage -> artists.firstOrNull { it.name == s.name }?.let { ArtistPage(it, back, go) } ?: Gone(back)
                     is Screen.FolderPage -> FolderPage(s, data, back, go)
                     Screen.NowPlaying -> NowPlaying(back)
-                    Screen.Settings -> Settings(back)
+                    Screen.Settings -> Settings(back, go)
                     Screen.PodcastFind -> PodUi.Find(back, go)
                     is Screen.ShowPage -> PodUi.ShowPage(s.feed, back, go)
                     is Screen.EpisodePage -> PodUi.EpisodePage(s.id, back, go)
@@ -845,12 +846,15 @@ object Ui {
     private fun AlbumBox(al: Album, go: (Screen) -> Unit, onClose: () -> Unit) {
         val context = LocalContext.current
         var adding by remember { mutableStateOf(false) }
+        var editing by remember { mutableStateOf(false) }
+        if (editing) { EditAlbum(al, onClose); return }
         if (adding) { ListUi.AddBox("the album", al.tracks.map { it.id }, onClose); return }
         HoldBox(al.title, listOf(al.artist, count(al.tracks.size, "song")).joinToString(" · "), onClose) {
             Button("Play", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0); onClose() }
             Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0, shuffled = true); onClose() }
             CommonChoices(al.tracks, { adding = true }, onClose)
             if (Fixer.canFix(al) && !Fixer.isFixed(al)) Button("Fix the files", main = false, icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { Fixer.fix(context, listOf(al)); onClose() }
+            Button("Edit album name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editing = true }
             if (Scanner.view.artists.any { it.name == al.artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(al.artist)) }
         }
     }
@@ -865,6 +869,38 @@ object Ui {
             Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(all, 0); onClose() }
             Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) { Playing.play(all, 0, shuffled = true); onClose() }
             CommonChoices(all, { adding = true }, onClose)
+        }
+    }
+
+    /**
+     * Puts an album's name and artist right by hand (Kevin, 25 November 2026: an album the catalogue didn't find is
+     * usually a spelling). Kept in KueSounds at once and looked up again; written into the files when they are fixed.
+     */
+    @Composable
+    private fun EditAlbum(al: Album, onClose: () -> Unit) {
+        var title by remember { mutableStateOf(al.title) }
+        var artist by remember { mutableStateOf(al.artist) }
+        var saying by remember { mutableStateOf("") }
+        Dialog(onDismissRequest = onClose) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Words("Edit the album", 18, bold = true)
+                Words("Album name", 13, K.Soft)
+                EditField(title) { title = it }
+                Words("Artist", 13, K.Soft)
+                EditField(artist) { artist = it }
+                Words("It's looked up again straight away. The files get the new name when you next press Fix.", 13, K.Soft, lines = 3)
+                if (saying.isNotEmpty()) Words(saying, 14, K.Accent, lines = 2)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button("Save", modifier = Modifier.weight(1f)) {
+                        val name = title.trim()
+                        val who = artist.trim()
+                        if (name.isEmpty() || who.isEmpty()) { saying = "The album needs a name and an artist."; return@Button }
+                        Scanner.renameAlbum(al, name, who)
+                        onClose()
+                    }
+                    Button("Cancel", main = false, modifier = Modifier.weight(1f), onClick = onClose)
+                }
+            }
         }
     }
 
@@ -1018,6 +1054,10 @@ object Ui {
                     Button("Add to a playlist", main = false, modifier = Modifier.fillMaxWidth()) { adding = true }
                     if (adding) ListUi.AddBox("the album", al.tracks.map { it.id }) { adding = false }
                     Spacer(Modifier.height(12.dp))
+                    var editingAlbum by remember { mutableStateOf(false) }
+                    Button("Edit album name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editingAlbum = true }
+                    if (editingAlbum) EditAlbum(al) { editingAlbum = false }
+                    Spacer(Modifier.height(12.dp))
                     SaveToPhone(al)
                     if (Fixer.canFix(al)) {
                         Spacer(Modifier.height(12.dp))
@@ -1108,10 +1148,12 @@ object Ui {
      * what is left, one button, a spinner while it works, and the songs whose files can't be changed.
      */
     @Composable
-    private fun FixPanel(view: Scanner.LibraryView) {
+    private fun FixPanel(view: Scanner.LibraryView, go: (Screen) -> Unit) {
         val data = Scanner.data
-        val aside = remember(data) { data.tracks.filter { Fixer.setAside(it, data) } }
-        var showAside by remember { mutableStateOf(false) }
+        // Songs whose file didn't fix last time, with why, to put right (Kevin, 25 November 2026: never marked done).
+        val notFixed = remember(data) { data.tracks.filter { it.id in data.fixProblems && !(it.fixed && it.fixedFully) } }
+        var held by remember { mutableStateOf<Track?>(null) }
+        held?.let { t -> SongBox(t, go) { held = null } }
         when {
             Fixer.running -> Working(Fixer.status.removePrefix("Fixing files · ").ifBlank { "Fixing" })
             view.matched.isEmpty() -> Words(if (Scanner.running) "Nothing to fix until the albums are looked up." else "No albums matched yet.", 15, K.Soft, lines = 2)
@@ -1123,11 +1165,21 @@ object Ui {
         }
         if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 3)
         if (!Fixer.running && view.leftToFix > 0) FixFiles(view.matched, "Fix them", main = true)
-        if (aside.isNotEmpty()) {
-            Row(Modifier.fillMaxWidth().clickable { showAside = !showAside }, verticalAlignment = Alignment.CenterVertically) {
-                Words(count(aside.size, "song") + " can't be changed: their files are damaged. " + if (showAside) "Hide" else "See which", 14, K.Soft, lines = 3, modifier = Modifier.weight(1f))
+        if (notFixed.isNotEmpty() && !Fixer.running) {
+            Words("Not fixed yet", 15, bold = true)
+            for (t in notFixed) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable { held = t }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Words(t.title, 15, bold = true)
+                        Words(t.artist + " · " + t.fileName, 13, K.Soft)
+                        Words(data.fixProblems[t.id].orEmpty(), 13, K.Accent, lines = 3)
+                    }
+                    MoreButton("Everything you can do with it") { held = t }
+                }
             }
-            if (showAside) for (t in aside) Words(t.artist + " · " + t.title + " (" + t.fileName + ")", 13, K.Soft, lines = 2)
         }
     }
 
@@ -1456,7 +1508,7 @@ object Ui {
      * Steps 1 to 3 only read; the files in the Drive are changed only at step 4, when Fix is pressed.
      */
     @Composable
-    private fun MusicSteps(view: Scanner.LibraryView) {
+    private fun MusicSteps(view: Scanner.LibraryView, go: (Screen) -> Unit) {
         val data = Scanner.data
         val songs = data.tracks.size
         val read = data.tracks.count { it.tagged }
@@ -1477,6 +1529,49 @@ object Ui {
                     (if (Scanner.waitingForWifi && !Scanner.running) "\nSingles carry on when the phone is on Wi-Fi." else "") +
                     (if (!Scanner.running && Scanner.problem.isNotEmpty()) "\n" + Scanner.problem else ""),
             )
+            // Albums the catalogue didn't find, as a list to put right (Kevin, 25 November 2026: a miss is a spelling).
+            val missed = remember(view, data) { Scanner.notFound(view, data) }
+            var showMissed by remember { mutableStateOf(false) }
+            if (missed.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable { showMissed = true }.padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Words(count(missed.size, "album") + " not found in the catalogue", 15, bold = true, lines = 2)
+                        Words("Usually a name spelt differently. Tap to see them and put the name right.", 13, K.Soft, lines = 2)
+                    }
+                    KueSettings.Icon(KueSettings.Icons.CHEVRON, 18.dp, K.Soft, 2.2f)
+                }
+            }
+            if (showMissed) AlbumListBox("Not found in the catalogue", "Tap one to open it. Its ⋮ has Edit album name and artist.", missed, { showMissed = false }) { al ->
+                showMissed = false
+                go(Screen.AlbumPage(al.key))
+            }
+        }
+    }
+
+    /** A list of albums in a box: tapping one opens it. */
+    @Composable
+    private fun AlbumListBox(title: String, below: String, albums: List<Album>, onClose: () -> Unit, onPick: (Album) -> Unit) {
+        Dialog(onDismissRequest = onClose) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Words(title, 19, bold = true, lines = 2)
+                Words(below, 14, K.Soft, lines = 3)
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
+                    items(albums, key = { it.key }) { al ->
+                        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { onPick(al) }.padding(vertical = 8.dp, horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Cover(Scanner.artFor(al), Modifier.size(44.dp), corner = 8.dp, glyphSize = 20.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Words(al.title, 15, bold = true)
+                                Words(al.artist + " · " + count(al.tracks.size, "song"), 13, K.Soft)
+                            }
+                        }
+                    }
+                }
+                Button("Close", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+            }
         }
     }
 
@@ -1556,7 +1651,7 @@ object Ui {
     )
 
     @Composable
-    private fun Settings(back: () -> Unit) {
+    private fun Settings(back: () -> Unit, go: (Screen) -> Unit) {
         val data = Scanner.data
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
@@ -1598,10 +1693,10 @@ object Ui {
                 open == "app", look, { toggle("app") },
             ) {
                 KueSettings.Section("Your music", sectionOpen("app|Your music"), look, { flip("app|Your music") }) {
-                    MusicSteps(view)
+                    MusicSteps(view, go)
                     if (!Scanner.running) Button("Look for new music", main = false, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
                 }
-                KueSettings.Section("Fix the files", sectionOpen("app|Fix the files"), look, { flip("app|Fix the files") }) { FixPanel(view) }
+                KueSettings.Section("Fix the files", sectionOpen("app|Fix the files"), look, { flip("app|Fix the files") }) { FixPanel(view, go) }
                 KueSettings.Section("Sound for music", sectionOpen("app|Sound for music"), look, { flip("app|Sound for music") }) { SoundPanel(Sound.Kind.MUSIC) }
                 KueSettings.Section("Sound for podcasts and radio", sectionOpen("app|Sound for podcasts and radio"), look, { flip("app|Sound for podcasts and radio") }) {
                     SoundPanel(Sound.Kind.PODCASTS)

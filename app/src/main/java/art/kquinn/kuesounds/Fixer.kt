@@ -67,14 +67,21 @@ object Fixer {
     fun canFix(al: Album, d: LibraryData = Scanner.data): Boolean =
         ((al.key in d.releases && al.key in d.catalogueCovers) || al.key in d.ownSingles) && al.tracks.any { Tagger.canFix(it.fileName) }
 
-    /**
-     * A song whose file failed to fix twice is set aside (Kevin, 25 November 2026: the same 4 files failed on every
-     * press, so the albums never showed as done and Fix did the same thing over and over). It is named in Settings.
-     */
-    fun setAside(t: Track, d: LibraryData = Scanner.data): Boolean = (d.fixFailures[t.id] ?: 0) >= 2
+    /** Fixed the full way (song name and artist put right, the rest taken out, album and cover written). */
+    fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(it.fileName) }.all { it.fixed && it.fixedFully }
 
-    /** Fixed the full way (song name and artist put right, the rest taken out, album and cover written), set-aside songs apart. */
-    fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(it.fileName) && !setAside(it) }.all { it.fixed && it.fixedFully }
+    /** Why fixing a file failed, in plain words for the list in Settings (Kevin, 25 November 2026). */
+    private fun plain(e: Exception): String {
+        val said = (e.javaClass.simpleName + " " + e.message).lowercase()
+        return when {
+            "offsets" in said || "atom" in said || "identifier is invalid" in said -> "Its file is laid out in a way that couldn't be written."
+            "length changed" in said -> "It read as a different length after the change, so it was left as it was."
+            "cut short" in said -> "The download from your Drive was cut short."
+            "didn't stick" in said -> "The new details didn't stay in the file."
+            "pictures" in said -> "The cover didn't go in properly."
+            else -> "It didn't work (" + (e.message ?: e.javaClass.simpleName) + ")."
+        }
+    }
 
     fun isWaiting(al: Album): Boolean = synchronized(waiting) { al.key in waiting }
 
@@ -103,7 +110,7 @@ object Fixer {
                 // A single of its own has no catalogue record: no list of songs, and no cover (the compilation's comes out).
                 val own = key in Scanner.data.ownSingles && key !in Scanner.data.releases
                 val cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers } ?: continue
-                val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) && !setAside(it) }
+                val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) }
                 // 1 and 2: the album's own list of songs, with each one's proper name and artist.
                 status = "Fixing files · " + al.title + " · finding its songs' proper names"
                 progress(status)
@@ -246,13 +253,13 @@ object Fixer {
                     albumArtist = artist, fixed = true, fixedFully = true,
                 )
             }
-            Scanner.fixTried(t.id, true)
+            Scanner.fixTried(t.id, null)
             true
         } catch (e: Drive.SignedOut) {
             throw e
         } catch (e: Exception) {
             Scanner.note("not fixed: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
-            Scanner.fixTried(t.id, false)
+            Scanner.fixTried(t.id, plain(e))
             false
         } finally {
             file.delete()

@@ -76,8 +76,10 @@ data class LibraryData(
      * catalogue has neither an album nor a single (Kevin, 24 November 2026).
      */
     val ownSingles: Set<String> = emptySet(),
-    /** Song id to how many times fixing its file has failed. Two failures and it is set aside (see [Fixer.setAside]). */
+    /** Song id to how many times fixing its file has failed (0.1.52 only; no longer used). */
     val fixFailures: Map<String, Int> = emptyMap(),
+    /** Song id to why its file couldn't be fixed last time, in plain words. Listed in Settings until it is fixed. */
+    val fixProblems: Map<String, String> = emptyMap(),
 )
 
 object Library {
@@ -379,7 +381,7 @@ object Library {
             tracks, d.folders ?: emptyList(), d.art ?: emptyMap(), d.folderCovers ?: emptyMap(), d.scannedAt,
             d.releases ?: emptyMap(), d.catalogueCovers ?: emptySet(), d.version,
             d.singleTitles ?: emptyMap(), d.singleArt ?: emptyMap(), d.collections ?: emptySet(), d.ownSingles ?: emptySet(),
-            d.fixFailures ?: emptyMap(),
+            d.fixFailures ?: emptyMap(), d.fixProblems ?: emptyMap(),
         )
     }
 

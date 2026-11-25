@@ -743,12 +743,41 @@ object Scanner {
     /** The catalogue's record a song's album was matched to: its id and its group's id, or null. */
     fun releaseFor(t: Track): Pair<String, String>? = data.releases[keyOf(t)]?.split('|')?.let { it[0] to it.getOrElse(1) { "" } }
 
-    /** Counts a failed fix of a song's file, or clears the count when it worked. */
-    fun fixTried(id: String, worked: Boolean) = synchronized(this) {
-        val n = data.fixFailures[id] ?: 0
-        if (worked && n == 0) return@synchronized
-        data = data.copy(fixFailures = if (worked) data.fixFailures - id else data.fixFailures + (id to n + 1))
+    /** Keeps why a song's file couldn't be fixed (null: it was fixed), for the list in Settings. */
+    fun fixTried(id: String, problem: String?) = synchronized(this) {
+        if (problem == null && id !in data.fixProblems) return@synchronized
+        data = data.copy(fixProblems = if (problem == null) data.fixProblems - id else data.fixProblems + (id to problem))
         save()
+    }
+
+    /** An album renamed by hand: its old key to one of its songs, so a page open on it follows it to its new name. */
+    val renamed = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /**
+     * Albums the music catalogue didn't find (Kevin, 25 November 2026: nothing in his music is unknown, so a miss is
+     * a name spelt differently): looked up, not matched, and not a collection or a single of its own.
+     */
+    fun notFound(view: LibraryView = this.view, d: LibraryData = data): List<Album> =
+        view.albums.filter { al -> al.key !in d.releases && al.key !in d.ownSingles && al.key !in d.collections && !onItsOwn(al) && al.tracks.all { it.checked } }
+
+    /**
+     * An album's name and artist put right by hand: kept in the library at once and looked up again with the new
+     * name. The files get it when they are next fixed.
+     */
+    fun renameAlbum(al: Album, title: String, artist: String) {
+        synchronized(this) {
+            val ids = al.tracks.map { it.id }.toSet()
+            al.tracks.firstOrNull()?.let { renamed[al.key] = it.id }
+            val oldArt = data.art[al.key]
+            data = data.copy(tracks = data.tracks.map { t ->
+                if (t.id !in ids) t else t.copy(album = title, albumArtist = artist, checked = false, ownLook = false, fixed = false)
+            })
+            val newKey = Library.albumKey(artist, title)
+            if (oldArt != null && al.key !in data.catalogueCovers && newKey !in data.art) data = data.copy(art = data.art + (newKey to oldArt))
+            save()
+            note("album renamed by hand: " + al.artist + " / " + al.title + " to " + artist + " / " + title)
+        }
+        scan()
     }
 
     /** Takes songs out of the library (they were deleted from the Drive). */
