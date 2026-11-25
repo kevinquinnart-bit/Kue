@@ -39,6 +39,34 @@ data class Track(
     var singleChecked: Boolean = false,
     /** True once Kevin has put the song's name and artist right himself: fixing the files keeps them. */
     var named: Boolean = false,
+    /** Who wrote it, from the file (null until read; libraries kept before 25 Nov 2026 have no value here). */
+    var composer: String? = null,
+    /** True once [composer] has been read from the file, found or not. */
+    var composerRead: Boolean = false,
+)
+
+/**
+ * What the music catalogue says about an album, beyond its name and cover (Kevin, 25 November 2026: "add all info for
+ * the song or album ... date released etc", and the kind of music found by KueSounds itself).
+ */
+data class AlbumFacts(
+    /** Kinds of music, most agreed on first ("pop", "dance-pop"). */
+    val genres: List<String> = emptyList(),
+    /** When it first came out: "1994-11-14", "1994-11" or "1994". */
+    val firstOut: String = "",
+    /** Album, Single, EP, with Compilation, Live or Soundtrack after it when it is one. */
+    val type: String = "",
+    /** The record label, catalogue number, country and barcode of the release matched (asked when Info is opened). */
+    val label: String = "",
+    val catalogueNo: String = "",
+    val country: String = "",
+    val barcode: String = "",
+    /** The release's own date (a reissue can be years after [firstOut]). */
+    val released: String = "",
+    /** The catalogue's id for the album's main artist, for their picture. */
+    val artistId: String = "",
+    /** True once the label and the rest have been asked for. */
+    val detailed: Boolean = false,
 )
 
 /** A folder in the Drive: its name and the folder it sits in. */
@@ -82,9 +110,55 @@ data class LibraryData(
     val fixProblems: Map<String, String> = emptyMap(),
     /** Songs already listened to by Match by sound (found or not), so each is asked about once. */
     val soundChecked: Set<String> = emptySet(),
+    /** Album key to what the catalogue says about it (see [AlbumFacts]). Asked once each. */
+    val facts: Map<String, AlbumFacts> = emptyMap(),
+    /** Artist name to the file holding their photo on this phone; "" once looked for and none found. */
+    val artistPictures: Map<String, String> = emptyMap(),
 )
 
 object Library {
+    /**
+     * A song's kind of music: what its file says, or else what the catalogue says about its album (Kevin, 25 November
+     * 2026: KueSounds to pick it out itself). Written the way people write it: "Dance-Pop", "80's".
+     */
+    fun genreOf(t: Track, d: LibraryData): String {
+        val own = t.genre.trim()
+        if (own.isNotEmpty() && !own.all { it.isDigit() || it in "()" }) return own
+        val facts = d.facts[albumKey(albumArtistOf(t), t.album)] ?: return ""
+        return facts.genres.firstOrNull()?.let { tidyGenre(it) }.orEmpty()
+    }
+
+    /** "dance-pop" as "Dance-Pop", "hip hop" as "Hip Hop". */
+    fun tidyGenre(name: String): String =
+        name.trim().split(" ").joinToString(" ") { w -> w.split("-").joinToString("-") { it.replaceFirstChar { c -> c.uppercaseChar() } } }
+
+    /** Every kind of music in [albums], each with its albums (an album with songs of two kinds is under both), A to Z. */
+    fun genres(albums: List<Album>, d: LibraryData): List<Pair<String, List<Album>>> {
+        val byGenre = LinkedHashMap<String, MutableList<Album>>()
+        for (al in albums) {
+            val kinds = al.tracks.map { genreOf(it, d) }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+            for (k in kinds) {
+                val key = byGenre.keys.firstOrNull { it.equals(k, ignoreCase = true) } ?: k
+                byGenre.getOrPut(key) { mutableListOf() }.add(al)
+            }
+        }
+        return byGenre.entries.sortedBy { sortName(it.key) }.map { it.key to it.value.toList() }
+    }
+
+    /** Every writer named in the songs' files, each with their songs, A to Z. */
+    fun composers(tracks: List<Track>): List<Pair<String, List<Track>>> =
+        tracks.filter { !it.composer.isNullOrBlank() }.groupBy { it.composer!!.trim() }.entries
+            .sortedBy { sortName(it.key) }.map { it.key to it.value.sortedBy { t -> sortName(t.title) } }
+
+    /** "1994-11-14" as "14 November 1994"; "1994-11" as "November 1994". */
+    fun date(text: String): String {
+        val bits = text.split("-")
+        val months = listOf("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December")
+        val month = bits.getOrNull(1)?.toIntOrNull()?.takeIf { it in 1..12 }?.let { months[it - 1] }
+        val day = bits.getOrNull(2)?.toIntOrNull()
+        return listOfNotNull(day?.toString(), month, bits.firstOrNull()?.takeIf { it.isNotBlank() }).joinToString(" ")
+    }
+
     const val UNKNOWN_ARTIST = "Unknown artist"
     const val UNKNOWN_ALBUM = "Unknown album"
 

@@ -44,7 +44,17 @@ class PlaybackService : MediaSessionService() {
             val token = Google.tokenBlocking().orEmpty()
             spec.withAdditionalHeaders(mapOf("Authorization" to "Bearer $token"))
         }
-        val player = ExoPlayer.Builder(this)
+        // The sound goes through Sing along on its way out, so the singer can be turned down (Kevin, 25 November 2026).
+        val sink = androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(this)
+            .setAudioProcessors(arrayOf<androidx.media3.common.audio.AudioProcessor>(SingAlong)).build()
+        val renderers = androidx.media3.exoplayer.RenderersFactory { handler, _, audioListener, _, metadataOutput ->
+            arrayOf(
+                androidx.media3.exoplayer.audio.MediaCodecAudioRenderer(this, androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT, handler, audioListener, sink),
+                // Radio stations' "now playing" titles.
+                androidx.media3.exoplayer.metadata.MetadataRenderer(metadataOutput, handler.looper),
+            )
+        }
+        val player = ExoPlayer.Builder(this, renderers)
             // Songs saved on the phone are read from there; the rest come from the Drive with the pass.
             .setMediaSourceFactory(DefaultMediaSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(this, withPass)))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)

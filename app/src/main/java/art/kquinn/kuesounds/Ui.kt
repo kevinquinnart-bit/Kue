@@ -108,6 +108,8 @@ sealed class Screen {
     data class AlbumPage(val key: String) : Screen()
     data class ArtistPage(val name: String) : Screen()
     data class FolderPage(val id: String?, val name: String) : Screen()
+    data class GenrePage(val name: String) : Screen()
+    data class ComposerPage(val name: String) : Screen()
     data object NowPlaying : Screen()
     data object Settings : Screen()
     data object PodcastFind : Screen()
@@ -120,14 +122,14 @@ sealed class Screen {
 
 /** The parts of the music, shown under Music (Kevin, 25 November 2026: all music under one category). */
 // Singles are shown among the songs, each with its single's cover (Kevin, 25 November 2026: one less part).
-val musicViews = listOf(Tab.ALBUMS, Tab.SONGS, Tab.ARTISTS, Tab.PLAYLISTS, Tab.FAVOURITES, Tab.ON_PHONE, Tab.FOLDERS)
+val musicViews = listOf(Tab.ALBUMS, Tab.SONGS, Tab.ARTISTS, Tab.GENRES, Tab.COMPOSERS, Tab.PLAYLISTS, Tab.FAVOURITES, Tab.ON_PHONE, Tab.FOLDERS)
 
 /** The categories along the top: Music, then everything that isn't your own music. */
 val topTabs = listOf(Tab.PODCASTS, Tab.RADIO, Tab.SPOTIFY, Tab.YOUTUBE)
 
 enum class Tab(val label: String) {
     // The music first (Kevin, 25 November 2026), then everything else, in the order it was before.
-    ALBUMS("Albums"), SONGS("Songs"), ARTISTS("Artists"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
+    ALBUMS("Albums"), SONGS("Songs"), ARTISTS("Artists"), GENRES("Genres"), COMPOSERS("Composers"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
     PODCASTS("Podcasts"), RADIO("Radio"), SPOTIFY("Spotify"), YOUTUBE("YouTube"), FOLDERS("Folders"),
 }
 
@@ -295,6 +297,8 @@ object Ui {
                         ?.let { AlbumPage(it, back, go) } ?: Gone(back)
                     is Screen.ArtistPage -> artists.firstOrNull { it.name == s.name }?.let { ArtistPage(it, back, go) } ?: Gone(back)
                     is Screen.FolderPage -> FolderPage(s, data, back, go)
+                    is Screen.GenrePage -> GenrePage(s.name, albums, back, go)
+                    is Screen.ComposerPage -> ComposerPage(s.name, back, go)
                     Screen.NowPlaying -> NowPlaying(back)
                     Screen.Settings -> Settings(back, go)
                     Screen.PodcastFind -> PodUi.Find(back, go)
@@ -384,6 +388,8 @@ object Ui {
                     }
                     tab == Tab.ALBUMS -> AlbumShelf(albums, Views.layout(Tab.ALBUMS), go)
                     tab == Tab.ARTISTS -> ArtistList(artists, Views.layout(Tab.ARTISTS), go)
+                    tab == Tab.GENRES -> GenreList(albums, Views.layout(Tab.GENRES), go)
+                    tab == Tab.COMPOSERS -> ComposerList(Views.layout(Tab.COMPOSERS), go)
                     tab == Tab.SONGS -> SongList(songs, go, Views.layout(Tab.SONGS))
                     tab == Tab.FAVOURITES -> {
                         val ids = Sync.favouriteIds()
@@ -699,12 +705,89 @@ object Ui {
         held?.let { a -> ArtistBox(a) { held = null } }
         val things = remember(artists) {
             artists.map { a ->
-                // An artist's picture: the cover of their first album that has one.
+                // An artist's own photo when one is found (Kevin, 25 November 2026), else their first album's cover.
                 Item("a:" + a.name, a.name, count(a.albums.size, "album") + " · " + count(a.songCount, "song"), Glyph.PERSON,
-                    { a.albums.firstNotNullOfOrNull { Scanner.artFor(it) } }, round = true, onHold = { held = a }) { go(Screen.ArtistPage(a.name)) }
+                    { Scanner.artistPicture(a.name) ?: a.albums.firstNotNullOfOrNull { Scanner.artFor(it) } }, round = true, onHold = { held = a }) { go(Screen.ArtistPage(a.name)) }
             }
         }
         Shelf(things, layout)
+    }
+
+    /** Kinds of music, each with how many albums and songs (Kevin, 25 November 2026). */
+    @Composable
+    private fun GenreList(albums: List<Album>, layout: Views.Layout, go: (Screen) -> Unit) {
+        val data = Scanner.data
+        val kinds = remember(albums, data.facts) { Library.genres(albums, data) }
+        if (kinds.isEmpty()) {
+            Note(if (Scanner.running) "Kinds of music show here once step 4 has looked them up." else "No kinds of music known yet. They are looked up at step 4 in Settings › KueSounds › Your music.")
+            return
+        }
+        val things = remember(kinds) {
+            kinds.map { (name, list) ->
+                val songs = list.sumOf { al -> al.tracks.count { Library.genreOf(it, data).equals(name, ignoreCase = true) } }
+                Item("g:" + name, name, count(list.size, "album") + " · " + count(songs, "song"), Glyph.DISC,
+                    { list.firstNotNullOfOrNull { Scanner.artFor(it) } }) { go(Screen.GenrePage(name)) }
+            }
+        }
+        Shelf(things, layout)
+    }
+
+    /** One kind of music: its albums, and its songs to play or mix. */
+    @Composable
+    private fun GenrePage(name: String, albums: List<Album>, back: () -> Unit, go: (Screen) -> Unit) {
+        val data = Scanner.data
+        val list = remember(albums, data.facts, name) { Library.genres(albums, data).firstOrNull { it.first.equals(name, ignoreCase = true) }?.second.orEmpty() }
+        val songs = remember(list) { list.flatMap { al -> al.tracks.filter { Library.genreOf(it, data).equals(name, ignoreCase = true) } } }
+        AlbumGrid(list, go) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                RoundButton(Glyph.BACK, "Back", onClick = back)
+                Words(name, 24, bold = true, lines = 2)
+                Words(count(list.size, "album") + " · " + count(songs.size, "song"), 15, K.Soft)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0) }
+                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true) }
+                }
+                Spacer(Modifier.height(4.dp))
+            }
+        }
+    }
+
+    /** Who wrote the songs, from the files (Kevin, 25 November 2026, as CloudPlayer has). */
+    @Composable
+    private fun ComposerList(layout: Views.Layout, go: (Screen) -> Unit) {
+        val data = Scanner.data
+        val writers = remember(data.tracks) { Library.composers(data.tracks) }
+        if (writers.isEmpty()) {
+            val left = data.tracks.count { !it.composerRead }
+            Note(if (left > 0) "Who wrote each song is read from the files at step 4 in Settings: " + count(left, "song") + " still to read." else "None of your songs' files name who wrote them.")
+            return
+        }
+        val things = remember(writers) {
+            writers.map { (name, songs) ->
+                Item("c:" + name, name, count(songs.map { it.album }.distinct().size, "album") + " · " + count(songs.size, "song"), Glyph.PERSON,
+                    { songs.firstNotNullOfOrNull { Scanner.artForTrack(it) } }) { go(Screen.ComposerPage(name)) }
+            }
+        }
+        Shelf(things, layout)
+    }
+
+    @Composable
+    private fun ComposerPage(name: String, back: () -> Unit, go: (Screen) -> Unit) {
+        val songs = remember(Scanner.data.tracks, name) { Library.composers(Scanner.data.tracks).firstOrNull { it.first == name }?.second.orEmpty() }
+        Column(Modifier.fillMaxSize()) {
+            Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RoundButton(Glyph.BACK, "Back", onClick = back)
+                    Spacer(Modifier.width(14.dp))
+                    Words(name, 20, bold = true, lines = 2, modifier = Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0) }
+                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true) }
+                }
+            }
+            Box(Modifier.weight(1f)) { SongList(songs, go) }
+        }
     }
 
     private fun count(n: Int, word: String): String = String.format("%,d", n) + " " + word + if (n == 1) "" else "s"
@@ -808,6 +891,11 @@ object Ui {
             Unit
         }
         val words = java.net.URLEncoder.encode(listOf(t.artist.takeIf { it != Library.UNKNOWN_ARTIST }.orEmpty(), t.title).filter { it.isNotBlank() }.joinToString(" "), "UTF-8")
+        // What the catalogue says about its album, the label and the rest asked for now if not yet (Kevin, 25 Nov 2026).
+        val album0 = remember(t.id) { Scanner.albumOf(t) }
+        val facts by androidx.compose.runtime.produceState(album0?.let { Scanner.data.facts[it.key] }, t.id) {
+            if (album0 != null && value?.detailed != true) value = withContext(Dispatchers.IO) { runCatching { Scanner.detailsFor(album0) }.getOrNull() } ?: value
+        }
         Dialog(onDismissRequest = onClose) {
             Column(
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp),
@@ -821,8 +909,17 @@ object Ui {
                 val facts = buildList {
                     if (t.albumArtist.isNotBlank() && t.albumArtist != t.artist) add("Album artist" to t.albumArtist)
                     if (t.trackNo > 0) add("Song" to (t.trackNo.toString() + if (t.discNo > 0) " on disc " + t.discNo else ""))
-                    if (t.genre.isNotBlank()) add("Kind of music" to t.genre)
+                    val kind = Library.genreOf(t, Scanner.data)
+                    if (kind.isNotBlank()) add("Kind of music" to kind)
+                    val more = facts?.genres.orEmpty().map { Library.tidyGenre(it) }.filter { !it.equals(kind, ignoreCase = true) }
+                    if (more.isNotEmpty()) add("Also" to more.joinToString(", "))
+                    if (!t.composer.isNullOrBlank()) add("Written by" to t.composer!!)
                     if (t.durationMs > 0) add("Length" to Library.clock(t.durationMs))
+                    facts?.firstOut?.takeIf { it.isNotBlank() }?.let { add("First out" to Library.date(it)) }
+                    facts?.released?.takeIf { it.isNotBlank() && it != facts?.firstOut }?.let { add("This release" to Library.date(it)) }
+                    facts?.type?.takeIf { it.isNotBlank() }?.let { add("Album type" to it) }
+                    facts?.label?.takeIf { it.isNotBlank() }?.let { add("Record label" to it + (facts?.catalogueNo?.takeIf { c -> c.isNotBlank() }?.let { c -> " · $c" } ?: "")) }
+                    facts?.country?.takeIf { it.isNotBlank() }?.let { add("Released in" to (java.util.Locale("", it).displayCountry.ifBlank { it })) }
                     Scanner.data.singleTitles[t.id]?.let { add("Came out as a single" to it) }
                     add("File" to t.fileName)
                     add("Type" to Library.ending(t.fileName).uppercase())
@@ -1191,8 +1288,12 @@ object Ui {
                         Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(al.tracks, 0, shuffled = true) }
                     }
                     Spacer(Modifier.height(12.dp))
+                    var info by remember { mutableStateOf(false) }
+                    Button("Album info", main = false, icon = KueSettings.Icons.INFO, modifier = Modifier.fillMaxWidth()) { info = true }
+                    if (info) AlbumInfo(al) { info = false }
+                    Spacer(Modifier.height(12.dp))
                     var adding by remember { mutableStateOf(false) }
-                    Button("Add to a playlist", main = false, modifier = Modifier.fillMaxWidth()) { adding = true }
+                    Button("Add to a playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) { adding = true }
                     if (adding) ListUi.AddBox("the album", al.tracks.map { it.id }) { adding = false }
                     Spacer(Modifier.height(12.dp))
                     var editingAlbum by remember { mutableStateOf(false) }
@@ -1220,6 +1321,59 @@ object Ui {
                         Playing.play(al.tracks, i)
                     }
                 }
+            }
+        }
+    }
+
+    /**
+     * Everything about an album (Kevin, 25 November 2026): its cover, name and artist, when it first came out and when
+     * this release did, its label and catalogue number, country, barcode, kinds of music, songs and length.
+     */
+    @Composable
+    private fun AlbumInfo(al: Album, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val facts by androidx.compose.runtime.produceState(Scanner.data.facts[al.key], al.key) {
+            if (value?.detailed != true) value = withContext(Dispatchers.IO) { runCatching { Scanner.detailsFor(al) }.getOrNull() } ?: value
+        }
+        val release = Scanner.data.releases[al.key]?.split('|')?.firstOrNull()?.takeIf { it.isNotEmpty() }
+        Dialog(onDismissRequest = onClose) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Cover(Scanner.artFor(al), Modifier.fillMaxWidth().aspectRatio(1f), corner = 16.dp, glyphSize = 72.dp)
+                Words(al.title, 22, bold = true, lines = 3)
+                Words(al.artist, 17, K.Accent, lines = 2)
+                val f = facts
+                val kinds = al.tracks.map { Library.genreOf(it, Scanner.data) }.filter { it.isNotBlank() }.distinctBy { it.lowercase() }
+                    .ifEmpty { f?.genres.orEmpty().map { Library.tidyGenre(it) } }
+                val rows = buildList {
+                    if (kinds.isNotEmpty()) add("Kind of music" to kinds.joinToString(", "))
+                    f?.firstOut?.takeIf { it.isNotBlank() }?.let { add("First out" to Library.date(it)) }
+                    if (f?.firstOut.isNullOrBlank() && al.year > 0) add("Year" to al.year.toString())
+                    f?.released?.takeIf { it.isNotBlank() && it != f.firstOut }?.let { add("This release" to Library.date(it)) }
+                    f?.type?.takeIf { it.isNotBlank() }?.let { add("Type" to it) }
+                    f?.label?.takeIf { it.isNotBlank() }?.let { add("Record label" to it) }
+                    f?.catalogueNo?.takeIf { it.isNotBlank() }?.let { add("Catalogue number" to it) }
+                    f?.country?.takeIf { it.isNotBlank() }?.let { add("Released in" to (java.util.Locale("", it).displayCountry.ifBlank { it })) }
+                    f?.barcode?.takeIf { it.isNotBlank() }?.let { add("Barcode" to it) }
+                    add("Songs" to al.tracks.size.toString())
+                    val ms = al.tracks.sumOf { it.durationMs }
+                    if (ms > 0) add("Length" to Library.clock(ms))
+                    add("On this phone" to if (al.tracks.all { it.id in Offline.saved }) "Yes" else if (al.tracks.any { it.id in Offline.saved }) "Some songs" else "No")
+                }
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((label, value) in rows) Row {
+                        Words(label, 14, K.Soft, modifier = Modifier.width(130.dp))
+                        Words(value, 14, lines = 3, modifier = Modifier.weight(1f))
+                    }
+                }
+                if (f == null && release != null) Working("Asking the catalogue…")
+                Words(if (release != null) "Matched in the MusicBrainz music catalogue." else "Not matched in the music catalogue.", 14, K.Soft, lines = 2)
+                if (release != null) Button("Its record in the catalogue", main = false, icon = KueSettings.Icons.OPEN, modifier = Modifier.fillMaxWidth()) {
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://musicbrainz.org/release/$release")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+                Button("Close", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(), onClick = onClose)
             }
         }
     }
@@ -1336,8 +1490,15 @@ object Ui {
         AlbumGrid(a.albums, go) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 RoundButton(Glyph.BACK, "Back", onClick = back)
-                Words(a.name, 24, bold = true, lines = 2)
-                Words(count(a.albums.size, "album") + " · " + count(a.songCount, "song"), 15, K.Soft)
+                // Their photo when one was found (Kevin, 25 November 2026), round, beside their name.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Cover(Scanner.artistPicture(a.name) ?: a.albums.firstNotNullOfOrNull { Scanner.artFor(it) }, Modifier.size(96.dp), glyphSize = 40.dp, glyph = Glyph.PERSON, round = true)
+                    Spacer(Modifier.width(16.dp))
+                    Column(Modifier.weight(1f)) {
+                        Words(a.name, 24, bold = true, lines = 2)
+                        Words(count(a.albums.size, "album") + " · " + count(a.songCount, "song"), 15, K.Soft)
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(all, 0) }
                     Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(all, 0, shuffled = true) }
@@ -1503,6 +1664,7 @@ object Ui {
                     }
                     ToolChip(KueSettings.Icons.SLEEP, sleepWords, sleeping, Modifier.weight(1f)) { Playing.nextMusicSleep() }
                     val track = Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }
+                    if (track != null) ToolChip(KueSettings.Icons.LYRICS, "Lyrics", SingAlong.on, Modifier.weight(1f)) { tool = "lyrics" }
                     if (track != null) ToolChip(KueSettings.Icons.INFO, "Info", false, Modifier.weight(1f)) { tool = "info" }
                 }
             }
@@ -1510,6 +1672,7 @@ object Ui {
                 "sound" -> SoundBox(Sound.kindOf(Playing.currentId)) { tool = "" }
                 "queue" -> UpNext { tool = "" }
                 "info" -> Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }?.let { SongInfo(it) { tool = "" } } ?: run { tool = "" }
+                "lyrics" -> Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }?.let { LyricsBox(it) { tool = "" } } ?: run { tool = "" }
             }
             if (Playing.isRadio) OnlineUi.RadioControls() else
             if (Playing.isPodcast) PodUi.Controls() else
@@ -1546,6 +1709,81 @@ object Ui {
                 Modifier.align(Alignment.BottomCenter).padding(bottom = 128.dp).clip(RoundedCornerShape(20.dp)).background(K.Raised)
                     .padding(horizontal = 18.dp, vertical = 10.dp),
             ) { Words(said, 15, K.Ink, bold = true) }
+        }
+    }
+
+    /**
+     * The song's words, line by line as it is sung, for singing along (Kevin, 25 November 2026): the line being sung big
+     * and yellow in the middle, the list moving with the song, a tap on a line going to it, and Sing along to turn the
+     * singer down.
+     */
+    @Composable
+    private fun LyricsBox(t: Track, onClose: () -> Unit) {
+        var loading by remember(t.id) { mutableStateOf(true) }
+        var problem by remember(t.id) { mutableStateOf("") }
+        val words by androidx.compose.runtime.produceState<Lyrics.Words?>(null, t.id) {
+            value = withContext(Dispatchers.IO) {
+                runCatching { Lyrics.get(t.id, t.artist, t.title, t.album, t.durationMs / 1000) }
+                    .onFailure { problem = "The lyrics library couldn't be reached. Check the internet and try again." }
+                    .getOrNull()
+            }
+            loading = false
+        }
+        var position by remember { mutableLongStateOf(Playing.positionMs()) }
+        LaunchedEffect(t.id) {
+            while (true) {
+                position = Playing.positionMs()
+                delay(200)
+            }
+        }
+        var singAlong by remember { mutableStateOf(SingAlong.on) }
+        Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RoundButton(Glyph.DOWN, "Close", onClick = onClose)
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Words(t.title, 18, bold = true)
+                        Words(t.artist, 14, K.Soft)
+                    }
+                }
+                KueSettings.Toggle("Sing along", "Turns the singer down so you can sing. Some bass goes with it.", singAlong, look) { on ->
+                    singAlong = on
+                    SingAlong.on = on
+                }
+                val w = words
+                val timed = w?.timed.orEmpty()
+                when {
+                    loading -> Working("Finding the words…")
+                    problem.isNotEmpty() -> Words(problem, 15, K.Accent, lines = 3)
+                    w == null || w.none -> Words("No words found for this song in the lyrics library.", 15, K.Soft, lines = 3)
+                    w.instrumental && timed.isEmpty() && w.plain.isBlank() -> Words("This one has no words: it's an instrumental.", 15, K.Soft, lines = 2)
+                    timed.isNotEmpty() -> {
+                        val now = Lyrics.lineAt(timed, position + 300)
+                        val list = androidx.compose.foundation.lazy.rememberLazyListState()
+                        LaunchedEffect(now) { if (now >= 0) runCatching { list.animateScrollToItem((now - 3).coerceAtLeast(0)) } }
+                        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = list, verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(vertical = 40.dp)) {
+                            itemsIndexed(timed) { i, line ->
+                                val on = i == now
+                                Text(
+                                    line.words.ifBlank { "· · ·" },
+                                    color = if (on) K.Accent else if (i < now) K.Soft.copy(alpha = 0.6f) else K.Ink,
+                                    fontSize = if (on) 26.sp else 20.sp, fontFamily = K.Poppins,
+                                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, lineHeight = if (on) 32.sp else 26.sp,
+                                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { Playing.seekTo(line.at) }.padding(vertical = 4.dp, horizontal = 6.dp),
+                                )
+                            }
+                        }
+                    }
+                    else -> Box(Modifier.weight(1f).fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState())) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Words("These words don't have their timings, so they don't move with the song.", 13, K.Soft, lines = 2)
+                            Words(w.plain, 19, lines = 400)
+                        }
+                    }
+                }
+                Words("Words from LRCLIB, the free lyrics library.", 12, K.Soft)
+            }
         }
     }
 
@@ -1730,6 +1968,17 @@ object Ui {
                     (if (Scanner.waitingForWifi && !Scanner.running) "\nSingles carry on when the phone is on Wi-Fi." else "") +
                     (if (!Scanner.running && Scanner.problem.isNotEmpty()) "\n" + Scanner.problem else ""),
             )
+            // Step 4 (Kevin, 25 November 2026): kinds of music, dates, artist pictures and who wrote each song.
+            val withFacts = view.albums.count { it.key in data.facts }
+            val matchedAlbums = view.albums.count { it.key in data.releases }
+            val pictures = data.artistPictures.values.count { it.isNotEmpty() }
+            val composersLeft = data.tracks.count { !it.composerRead }
+            Step(
+                4, "Kinds of music, dates, artist pictures", "",
+                state = if (stage == 4) NOW else if (matchedAlbums > 0 && withFacts >= matchedAlbums && composersLeft == 0) DONE else WAITING,
+                progress = n(withFacts) + " of " + n(matchedAlbums) + " matched albums · " + n(pictures) + " artist pictures" +
+                    (if (composersLeft > 0) "\nWho wrote each song: " + n(songs - composersLeft) + " of " + n(songs) + " read" else ""),
+            )
             // Albums the catalogue didn't find, as a list to put right (Kevin, 25 November 2026: a miss is a spelling).
             val missed = remember(view, data) { Scanner.notFound(view, data) }
             var showMissed by remember { mutableStateOf(false) }
@@ -1902,7 +2151,7 @@ object Ui {
                 count(data.tracks.size, "song") + " · " + String.format("%,d", view.leftToFix) + " albums to fix",
                 open == "app", look, { toggle("app") },
             ) {
-                KueSettings.Section("Your music", sectionOpen("app|Your music"), look, { flip("app|Your music") }, note = if (Scanner.running) "Step " + Scanner.stage + " of 3" else "") {
+                KueSettings.Section("Your music", sectionOpen("app|Your music"), look, { flip("app|Your music") }, note = if (Scanner.running) "Step " + Scanner.stage + " of 4" else "") {
                     MusicSteps(view, go)
                     if (!Scanner.running) Button("Look for new music", main = false, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
                 }

@@ -333,6 +333,11 @@ object Scanner {
                         matchAlbums()
                         // Then the ones the catalogue still doesn't know, by their sound; any put right are looked up again.
                         if (matchBySound()) matchAlbums()
+                        // Step 4: kinds of music, dates, artist pictures and who wrote each song (Kevin, 25 November 2026).
+                        stage = 4
+                        lookUpFacts()
+                        lookUpArtistPictures()
+                        readComposers()
                         status = ""
                         note("scan finished")
                         break
@@ -440,6 +445,8 @@ object Scanner {
                 year = Library.year(key(MediaMetadataRetriever.METADATA_KEY_YEAR) ?: key(MediaMetadataRetriever.METADATA_KEY_DATE)),
                 durationMs = key(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L,
                 genre = key(MediaMetadataRetriever.METADATA_KEY_GENRE).orEmpty(),
+                composer = key(MediaMetadataRetriever.METADATA_KEY_COMPOSER).orEmpty(),
+                composerRead = true,
                 tagged = true,
                 // Fresh details mean the album is looked up again with them.
                 checked = false,
@@ -464,6 +471,115 @@ object Scanner {
             runCatching { retriever.release() }
         }
     }
+
+    /**
+     * Step 4, first part: each matched album's kinds of music, the date it first came out, its type and its main
+     * artist, asked of the catalogue once each (one question a second, so about half an hour for 1,700 albums).
+     */
+    private fun lookUpFacts() {
+        val todo = view.albums.mapNotNull { al -> data.releases[al.key]?.split('|')?.getOrNull(1)?.takeIf { it.isNotEmpty() && al.key !in data.facts }?.let { al to it } }
+        if (todo.isEmpty()) return
+        var done = 0
+        var found = 0
+        for ((al, group) in todo) {
+            if (!scope.isActive) return
+            say("Finding each album's kind of music and date", done, todo.size)
+            lookup("facts for " + al.title) { Catalogue.groupFacts(group) }.onSuccess { f ->
+                synchronized(this) { data = data.copy(facts = data.facts + (al.key to f)) }
+                if (f.genres.isNotEmpty()) found++
+            }
+            done++
+            if (done % 25 == 0) save()
+        }
+        save()
+        note("kinds of music: $done albums asked, $found with a kind of music")
+    }
+
+    /**
+     * Step 4, second part: a photo of each artist or group (Kevin, 25 November 2026: "ideally an image of the artist"),
+     * free from Wikimedia Commons through the catalogue's link to Wikidata. Looked for once each.
+     */
+    private fun lookUpArtistPictures() {
+        val todo = view.artists.mapNotNull { a ->
+            if (a.name in data.artistPictures || Catalogue.isVarious(a.name) || a.name == Library.UNKNOWN_ARTIST) return@mapNotNull null
+            val id = a.albums.firstNotNullOfOrNull { al -> data.facts[al.key]?.artistId?.takeIf { it.isNotEmpty() } } ?: return@mapNotNull null
+            a.name to id
+        }
+        if (todo.isEmpty()) return
+        var done = 0
+        var found = 0
+        for ((name, id) in todo) {
+            if (!scope.isActive) return
+            say("Finding artist pictures", done, todo.size)
+            lookup("picture of $name") { Catalogue.artistPicture(id) }.onSuccess { bytes ->
+                val kept = bytes?.let { keepPicture(it, "artist\u0001$name") }.orEmpty()
+                if (kept.isNotEmpty()) found++
+                synchronized(this) { data = data.copy(artistPictures = data.artistPictures + (name to kept)) }
+            }
+            done++
+            if (done % 25 == 0) save()
+        }
+        save()
+        note("artist pictures: $done artists asked, $found found")
+    }
+
+    /** Step 4, last part: who wrote each song, read from the files kept before KueSounds read it (for Composers). */
+    private suspend fun readComposers() {
+        val todo = data.tracks.filter { it.tagged && !it.composerRead }
+        if (todo.isEmpty()) return
+        val gate = Semaphore(4)
+        var done = 0
+        todo.chunked(25).forEach { chunk ->
+            if (!scope.isActive) return
+            say("Reading who wrote each song", done, todo.size)
+            val pass = Google.token() ?: throw Drive.SignedOut()
+            val got = coroutineScopeAsync(chunk.map { t -> suspend { gate.withPermit { t.id to readComposer(t, pass) } } })
+                .filter { it.second != null }.associate { it.first to it.second!! }
+            synchronized(this) {
+                data = data.copy(tracks = data.tracks.map { t -> got[t.id]?.let { t.copy(composer = it, composerRead = true) } ?: t })
+            }
+            done += chunk.size
+            if (done % 200 == 0) save()
+        }
+        save()
+        note("composers: " + data.tracks.count { !it.composer.isNullOrBlank() } + " songs name who wrote them")
+    }
+
+    /** Who wrote one song, from its file: "" when it doesn't say; null when the file couldn't be reached. */
+    private fun readComposer(t: Track, token: String): String? {
+        val retriever = MediaMetadataRetriever()
+        val source = DriveSource(t.id, t.size, token)
+        return try {
+            retriever.setDataSource(source)
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_COMPOSER)?.trim().orEmpty()
+        } catch (e: Exception) {
+            if (source.failure != null) null else ""
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    /**
+     * The label, catalogue number, country and barcode of an album's release, asked when its info is opened (one
+     * question, kept). Call off the main thread.
+     */
+    fun detailsFor(al: Album): AlbumFacts? {
+        val facts = data.facts[al.key]
+        if (facts?.detailed == true) return facts
+        val release = data.releases[al.key]?.split('|')?.firstOrNull()?.takeIf { it.isNotEmpty() } ?: return facts
+        val group = data.releases[al.key]?.split('|')?.getOrNull(1).orEmpty()
+        val base = facts ?: runCatching { if (group.isNotEmpty()) Catalogue.groupFacts(group) else null }.getOrNull() ?: AlbumFacts()
+        val full = runCatching { Catalogue.releaseFacts(release, base) }.getOrElse { return base }
+        synchronized(this) { data = data.copy(facts = data.facts + (al.key to full)) }
+        save()
+        return full
+    }
+
+    /** The photo of an artist or group, once found. */
+    fun artistPicture(name: String): File? = data.artistPictures[name]?.takeIf { it.isNotEmpty() }?.let { File(it) }?.takeIf { it.exists() }
+
+    /** The album a song is on. */
+    fun albumOf(t: Track): Album? = view.byKey[keyOf(t)]
 
     /** Albums whose folder holds a cover picture get it, downloaded once and kept small. */
     private suspend fun fillCovers() {

@@ -370,4 +370,92 @@ object Catalogue {
         }
         return null
     }
+
+    // ---- What the catalogue says about an album, and its artist's picture (Kevin, 25 November 2026) ----------------
+
+    /** An album's kinds of music, first date out, type and main artist, from its release group. Call off the main thread. */
+    fun groupFacts(groupId: String): AlbumFacts =
+        parseGroupFacts(
+            askAt(
+                (SEARCH + "release-group/" + groupId).toHttpUrl().newBuilder().addQueryParameter("inc", "genres+tags+artist-credits")
+                    .addQueryParameter("fmt", "json").build(),
+            ),
+        )
+
+    fun parseGroupFacts(json: String): AlbumFacts {
+        val o = JsonParser.parseString(json).asJsonObject
+        fun named(key: String): List<Pair<String, Int>> = o.getAsJsonArray(key)?.mapNotNull { e ->
+            val g = e.asJsonObject
+            val name = g.get("name")?.asString?.trim().orEmpty()
+            if (name.isEmpty()) null else name to (g.get("count")?.asInt ?: 0)
+        }.orEmpty()
+        // Genres are MusicBrainz's own list; tags are anyone's words, used only when there are no genres, and only
+        // ones more than one person agreed on.
+        val genres = named("genres").sortedByDescending { it.second }.map { it.first }
+            .ifEmpty { named("tags").filter { it.second >= 2 }.sortedByDescending { it.second }.map { it.first } }
+            .take(3)
+        val primary = o.get("primary-type")?.takeIf { !it.isJsonNull }?.asString.orEmpty()
+        val secondary = o.getAsJsonArray("secondary-types")?.mapNotNull { it.takeIf { e -> !e.isJsonNull }?.asString }.orEmpty()
+        val artistId = o.getAsJsonArray("artist-credit")?.firstOrNull()?.asJsonObject?.getAsJsonObject("artist")?.get("id")?.asString.orEmpty()
+        return AlbumFacts(
+            genres = genres,
+            firstOut = o.get("first-release-date")?.takeIf { !it.isJsonNull }?.asString.orEmpty(),
+            type = (listOf(primary) + secondary).filter { it.isNotBlank() }.joinToString(", "),
+            artistId = artistId,
+        )
+    }
+
+    /** The label, catalogue number, country, barcode and date of the release [releaseId]. Call off the main thread. */
+    fun releaseFacts(releaseId: String, into: AlbumFacts): AlbumFacts =
+        parseReleaseFacts(
+            askAt(
+                (SEARCH + "release/" + releaseId).toHttpUrl().newBuilder().addQueryParameter("inc", "labels")
+                    .addQueryParameter("fmt", "json").build(),
+            ),
+            into,
+        )
+
+    fun parseReleaseFacts(json: String, into: AlbumFacts): AlbumFacts {
+        val o = JsonParser.parseString(json).asJsonObject
+        val info = o.getAsJsonArray("label-info")?.firstOrNull()?.asJsonObject
+        fun str(x: JsonObject?, key: String) = x?.get(key)?.takeIf { !it.isJsonNull }?.asString.orEmpty()
+        return into.copy(
+            label = str(info?.getAsJsonObject("label"), "name").takeIf { it != "[no label]" }.orEmpty(),
+            catalogueNo = str(info, "catalog-number").takeIf { it != "[none]" }.orEmpty(),
+            country = str(o, "country"),
+            barcode = str(o, "barcode"),
+            released = str(o, "date"),
+            detailed = true,
+        )
+    }
+
+    /**
+     * A picture of the artist or group, free to use: the catalogue's link to Wikidata, then the picture Wikidata
+     * gives for them, from Wikimedia Commons. Null when there is none. Call off the main thread.
+     */
+    fun artistPicture(artistId: String): ByteArray? {
+        val json = askAt(
+            (SEARCH + "artist/" + artistId).toHttpUrl().newBuilder().addQueryParameter("inc", "url-rels").addQueryParameter("fmt", "json").build(),
+        )
+        val wikidata = wikidataOf(json) ?: return null
+        val entity = Request.Builder().url("https://www.wikidata.org/wiki/Special:EntityData/$wikidata.json").header("User-Agent", WHO).build()
+        val file = Drive.http.newCall(entity).execute().use { r -> if (r.isSuccessful) pictureNameOf(r.body.string(), wikidata) else null } ?: return null
+        val url = "https://commons.wikimedia.org/wiki/Special:FilePath/" + java.net.URLEncoder.encode(file.replace(' ', '_'), "UTF-8").replace("+", "%20") + "?width=500"
+        val picture = Request.Builder().url(url).header("User-Agent", WHO).build()
+        return Drive.http.newCall(picture).execute().use { r -> if (r.isSuccessful) r.body.bytes() else null }
+    }
+
+    /** The Wikidata item ("Q123") an artist in the catalogue links to. */
+    fun wikidataOf(json: String): String? =
+        JsonParser.parseString(json).asJsonObject.getAsJsonArray("relations")?.firstNotNullOfOrNull { r ->
+            val o = r.asJsonObject
+            if (o.get("type")?.asString != "wikidata") null
+            else o.getAsJsonObject("url")?.get("resource")?.asString?.substringAfterLast('/')?.takeIf { it.startsWith("Q") }
+        }
+
+    /** The Commons file named as the item's picture (its "image", P18). */
+    fun pictureNameOf(json: String, item: String): String? = runCatching {
+        JsonParser.parseString(json).asJsonObject.getAsJsonObject("entities").getAsJsonObject(item).getAsJsonObject("claims")
+            .getAsJsonArray("P18")?.firstOrNull()?.asJsonObject?.getAsJsonObject("mainsnak")?.getAsJsonObject("datavalue")?.get("value")?.asString
+    }.getOrNull()
 }

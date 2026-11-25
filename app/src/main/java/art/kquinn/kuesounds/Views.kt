@@ -15,7 +15,7 @@ object Views {
 
     /** The parts that can be shown each way, and how each shows until chosen (as each looked before). */
     val defaults = mapOf(
-        Tab.ALBUMS to Layout.COVERS, Tab.SONGS to Layout.LIST, Tab.ARTISTS to Layout.LIST,
+        Tab.ALBUMS to Layout.COVERS, Tab.SONGS to Layout.LIST, Tab.ARTISTS to Layout.LIST, Tab.GENRES to Layout.LIST, Tab.COMPOSERS to Layout.LIST,
         Tab.PLAYLISTS to Layout.LIST, Tab.FAVOURITES to Layout.LIST, Tab.ON_PHONE to Layout.COVERS,
     )
 
