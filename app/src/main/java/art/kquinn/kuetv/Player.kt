@@ -47,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -1925,7 +1926,7 @@ object SharedMini {
  */
 @OptIn(UnstableApi::class)
 @Composable
-fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
+fun MiniTv(item: Playable, modifier: Modifier = Modifier, nameOnPicture: Boolean = false) {
     val context = LocalContext.current
     val address = resolvedAddress(item.url) ?: return
     var retry by remember(address) { mutableIntStateOf(0) }
@@ -2036,19 +2037,38 @@ fun MiniTv(item: Playable, modifier: Modifier = Modifier) {
             .then(if (link.open != null) Modifier.clickable { link.open.invoke() } else Modifier)
             .padding(6.dp),
     ) {
-        AndroidView(
-            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
-            factory = { ctx -> PlayerView(ctx).apply { useController = false; isFocusable = false } },
-            update = { it.player = player },
-            // Let go of the shared player when this small TV goes, so the next one shows the picture.
-            onRelease = { it.player = null },
-        )
-        Text(
-            if (focused) "OK: full screen" else item.name,
-            color = if (focused) Color.Black else Color.White, fontSize = 17.sp, maxLines = 1,
-            fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-        )
+        val picture: @Composable (Modifier) -> Unit = { m ->
+            AndroidView(
+                modifier = m,
+                factory = { ctx -> PlayerView(ctx).apply { useController = false; isFocusable = false } },
+                update = { it.player = player },
+                // Let go of the shared player when this small TV goes, so the next one shows the picture.
+                onRelease = { it.player = null },
+            )
+        }
+        if (nameOnPicture) {
+            // Beside Movies' and Series' strip there is no room under the picture, so the channel's name sits
+            // across the bottom of it (Kevin, 25 November 2026: the small TV must show its channel's name).
+            Box(Modifier.fillMaxWidth().weight(1f).clip(RoundedCornerShape(9.dp))) {
+                picture(Modifier.fillMaxSize())
+                Text(
+                    if (focused) "OK: full screen" else item.name,
+                    color = Color.White, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                        .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to Color.Transparent, 1f to Color(0xCC000000)))
+                        .padding(start = 8.dp, end = 8.dp, top = 10.dp, bottom = 4.dp),
+                )
+            }
+        } else {
+            picture(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
+            Text(
+                if (focused) "OK: full screen" else item.name,
+                color = if (focused) Color.Black else Color.White, fontSize = 17.sp, maxLines = 1,
+                fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            )
+        }
     }
 }
 

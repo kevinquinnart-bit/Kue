@@ -3331,7 +3331,7 @@ private fun MainScreen(
             // Movies and Series draw it themselves, beside the strip above the posters (Kevin, 25 November 2026).
             val small = LastLive.item
             val wanted = remember(Choices.changes) { Choices.smallTv(context) }
-            val sideTv: (@Composable (Modifier) -> Unit)? = if (small != null && wanted) ({ m -> MiniTv(small, m.focusProperties { canFocus = !bar.inside }) }) else null
+            val sideTv: (@Composable (Modifier) -> Unit)? = if (small != null && wanted) ({ m -> MiniTv(small, m.focusProperties { canFocus = !bar.inside }, nameOnPicture = true) }) else null
             CompositionLocalProvider(LocalSideTv provides sideTv) { Pane(this, null).body() }
             val guideGrid = section == Section.GUIDE && state.guide.open == null
             // A series open: what it is about goes under the small TV, in place of the channel's programme details.
@@ -6454,12 +6454,17 @@ private fun TrendingBanner(slides: List<Trending.Slide>, clock: String, modifier
                 AsyncImage(model = s.picture, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxHeight().fillMaxWidth(0.66f).align(Alignment.CenterEnd))
                 Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(0f to Panel, 0.36f to Panel, 0.62f to Panel.copy(alpha = 0f))))
                 Column(Modifier.fillMaxHeight().fillMaxWidth(0.52f).padding(start = 20.dp, top = 10.dp, bottom = 8.dp, end = 8.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.wrapContentWidth(Alignment.Start, unbounded = true), verticalAlignment = Alignment.CenterVertically) {
                         KueLogo(24.dp, 17.sp)
                         Spacer(Modifier.width(14.dp))
                         Text(clock, color = Soft, fontSize = 14.sp, maxLines = 1)
                         Spacer(Modifier.width(14.dp))
-                        Text((if (s.popular) "Most popular · " else "Trending · ") + s.service, color = AccentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        // Whole, never cut short (Kevin, 25 November 2026: "Trending · BBC iPla..."): the line may run on
+                        // past the words' column, over the dark edge of the picture.
+                        Text(
+                            (if (s.popular) "Most popular · " else "Trending · ") + s.service, color = AccentInk, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false,
+                            style = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Color.Black, blurRadius = 6f)),
+                        )
                     }
                     Spacer(Modifier.height(6.dp))
                     // Nothing cut off (Kevin, 23 November 2026): a long name takes two lines, and words that don't fit
