@@ -1167,6 +1167,31 @@ object Ui {
         soft = { K.Soft }, font = K.Poppins,
     )
 
+    /** Every setting, for Search all settings: group id, group name, section (if it has one), setting. */
+    private val settingsPlaces = listOf(
+        KueSettings.Place("account", "Account", null, "Google account"),
+        KueSettings.Place("account", "Account", null, "Sign-in and password"),
+        KueSettings.Place("app", "KueSounds", "Your music", "Songs and albums"),
+        KueSettings.Place("app", "KueSounds", "Your music", "Covers"),
+        KueSettings.Place("app", "KueSounds", "Your music", "Look for new music"),
+        KueSettings.Place("app", "KueSounds", "Fix the files", "Fix all matched albums"),
+        KueSettings.Place("app", "KueSounds", "Fix the files", "Albums still to fix"),
+        KueSettings.Place("look", "Look and feel", null, "Text size"),
+        KueSettings.Place("look", "Look and feel", null, "Stronger contrast"),
+        KueSettings.Place("notices", "Notifications", null, "Progress in the pull-down"),
+        KueSettings.Place("backup", "Backup and sync", "Backup", "Back up now"),
+        KueSettings.Place("backup", "Backup and sync", "Backup", "Bring back a backup"),
+        KueSettings.Place("backup", "Backup and sync", "Favourites", "Favourites synced with the Drive"),
+        KueSettings.Place("privacy", "Privacy and storage", "Space on this phone", "Songs saved to the phone"),
+        KueSettings.Place("privacy", "Privacy and storage", "What leaves this phone", "What leaves this phone"),
+        KueSettings.Place("privacy", "Privacy and storage", null, "Permissions"),
+        KueSettings.Place("kue", "Your Kue apps", null, "KueTV"),
+        KueSettings.Place("kue", "Your Kue apps", null, "KueVault"),
+        KueSettings.Place("help", "Help and about", null, "Version"),
+        KueSettings.Place("help", "Help and about", null, "Check for updates"),
+        KueSettings.Place("help", "Help and about", null, "Copy report for Claude"),
+    )
+
     @Composable
     private fun Settings(back: () -> Unit) {
         val data = Scanner.data
@@ -1175,11 +1200,22 @@ object Ui {
         var open by rememberSaveable { mutableStateOf("app") }
         val toggle = { id: String -> open = if (open == id) "" else id }
         val stamp = { at: Long -> java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(at)) }
-        Column(Modifier.fillMaxSize().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Sections inside a group fold away too (Kevin, 25 November 2026); Search all settings opens the right one.
+        var sections by rememberSaveable { mutableStateOf("") }
+        val sectionOpen = { id: String -> id in sections.split("|") }
+        val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("|").filter { it != id }.joinToString("|") else "$sections|$id" }
+        var query by rememberSaveable { mutableStateOf("") }
+        val scroll = androidx.compose.foundation.rememberScrollState()
+        Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                 RoundButton(Glyph.BACK, "Back", onClick = back)
                 Spacer(Modifier.width(14.dp))
                 Words("Settings", 22, bold = true)
+            }
+            KueSettings.Search(query, settingsPlaces, look, { query = it }) { p ->
+                query = ""
+                open = p.group
+                if (p.section != null && !sectionOpen(p.group + "|" + p.section)) flip(p.group + "|" + p.section)
             }
 
             // 1. Account
@@ -1195,19 +1231,21 @@ object Ui {
                 count(data.tracks.size, "song") + " · " + String.format("%,d", view.leftToFix) + " albums to fix",
                 open == "app", look, { toggle("app") },
             ) {
-                KueSettings.Heading("Your music", look)
-                Words(count(data.tracks.size, "song") + " · " + count(view.albums.size, "album"), 17)
-                Words(String.format("%,d", view.withCover) + " with a cover", 14, K.Soft)
-                Spacer(Modifier.height(6.dp))
-                MusicSteps(view)
-                Spacer(Modifier.height(4.dp))
-                if (!Scanner.running) Button("Look for new music", modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
-                KueSettings.Heading("Fix the files", look)
-                val fixable = Scanner.view.matched
-                Words(count(fixable.size, "album") + " matched · " + String.format("%,d", view.leftToFix) + " still to fix", 17)
-                if (Fixer.status.isNotEmpty()) Words(Fixer.status, 14, K.Accent, lines = 2)
-                if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 2)
-                FixFiles(fixable, "Fix all matched albums", main = true)
+                KueSettings.Section("Your music", sectionOpen("app|Your music"), look, { flip("app|Your music") }) {
+                    Words(count(data.tracks.size, "song") + " · " + count(view.albums.size, "album"), 17)
+                    Words(String.format("%,d", view.withCover) + " with a cover", 14, K.Soft)
+                    Spacer(Modifier.height(6.dp))
+                    MusicSteps(view)
+                    Spacer(Modifier.height(4.dp))
+                    if (!Scanner.running) Button("Look for new music", modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
+                }
+                KueSettings.Section("Fix the files", sectionOpen("app|Fix the files"), look, { flip("app|Fix the files") }) {
+                    val fixable = Scanner.view.matched
+                    Words(count(fixable.size, "album") + " matched · " + String.format("%,d", view.leftToFix) + " still to fix", 17)
+                    if (Fixer.status.isNotEmpty()) Words(Fixer.status, 14, K.Accent, lines = 2)
+                    if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 2)
+                    FixFiles(fixable, "Fix all matched albums", main = true)
+                }
             }
 
             // 3. Look and feel
@@ -1245,10 +1283,11 @@ object Ui {
                 if (Backup.lastAt == 0L) "Not backed up yet" else "Backed up " + stamp(Backup.lastAt),
                 open == "backup", look, { toggle("backup") },
             ) {
-                BackupPanel()
-                KueSettings.Heading("Favourites", look)
-                val when_ = Sync.syncedAt
-                KueSettings.Note(if (when_ == 0L) "Not synced with the Drive yet." else "Synced with the Drive at " + stamp(when_), look)
+                KueSettings.Section("Backup", sectionOpen("backup|Backup"), look, { flip("backup|Backup") }) { BackupPanel() }
+                KueSettings.Section("Favourites", sectionOpen("backup|Favourites"), look, { flip("backup|Favourites") }) {
+                    val when_ = Sync.syncedAt
+                    KueSettings.Note(if (when_ == 0L) "Not synced with the Drive yet." else "Synced with the Drive at " + stamp(when_), look)
+                }
             }
 
             // 6. Privacy and storage
@@ -1259,16 +1298,18 @@ object Ui {
                 count(saved.size, "song") + " saved · " + String.format("%.1f", bytes / 1_000_000_000.0) + " GB",
                 open == "privacy", look, { toggle("privacy") },
             ) {
-                KueSettings.Heading("Space on this phone", look)
-                Words(count(saved.size, "song") + " saved · " + String.format("%.1f", bytes / 1_000_000_000.0) + " GB", 17)
-                if (Offline.status.isNotEmpty()) Words(Offline.status, 14, K.Accent, lines = 2)
-                KueSettings.Heading("What leaves this phone", look)
-                KueSettings.Note(
-                    "Your songs stay in your Google Drive. Album and song names go to the MusicBrainz music catalogue and its cover " +
-                        "library to look them up. The podcasts, radio stations and videos you choose are fetched from where they are " +
-                        "published. KueSounds checks GitHub for new versions. Nothing else.",
-                    look,
-                )
+                KueSettings.Section("Space on this phone", sectionOpen("privacy|Space on this phone"), look, { flip("privacy|Space on this phone") }) {
+                    Words(count(saved.size, "song") + " saved · " + String.format("%.1f", bytes / 1_000_000_000.0) + " GB", 17)
+                    if (Offline.status.isNotEmpty()) Words(Offline.status, 14, K.Accent, lines = 2)
+                }
+                KueSettings.Section("What leaves this phone", sectionOpen("privacy|What leaves this phone"), look, { flip("privacy|What leaves this phone") }) {
+                    KueSettings.Note(
+                        "Your songs stay in your Google Drive. Album and song names go to the MusicBrainz music catalogue and its cover " +
+                            "library to look them up. The podcasts, radio stations and videos you choose are fetched from where they are " +
+                            "published. KueSounds checks GitHub for new versions. Nothing else.",
+                        look,
+                    )
+                }
                 Button("Permissions", main = false, modifier = Modifier.fillMaxWidth()) { KueSettings.openPermissions(context) }
             }
 
