@@ -67,7 +67,10 @@ jobs:
         run: |
           ./gradlew :app:assembleRelease --stacktrace
           mkdir -p dist
-          cp app/build/outputs/apk/release/app-release.apk dist/KueTV.apk
+          cp app/build/outputs/apk/release/app-universal-release.apk dist/KueTV.apk
+          # Each kind of chip's own half, which updates download.
+          for abi in armeabi-v7a arm64-v8a; do cp app/build/outputs/apk/release/app-$abi-release.apk dist/KueTV-$abi.apk; done
+          ls -l dist
           # A copy for apps up to 0.1.156, which check the old "kuetv2" download.
           cp dist/KueTV.apk dist/KueTV2.apk
           printf 'KueTV, version %s\n' "$VERSION_NAME" > dist/NOTES.md
@@ -78,6 +81,7 @@ jobs:
           for abi in armeabi-v7a arm64-v8a; do
             for lib in libopenvpn.so libovpnexec.so libovpnutil.so libosslutil.so libosslspeedtest.so libovpn3.so; do
               unzip -l dist/KueTV.apk | grep -q "lib/$abi/$lib" || { echo "VPN engine part missing: $abi/$lib"; exit 1; }
+              unzip -l dist/KueTV-$abi.apk | grep -q "lib/$abi/$lib" || { echo "VPN engine part missing from the $abi half: $lib"; exit 1; }
             done
           done
           echo "VPN engine in this build: all parts, for both kinds of chip"
@@ -92,7 +96,10 @@ jobs:
           tag_name: kuetv
           target_commitish: ${{ github.sha }}
           name: KueTV (${{ env.VERSION_NAME }})
-          files: dist/KueTV.apk
+          files: |
+            dist/KueTV.apk
+            dist/KueTV-armeabi-v7a.apk
+            dist/KueTV-arm64-v8a.apk
           body_path: dist/NOTES.md
           prerelease: false
           make_latest: true

@@ -62,6 +62,16 @@ android {
             excludes += listOf("lib/x86/**", "lib/x86_64/**")
         }
     }
+    // Besides the whole app (for first installs), one half per kind of chip: updates download only their own
+    // half, about half the size (Kevin, 25 November 2026: updates to be as quick as they can be).
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = true
+        }
+    }
     buildFeatures {
         compose = true
         buildConfig = true

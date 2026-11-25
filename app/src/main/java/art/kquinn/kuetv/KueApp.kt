@@ -24,6 +24,13 @@ class KueApp : ICSOpenVPNApplication() {
             previous?.uncaughtException(thread, error)
         }
         super.onCreate()
+        // Straight after an update KueTV handed over: open it before anything else (Kevin, 25 November 2026).
+        runCatching {
+            if (Report.file == null) Report.keepIn(java.io.File(filesDir, "report.txt"))
+            // Only KueTV's own process (the VPN runs in a second one, which starts this too).
+            val main = android.os.Build.VERSION.SDK_INT < 28 || android.app.Application.getProcessName() == packageName
+            if (main) Reopen.onStart(this)
+        }
         KueDns.load(this)
     }
 

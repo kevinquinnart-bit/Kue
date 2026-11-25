@@ -50,12 +50,18 @@ object Updates {
 
     private val http by lazy { Provider.http.newBuilder().callTimeout(15, TimeUnit.SECONDS).build() }
 
+    /** When the download was last asked what is on it (time since the TV started, sleep included). */
+    @Volatile var lastChecked = 0L
+        private set
+
     /** What is on the download now. Call off the main thread; throws when it can't be reached. */
     fun check(): Latest {
         val request = Request.Builder().url(VERSION_URL).cacheControl(CacheControl.FORCE_NETWORK).header("User-Agent", Provider.USER_AGENT).build()
         http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw java.io.IOException("the download answered " + response.code)
-            return parse(response.body.string()) ?: throw java.io.IOException("the version file had no build number")
+            val latest = parse(response.body.string()) ?: throw java.io.IOException("the version file had no build number")
+            lastChecked = android.os.SystemClock.elapsedRealtime()
+            return latest
         }
     }
 
@@ -78,6 +84,31 @@ object Updates {
     var readyCode = 0
         private set
 
+    /** The build already written into the TV's installer, waiting for Install (0 when none). See KueUpdate. */
+    var inInstaller by mutableStateOf(0)
+        private set
+
+    /** Whether build [code] (or newer) is downloaded and ready to put on with no wait. */
+    fun readyFor(code: Int): Boolean = inInstaller >= code || (ready?.exists() == true && readyCode >= code)
+
+    /**
+     * Writes the downloaded app into the TV's installer straight away, out of sight, so Install opens the TV's
+     * question at once (25 November 2026: writing it after Install was pressed left 2 to 6 seconds of nothing).
+     * The downloaded copy is then deleted, as the installer holds it: the TV is short of storage.
+     */
+    private fun intoInstaller(context: Context) {
+        val file = ready?.takeIf { it.exists() } ?: return
+        val started = android.os.SystemClock.uptimeMillis()
+        runCatching { KueUpdate.prepare(context, file, readyCode) }
+            .onSuccess {
+                inInstaller = readyCode
+                file.delete()
+                ready = null
+                Report.note("Updates", "build $readyCode written into the installer in " + (android.os.SystemClock.uptimeMillis() - started) + " ms, waiting for Install")
+            }
+            .onFailure { Report.note("Updates", "couldn't write build $readyCode into the installer ahead (" + it.message + "); it is written when Install is pressed") }
+    }
+
     @Volatile private var fetching = false
 
     /** The build last handed to the installer, and when. */
@@ -98,6 +129,7 @@ object Updates {
             Report.note("Updates", "check failed: " + it.message)
             return
         }
+        inInstaller = KueUpdate.waiting(context)
         if (!isNewer(latest, BuildConfig.VERSION_CODE)) {
             if (!fetching) tidy(context)
             return
@@ -115,7 +147,8 @@ object Updates {
             Report.note("Updates", "back on screen while the installer has version " + latest.name + "; not offered again")
             return
         }
-        if (ready?.exists() == true && readyCode >= latest.code) {
+        if (readyFor(latest.code)) {
+            if (inInstaller < latest.code) intoInstaller(context)
             offer = latest
             return
         }
@@ -129,6 +162,7 @@ object Updates {
             readyCode = buildInside(context, file)?.toInt() ?: latest.code
             ready = file
             Report.note("Updates", "version " + latest.name + " downloaded and checked, ready to install")
+            intoInstaller(context)
         } catch (e: Exception) {
             Report.note("Updates", "background download failed: " + e.javaClass.simpleName + " · " + e.message)
         } finally {
@@ -139,12 +173,12 @@ object Updates {
 
     private fun folder(context: Context) = File(context.cacheDir, "update").apply { mkdirs() }
 
-    /** Downloads the newest app, telling [progress] how far it has got, 0 to 100. Call off the main thread. */
-    fun download(context: Context, progress: (Int) -> Unit): File {
+    /** Downloads the newest app from [url], telling [progress] how far it has got, 0 to 100. Call off the main thread. */
+    fun download(context: Context, progress: (Int) -> Unit, url: String = APP_URL): File {
         val target = File(folder(context), "KueTV.apk")
         val part = File(folder(context), "KueTV.apk.part")
         val big = Provider.http.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
-        val request = Request.Builder().url(APP_URL).cacheControl(CacheControl.FORCE_NETWORK).header("User-Agent", Provider.USER_AGENT).build()
+        val request = Request.Builder().url(url).cacheControl(CacheControl.FORCE_NETWORK).header("User-Agent", Provider.USER_AGENT).build()
         big.newCall(request).execute().use { response ->
             if (!response.isSuccessful) throw java.io.IOException("the download answered " + response.code)
             val total = response.body.contentLength()
@@ -219,18 +253,32 @@ object Updates {
      * Report, so a failed update shows what was downloaded. Throws when neither try gives a newer app.
      */
     fun downloadChecked(context: Context, progress: (Int) -> Unit): File {
+        // This TV's own half of the app first (about half the size: the parts for the other kind of chip left
+        // out), the whole app if that isn't there.
+        val half = KueUpdate.ownHalf(context, APP_URL)
         repeat(2) { attempt ->
-            val file = download(context, progress)
+            val url = if (attempt == 0 && half != null) half else APP_URL
+            val file = runCatching { download(context, progress, url) }.getOrElse {
+                if (attempt == 0) { Report.note("Updates", "try 1 from " + url.substringAfterLast('/') + " failed: " + it.message); return@repeat }
+                throw it
+            }
             val inside = buildInside(context, file)
             Report.note(
                 "Updates",
-                "try " + (attempt + 1) + ": downloaded " + file.length() + " bytes, build " + (inside?.toString() ?: "unreadable") +
+                "try " + (attempt + 1) + ": downloaded " + url.substringAfterLast('/') + ", " + file.length() + " bytes, build " + (inside?.toString() ?: "unreadable") +
                     ", this is build " + BuildConfig.VERSION_CODE,
             )
             if (inside != null && inside > BuildConfig.VERSION_CODE) return file
             file.delete()
         }
         throw java.io.IOException("the download wasn't a newer, whole app, twice")
+    }
+
+    /** Downloads the newest app now (Update pressed with nothing downloaded yet), ready for [installNow]. */
+    fun downloadNow(context: Context, progress: (Int) -> Unit) {
+        val file = downloadChecked(context, progress)
+        readyCode = buildInside(context, file)?.toInt() ?: readyCode
+        ready = file
     }
 
     /** Whether the device lets KueTV put apps on. Fire TV and phones ask for this once, in their own settings. */
@@ -247,24 +295,36 @@ object Updates {
     /** Takes down the offer on screen (a newer version is being fetched in its place). */
     fun dropOffer() { offer = null }
 
-    /** Hands the downloaded app to the device's installer, which asks before it installs over this one. */
-    fun install(context: Context, file: File) {
-        handedOver = buildInside(context, file)?.toInt() ?: readyCode
+    /**
+     * Puts the update on: the TV's installer asks "Install?" and puts it on. Already written into the installer
+     * (the usual case) it is only told to go, so its question comes up at once; otherwise the downloaded file is
+     * written into it first.
+     */
+    fun installNow(context: Context) {
+        val file = ready?.takeIf { it.exists() }
+        handedOver = maxOf(inInstaller, file?.let { buildInside(context, it)?.toInt() } ?: readyCode)
         handedAt = android.os.SystemClock.uptimeMillis()
         offer = null
         // The Home watcher stands aside while the installer opens, so it can't pull KueTV back over it.
         HomeGuard.pauseFor(HANDED_WAIT)
-        Report.note("Updates", "build " + handedOver + " handed to the installer (" + file.length() + " bytes)")
+        Report.note("Updates", "build " + handedOver + " handed to the installer" + if (inInstaller > 0) " (already written in)" else " (" + (file?.length() ?: 0) + " bytes to write)")
         // So KueTV opens again by itself once the installer has put the update on.
         context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE).edit().putLong("at", System.currentTimeMillis()).putInt("build", handedOver).apply()
-        // KueTV writes the app into the installer itself, as KueSounds does, and the installer answers with how it
-        // went, so a refusal ("App not installed") is in the Report with its reason. The old way, the installer
-        // reading the file from KueTV and saying nothing back, is kept for when this one can't start.
-        // Said at once, and the 83 MB written to the installer away from the screen: written on the screen, it froze
-        // the remote for 5 to 7 seconds with nothing said, and the update got asked for twice (Kevin, 22 November 2026).
-        kueToast(context, "Update downloaded. Handing it to the TV's installer…", long = false)
         val app = context.applicationContext
+        // Away from the screen: writing 40 to 80 MB on the screen froze the remote (Kevin, 22 November 2026).
         Thread({
+            val started = android.os.SystemClock.uptimeMillis()
+            val went = runCatching { KueUpdate.putOn(app, UpdateReceiver::class.java) }.getOrDefault(false)
+            inInstaller = 0
+            if (went) {
+                Report.note("Updates", "installer told to go in " + (android.os.SystemClock.uptimeMillis() - started) + " ms")
+                return@Thread
+            }
+            if (file == null) {
+                Report.note("Updates", "nothing downloaded to put on")
+                kueToast(app, "The update needs downloading again. Use Settings › About › Check for updates.")
+                return@Thread
+            }
             val session = runCatching { installSession(app, file) }
             if (session.isFailure) {
                 Report.note("Updates", "installer session couldn't start: " + session.exceptionOrNull()?.message + "; using the old way")
@@ -304,6 +364,8 @@ object Updates {
     /** Clears a downloaded app once the newer version is the one running. */
     fun tidy(context: Context) {
         runCatching { File(context.cacheDir, "update").deleteRecursively() }
+        KueUpdate.tidy(context)
+        inInstaller = 0
     }
 }
 
@@ -340,9 +402,24 @@ class UpdateReceiver : android.content.BroadcastReceiver() {
 object Reopen {
     private const val WITHIN_MS = 20 * 60_000L
 
+    @Volatile private var opened = false
+
+    /**
+     * KueTV starting: if this is the update KueTV handed over, KueTV opens at once. Android starts KueTV again as
+     * soon as the update is on (for its Home watcher); its "update on" message comes about 2 seconds later, with
+     * Fire TV's home screen up all that time (seen 25 November 2026).
+     */
+    fun onStart(context: Context) {
+        val prefs = context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE)
+        if (prefs.getLong("at", 0L) == 0L || BuildConfig.VERSION_CODE < prefs.getInt("build", Int.MAX_VALUE)) return
+        afterUpdate(context)
+    }
+
     fun afterUpdate(context: Context) {
         val prefs = context.getSharedPreferences("updates-reopen", Context.MODE_PRIVATE)
         val at = prefs.getLong("at", 0L)
+        // Already opened by onStart: Android's message adds nothing.
+        if (at == 0L && opened) return
         // Kept until the build handed over is the one on: an older one finishing first doesn't use it up (23 November
         // 2026: 0.1.201 went on, then 0.1.202, which then didn't open KueTV).
         if (BuildConfig.VERSION_CODE >= prefs.getInt("build", 0)) prefs.edit().remove("at").remove("build").apply()
@@ -350,6 +427,7 @@ object Reopen {
         Report.note("Updates", "update on (Android said so); handed over " + (if (ago < 0) "not by KueTV" else "$ago seconds ago"))
         if (at == 0L || System.currentTimeMillis() - at > WITHIN_MS || !isTv(context)) return
         Report.note("Updates", "update on: opening KueTV again")
+        opened = true
         open(context)
         // It opened, then the installer's last screen closing put Fire TV's home over it (Kevin, 22 November 2026,
         // 18:45: opened, yet Fire TV's home showed). So it looks again a few times, and comes back to the front if covered.

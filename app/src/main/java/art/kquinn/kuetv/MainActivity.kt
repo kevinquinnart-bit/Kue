@@ -6849,7 +6849,13 @@ private fun UpdateNow(latest: Updates.Latest, modifier: Modifier = Modifier) {
             }
             // Already downloaded in the background: straight to the installer, once it is sure no newer one is out
             // (23 November 2026: an offer from before the TV slept put 0.1.201 on, then 0.1.202 came straight after).
-            Updates.ready?.takeIf { it.exists() && Updates.readyCode >= latest.code } != null -> {
+            // Asked within the last 5 minutes: straight to the installer, no second asking (25 November 2026).
+            Updates.readyFor(latest.code) && android.os.SystemClock.elapsedRealtime() - Updates.lastChecked < 5 * 60_000L -> {
+                said = "Opening the TV's installer…"
+                Report.note("Updates", "installing " + latest.name + ", checked " + (android.os.SystemClock.elapsedRealtime() - Updates.lastChecked) / 1000 + " s ago")
+                Updates.installNow(context)
+            }
+            Updates.readyFor(latest.code) -> {
                 busy = true
                 said = "Checking it's the newest…"
                 scope.launch {
@@ -6861,9 +6867,9 @@ private fun UpdateNow(latest: Updates.Latest, modifier: Modifier = Modifier) {
                         Updates.dropOffer()
                         withContext(Dispatchers.IO) { Updates.checkAndFetch(context) }
                     } else {
-                        said = "Choose Install on the next screen."
+                        said = "Opening the TV's installer…"
                         Report.note("Updates", "installing " + latest.name + " downloaded in the background")
-                        Updates.install(context, Updates.ready!!)
+                        Updates.installNow(context)
                     }
                 }
             }
@@ -6872,10 +6878,10 @@ private fun UpdateNow(latest: Updates.Latest, modifier: Modifier = Modifier) {
                 said = "Downloading · 0%"
                 scope.launch {
                     try {
-                        val file = withContext(Dispatchers.IO) { Updates.downloadChecked(context) { p -> scope.launch { said = "Downloading · $p%" } } }
-                        said = "Downloaded. Choose Install on the next screen."
+                        withContext(Dispatchers.IO) { Updates.downloadNow(context) { p -> scope.launch { said = "Downloading · $p%" } } }
+                        said = "Downloaded. Opening the TV's installer…"
                         Report.note("Updates", "downloaded " + latest.name + ", handing to the installer")
-                        Updates.install(context, file)
+                        Updates.installNow(context)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -6888,7 +6894,7 @@ private fun UpdateNow(latest: Updates.Latest, modifier: Modifier = Modifier) {
             }
         }
     }
-    val downloaded = Updates.ready?.exists() == true && Updates.readyCode >= latest.code
+    val downloaded = Updates.readyFor(latest.code)
     FocusRow(
         when {
             busy -> "Downloading…"
