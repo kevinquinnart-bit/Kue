@@ -660,6 +660,27 @@ object Ui {
         soft = { K.Soft }, font = K.Poppins,
     )
 
+    /** Every setting, for Search all settings: group id, group name, section (if it has one), setting. */
+    private val settingsPlaces = listOf(
+        KueSettings.Place("account", "Account", null, "Places and Google accounts"),
+        KueSettings.Place("account", "Account", null, "Passwords"),
+        KueSettings.Place("app", "KueVault", null, "Make films smaller first"),
+        KueSettings.Place("app", "KueVault", null, "Copy the PC download link"),
+        KueSettings.Place("look", "Look and feel", null, "Text size"),
+        KueSettings.Place("look", "Look and feel", null, "Stronger contrast"),
+        KueSettings.Place("notices", "Notifications", null, "Warranty reminders"),
+        KueSettings.Place("backup", "Backup and sync", null, "Android's own backup"),
+        KueSettings.Place("backup", "Backup and sync", null, "Moving to a new phone"),
+        KueSettings.Place("privacy", "Privacy and storage", "What leaves this phone", "What leaves this phone"),
+        KueSettings.Place("privacy", "Privacy and storage", null, "Permissions"),
+        KueSettings.Place("privacy", "Privacy and storage", "Forget", "Forget everything on this phone"),
+        KueSettings.Place("kue", "Your Kue apps", null, "KueTV"),
+        KueSettings.Place("kue", "Your Kue apps", null, "KueSounds"),
+        KueSettings.Place("help", "Help and about", null, "Version"),
+        KueSettings.Place("help", "Help and about", null, "Check for updates"),
+        KueSettings.Place("help", "Help and about", null, "Copy report for Claude"),
+    )
+
     @Composable
     private fun Settings(onNewPhone: () -> Unit, onPlaces: () -> Unit, onBack: () -> Unit) {
         val context = LocalContext.current
@@ -667,9 +688,19 @@ object Ui {
         var forget by remember { mutableStateOf(false) }
         var open by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("app") }
         val toggle = { id: String -> open = if (open == id) "" else id }
+        // Sections inside a group fold away too (Kevin, 25 November 2026); Search all settings opens the right one.
+        var sections by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+        val sectionOpen = { id: String -> id in sections.split("|") }
+        val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("|").filter { it != id }.joinToString("|") else "$sections|$id" }
+        var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Title("Settings", onBack)
             Column(Modifier.padding(horizontal = 16.dp).padding(bottom = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                KueSettings.Search(query, settingsPlaces, look, { query = it }) { p ->
+                    query = ""
+                    open = p.group
+                    if (p.section != null && !sectionOpen(p.group + "|" + p.section)) flip(p.group + "|" + p.section)
+                }
                 // 1. Account: the Google accounts and other places KueVault keeps things in
                 val googles = Vault.places.filter { it.kind == PlaceKind.GOOGLE }
                 KueSettings.Group(
@@ -727,14 +758,16 @@ object Ui {
 
                 // 6. Privacy and storage
                 KueSettings.Group(KueSettings.Icons.PRIVACY, "Privacy and storage", "No KueVault server", open == "privacy", look, { toggle("privacy") }) {
-                    KueSettings.Heading("What leaves this phone", look)
+                    KueSettings.Section("What leaves this phone", sectionOpen("privacy|What leaves this phone"), look, { flip("privacy|What leaves this phone") }) {
                     Words("In each place, KueVault can only see the files it puts in its own KueVault folder. Your files go straight between this phone and your own places. There is no KueVault server. Receipts, labels and manuals are read on this phone; the only thing sent anywhere else is a product's barcode number, to Open Products Facts, when you scan one. Home computer passwords stay on this phone, locked.", 13, K.Soft, lines = 10)
+                    }
                     Button("Permissions", modifier = Modifier.fillMaxWidth()) { KueSettings.openPermissions(context) }
-                    KueSettings.Heading("Forget", look)
+                    KueSettings.Section("Forget", sectionOpen("privacy|Forget"), look, { flip("privacy|Forget") }) {
                     Button(if (forget) "Tap again to forget everything on this phone" else "Forget everything on this phone", modifier = Modifier.fillMaxWidth()) {
                         if (!forget) forget = true else { forget = false; Vault.forgetAll(); Library.forgetAll(); Things.forgetAll(); Work.told = "Forgotten. Your files are still in your places." }
                     }
                     Words("Takes every place and the list of your things out of KueVault on this phone. The files, papers included, stay where they are.", 12, K.Soft, lines = 3)
+                    }
                 }
 
                 // 7. Your Kue apps
