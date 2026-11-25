@@ -71,6 +71,7 @@ class MainActivity : ComponentActivity() {
         Sound.init(this)
         Views.init(this)
         Lyrics.init(this)
+        PlayPrefs.init(this)
         SoundMatch.init(this)
         Backup.init(this)
         SpotifyLink.init(this)
@@ -135,6 +136,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // Kept upright when chosen in Settings (CloudPlayer's "portrait lock").
+        requestedOrientation = if (PlayPrefs.portraitLock) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         readNotices()
         if (signedIn) Sync.later(1000)
         lifecycleScope.launch(Dispatchers.IO) { Updates.checkAndFetch(applicationContext) }

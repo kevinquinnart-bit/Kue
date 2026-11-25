@@ -175,7 +175,18 @@ object Playing {
             }
             return play(onPhone, chosen?.let { onPhone.indexOf(it) }?.takeIf { it >= 0 } ?: 0, shuffled)
         }
-        c.shuffleModeEnabled = shuffled
+        // Mobile data turned off for music (Settings › KueSounds › Playing): only songs saved on the phone, until Wi-Fi.
+        if (!PlayPrefs.mobileData && !Net.unmetered(appContext) && list.any { it.id !in Offline.saved }) {
+            val chosen = list.getOrNull(start)
+            val onPhone = list.filter { it.id in Offline.saved }
+            if (onPhone.isEmpty()) {
+                problem = "Mobile data is off for music in Settings, and these songs aren't saved on the phone."
+                return
+            }
+            return play(onPhone, chosen?.let { onPhone.indexOf(it) }?.takeIf { it >= 0 } ?: 0, shuffled)
+        }
+        // Shuffle stays as it was last left, when chosen in Settings.
+        c.shuffleModeEnabled = shuffled || (PlayPrefs.rememberShuffle && PlayPrefs.lastShuffle)
         // Music always plays at its own speed: a podcast's faster speed stays with podcasts.
         c.setPlaybackSpeed(1f)
         val first = if (shuffled) list.indices.random() else start.coerceIn(0, list.size - 1)
@@ -342,7 +353,31 @@ object Playing {
     }
 
     fun flipShuffle() {
-        controller?.let { it.shuffleModeEnabled = !it.shuffleModeEnabled }
+        controller?.let {
+            it.shuffleModeEnabled = !it.shuffleModeEnabled
+            PlayPrefs.lastShuffle = it.shuffleModeEnabled
+        }
+    }
+
+    /** Moves an item in the line-up from [from] to [to] (Up next, dragged). */
+    fun move(from: Int, to: Int) {
+        val c = controller ?: return
+        if (from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount && from != to) c.moveMediaItem(from, to)
+    }
+
+    /** Clears the line-up, keeping only the song playing now. */
+    fun clearQueue() {
+        val c = controller ?: return
+        val now = c.currentMediaItemIndex
+        if (now < 0) return
+        if (now + 1 < c.mediaItemCount) c.removeMediaItems(now + 1, c.mediaItemCount)
+        if (now > 0) c.removeMediaItems(0, now)
+    }
+
+    /** The songs lined up, in order, by their ids (for Save as a playlist). */
+    fun queueIds(): List<String> {
+        val c = controller ?: return emptyList()
+        return (0 until c.mediaItemCount).map { c.getMediaItemAt(it).mediaId }.filter { id -> !id.startsWith("pod:") && !id.startsWith("radio:") }
     }
 
     /** Off, then the whole list again and again, then this one song again and again. */

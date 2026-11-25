@@ -144,3 +144,42 @@ object SingAlong : BaseAudioProcessor() {
         out.flip()
     }
 }
+
+/**
+ * Set as ringtone (Kevin, 25 November 2026, from CloudPlayer): the song is copied into the phone's Ringtones folder and
+ * made the ringtone. Android asks once for KueSounds to be allowed to change the phone's settings; without that the
+ * song is still in the Ringtones folder to choose in the phone's own sound settings.
+ */
+object Ringtone {
+    /** Does it. Gives back what happened, in words for the screen. Call off the main thread. */
+    suspend fun set(context: Context, t: Track): String {
+        val ending = Library.ending(t.fileName).ifEmpty { "mp3" }
+        val local = Offline.fileFor(t) ?: File(context.cacheDir, "ringtone." + ending).also { Drive.download(t.id, it) }
+        val resolver = context.contentResolver
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, (t.artist + " - " + t.title).replace(Regex("""[\\/:*?"<>|]"""), " ").take(80) + "." + ending)
+            put(android.provider.MediaStore.MediaColumns.MIME_TYPE, t.mime.ifBlank { "audio/mpeg" })
+            put(android.provider.MediaStore.Audio.Media.TITLE, t.title)
+            put(android.provider.MediaStore.Audio.Media.ARTIST, t.artist)
+            put(android.provider.MediaStore.Audio.Media.IS_RINGTONE, true)
+            put(android.provider.MediaStore.Audio.Media.IS_MUSIC, false)
+            if (android.os.Build.VERSION.SDK_INT >= 29) put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, android.os.Environment.DIRECTORY_RINGTONES)
+        }
+        val collection = if (android.os.Build.VERSION.SDK_INT >= 29) android.provider.MediaStore.Audio.Media.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+        else android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val uri = resolver.insert(collection, values) ?: return "The phone wouldn't take the song as a ringtone."
+        resolver.openOutputStream(uri)?.use { out -> local.inputStream().use { it.copyTo(out) } } ?: return "The phone wouldn't take the song as a ringtone."
+        if (local.parentFile == context.cacheDir) local.delete()
+        if (android.os.Build.VERSION.SDK_INT >= 23 && !android.provider.Settings.System.canWrite(context)) {
+            runCatching {
+                context.startActivity(
+                    android.content.Intent(android.provider.Settings.ACTION_MANAGE_WRITE_SETTINGS, android.net.Uri.parse("package:" + context.packageName))
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }
+            return "It's in your phone's Ringtones now. To make it the ringtone straight from here, allow KueSounds on the page that opened, then try again; or choose it in the phone's Sound settings."
+        }
+        android.media.RingtoneManager.setActualDefaultRingtoneUri(context, android.media.RingtoneManager.TYPE_RINGTONE, uri)
+        return "\"" + t.title + "\" is your ringtone now."
+    }
+}

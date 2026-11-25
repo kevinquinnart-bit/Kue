@@ -575,6 +575,23 @@ object Scanner {
         return full
     }
 
+    /**
+     * Starts the library again from the Drive (Settings › KueSounds › Your music; CloudPlayer's reset): every song's
+     * details, covers and lookups are dropped and found again. Favourites, playlists and songs saved on the phone are
+     * kept elsewhere and stay.
+     */
+    fun startAgain() {
+        if (job?.isActive == true || Fixer.running) return
+        synchronized(this) {
+            runCatching { artFolder().deleteRecursively() }
+            // At the newest layout, so none of the one-off updates for older libraries runs on the new one.
+            data = LibraryData(version = 9)
+            save()
+        }
+        note("library started again by hand")
+        scan()
+    }
+
     /** The photo of an artist or group, once found. */
     fun artistPicture(name: String): File? = data.artistPictures[name]?.takeIf { it.isNotEmpty() }?.let { File(it) }?.takeIf { it.exists() }
 

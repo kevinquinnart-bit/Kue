@@ -36,6 +36,7 @@ class PlaybackService : MediaSessionService() {
         Scanner.init(this)
         Offline.init(this)
         Podcasts.init(this)
+        PlayPrefs.init(this)
         val upstream = OkHttpDataSource.Factory(Drive.http)
         // Every request for a song carries the current Drive pass, fetched fresh when the old one has run out.
         // Only requests to Google's Drive: a podcast comes from its own website, which must never see the pass.
@@ -46,7 +47,7 @@ class PlaybackService : MediaSessionService() {
         }
         // The sound goes through Sing along on its way out, so the singer can be turned down (Kevin, 25 November 2026).
         val sink = androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(this)
-            .setAudioProcessors(arrayOf<androidx.media3.common.audio.AudioProcessor>(SingAlong)).build()
+            .setAudioProcessors(arrayOf<androidx.media3.common.audio.AudioProcessor>(SingAlong, Leveller)).build()
         val renderers = androidx.media3.exoplayer.RenderersFactory { handler, _, audioListener, _, metadataOutput ->
             arrayOf(
                 androidx.media3.exoplayer.audio.MediaCodecAudioRenderer(this, androidx.media3.exoplayer.mediacodec.MediaCodecSelector.DEFAULT, handler, audioListener, sink),
@@ -56,7 +57,7 @@ class PlaybackService : MediaSessionService() {
         }
         val player = ExoPlayer.Builder(this, renderers)
             // Songs saved on the phone are read from there; the rest come from the Drive with the pass.
-            .setMediaSourceFactory(DefaultMediaSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(this, withPass)))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(androidx.media3.datasource.DefaultDataSource.Factory(this, keptAsPlayed(withPass))))
             .setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), true)
             .setHandleAudioBecomingNoisy(true)
             .setWakeMode(C.WAKE_MODE_NETWORK)
@@ -87,6 +88,18 @@ class PlaybackService : MediaSessionService() {
         })
         listenToPodcasts(player)
         listenForSound(player)
+        listenForPlaces(player)
+        listenForHeadphones(player)
+        // Settings › KueSounds › Playing: pausing for other apps, even loudness (Kevin, 25 November 2026).
+        val prefsApply = {
+            player.setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MUSIC).build(), PlayPrefs.audioFocus)
+            Leveller.on = PlayPrefs.evenLoudness && Sound.kindOf(player.currentMediaItem?.mediaId.orEmpty()) == Sound.Kind.MUSIC
+        }
+        prefsApply()
+        PlayPrefs.onChange = { prefsApply() }
+        player.addListener(object : Player.Listener {
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) { prefsApply() }
+        })
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
@@ -119,6 +132,96 @@ class PlaybackService : MediaSessionService() {
             override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) = apply()
         })
         Sound.onChange = { apply() }
+    }
+
+    private var cache: androidx.media3.datasource.cache.SimpleCache? = null
+
+    /**
+     * Songs played lately kept on the phone (Settings › KueSounds › Playing, 500 MB unless changed), so playing one
+     * again needs no downloading. Live radio isn't kept: it never ends. The size takes effect when KueSounds next starts.
+     */
+    private fun keptAsPlayed(upstream: androidx.media3.datasource.DataSource.Factory): androidx.media3.datasource.DataSource.Factory {
+        val made = runCatching {
+            androidx.media3.datasource.cache.SimpleCache(
+                java.io.File(cacheDir, "played"),
+                androidx.media3.datasource.cache.LeastRecentlyUsedCacheEvictor(PlayPrefs.cacheMb.coerceAtLeast(50) * 1_000_000L),
+                androidx.media3.database.StandaloneDatabaseProvider(this),
+            )
+        }.getOrNull() ?: return upstream
+        cache = made
+        return androidx.media3.datasource.cache.CacheDataSource.Factory()
+            .setCache(made)
+            .setUpstreamDataSourceFactory(upstream)
+            // The Drive's address for a song carries no pass, so it is the same every time: kept by it.
+            .setFlags(androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR or androidx.media3.datasource.cache.CacheDataSource.FLAG_IGNORE_CACHE_FOR_UNSET_LENGTH_REQUESTS)
+    }
+
+    /**
+     * Long songs carry on where they were left (Settings › KueSounds › Playing; CloudPlayer's "bookmarking"): a song of
+     * 10 minutes or more has its place kept every 10 seconds and on pause, starts there next time, and loses it once
+     * played to the end.
+     */
+    private fun listenForPlaces(player: ExoPlayer) {
+        fun long(): Boolean {
+            val id = player.currentMediaItem?.mediaId.orEmpty()
+            return PlayPrefs.keepPlace && id.isNotEmpty() && !id.startsWith("pod:") && !id.startsWith("radio:") &&
+                player.duration >= PlayPrefs.keepPlaceMinutes * 60_000L
+        }
+        val keep = object : Runnable {
+            override fun run() {
+                if (player.isPlaying && long()) PlayPrefs.keepPlaceOf(player.currentMediaItem!!.mediaId, player.currentPosition)
+                tick.postDelayed(this, 10_000)
+            }
+        }
+        tick.postDelayed(keep, 10_000)
+        var current = ""
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                if (!isPlaying && long() && player.playbackState != Player.STATE_ENDED) PlayPrefs.keepPlaceOf(player.currentMediaItem!!.mediaId, player.currentPosition)
+            }
+
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                // The song before played to its end: its place goes.
+                if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO && current.isNotEmpty()) PlayPrefs.keepPlaceOf(current, 0)
+                current = mediaItem?.mediaId.orEmpty()
+                if (!PlayPrefs.keepPlace || current.startsWith("pod:") || current.startsWith("radio:")) return
+                val at = PlayPrefs.place(current)
+                if (at > 5_000) player.seekTo(at)
+            }
+
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_ENDED && current.isNotEmpty()) PlayPrefs.keepPlaceOf(current, 0)
+            }
+        })
+    }
+
+    private var devices: android.media.AudioDeviceCallback? = null
+
+    /**
+     * Plays when headphones are plugged in, or Bluetooth headphones, a speaker or a car connect (Settings › KueSounds ›
+     * Playing; each off until turned on). Works while KueSounds' player is running: after anything has been played.
+     */
+    private fun listenForHeadphones(player: ExoPlayer) {
+        val audio = getSystemService(android.media.AudioManager::class.java) ?: return
+        val wired = setOf(
+            android.media.AudioDeviceInfo.TYPE_WIRED_HEADPHONES, android.media.AudioDeviceInfo.TYPE_WIRED_HEADSET, android.media.AudioDeviceInfo.TYPE_USB_HEADSET,
+        )
+        val bluetooth = setOf(android.media.AudioDeviceInfo.TYPE_BLUETOOTH_A2DP, android.media.AudioDeviceInfo.TYPE_BLE_HEADSET, android.media.AudioDeviceInfo.TYPE_BLE_SPEAKER)
+        var first = true
+        val callback = object : android.media.AudioDeviceCallback() {
+            override fun onAudioDevicesAdded(added: Array<out android.media.AudioDeviceInfo>) {
+                // The first call lists what is already connected: not a new arrival.
+                if (first) { first = false; return }
+                val outs = added.filter { it.isSink }
+                val go = (PlayPrefs.headsetPlay && outs.any { it.type in wired }) || (PlayPrefs.bluetoothPlay && outs.any { it.type in bluetooth })
+                if (go && player.mediaItemCount > 0 && !player.isPlaying) {
+                    if (player.playbackState == Player.STATE_IDLE) player.prepare()
+                    player.play()
+                }
+            }
+        }
+        devices = callback
+        audio.registerAudioDeviceCallback(callback, android.os.Handler(android.os.Looper.getMainLooper()))
     }
 
     private val tick = android.os.Handler(android.os.Looper.getMainLooper())
@@ -178,6 +281,10 @@ class PlaybackService : MediaSessionService() {
     override fun onDestroy() {
         tick.removeCallbacksAndMessages(null)
         Sound.onChange = null
+        PlayPrefs.onChange = null
+        devices?.let { d -> runCatching { getSystemService(android.media.AudioManager::class.java)?.unregisterAudioDeviceCallback(d) } }
+        runCatching { cache?.release() }
+        cache = null
         effects?.release()
         effects = null
         scope.cancel()

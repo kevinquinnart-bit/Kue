@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Music keeps playing with the screen off, with its controls on the lock screen. -->
@@ -8,6 +9,8 @@
     <!-- Saving songs to the phone and fixing the music files carry on with the screens closed. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Set as ringtone: making a song the phone's ringtone (asked for once, on Android's own page). -->
+    <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <!-- The equaliser, deep bass, surround and louder on KueSounds' own sound (25 November 2026). -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
