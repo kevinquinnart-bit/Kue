@@ -57,6 +57,8 @@ data class About(
     val plot: String = "", val genre: String = "", val year: String = "", val rating: String = "", val minutes: Int = 0,
     /** The trailer, as the provider gives it: a YouTube video's id or address. May be missing in lists kept from older versions. */
     val trailer: String? = null,
+    /** A wide picture of it, for the top of its page (Kevin, 25 November 2026); empty when the provider gives none. */
+    val backdrop: String = "",
 ) {
     /** "2024 · Drama · 7.1 · 1 h 52 min", leaving out whatever isn't known. */
     val line: String
@@ -624,6 +626,8 @@ object Provider {
             rating = About.rating(field("rating")),
             minutes = minutes,
             trailer = field("youtube_trailer").ifBlank { null },
+            // A list of pictures, or one: the first.
+            backdrop = runCatching { info.get("backdrop_path")?.let { b -> if (b.isJsonArray) b.asJsonArray.firstOrNull()?.asString else b.asString } }.getOrNull().orEmpty().trim(),
         )
     }
 

@@ -61,6 +61,24 @@ class FilmsExtrasTest {
         assertTrue("…and its poster shows the tick", rule.onAllNodes(androidx.compose.ui.test.hasContentDescription("Watched"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
     }
 
+    @Test fun okOnAFilmOpensItsOwnPageAndPlayPlaysIt() {
+        // Kevin, 25 November 2026: OK on a film opens its page (the wide picture, Play, the trailer, the star); Play plays.
+        val film = Film("6", "Another Film", "", "1", "http://films.example/6.mp4")
+        val library = Library(listOf(Category("1", "UK")), listOf(Channel("10", "BBC One", "", "1", "http://tv.example/10.ts", 0)), listOf(Category("1", "Drama")), listOf(film))
+        var played = 0
+        rule.setContent { FilmsForChecks(library, Favourites(context)) { played++ } }
+        rule.waitForIdle()
+        press(Key.DirectionDown)
+        press(Key.DirectionRight)
+        press(Key.DirectionDown)
+        press(Key.DirectionCenter)
+        rule.waitForIdle()
+        assertEquals("OK on the film doesn't play it straight away", 0, played)
+        assertTrue("its page opens with Play on it", shown("Play"))
+        press(Key.DirectionCenter)
+        assertEquals("OK on Play plays it", 1, played)
+    }
+
     @Test fun watchingIntoTheCreditsMarksItWatched() {
         val url = "http://films.example/9.mp4"
         Positions.keep(context, url, 40 * 60_000L, 100 * 60_000L, "Nine", "")

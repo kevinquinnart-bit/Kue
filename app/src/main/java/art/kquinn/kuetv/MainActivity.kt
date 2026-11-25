@@ -50,6 +50,9 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -1613,6 +1616,11 @@ private class BrowseState(saved: Map<String, String> = emptyMap()) {
     val showGrid = LazyGridState()
     var openShow by mutableStateOf<Show?>(null)
 
+    /** A film's own page, open (Kevin, 25 November 2026); with the catalogue's item when it came from one. */
+    var openFilm by mutableStateOf<Film?>(null)
+    var openFilmCat by mutableStateOf<CatItem?>(null)
+    var filmJustClosed by mutableStateOf(false)
+
     /** The film and the series the remote is on, for the lines above the posters saying what they are about. */
     var onFilm by mutableStateOf<Film?>(null)
     var onShow by mutableStateOf<Show?>(null)
@@ -1690,6 +1698,12 @@ private val LocalPanels = staticCompositionLocalOf<Panels?> { null }
 class SmallTvLink(val open: (() -> Unit)?, val back: FocusRequester?)
 
 val LocalSmallTv = staticCompositionLocalOf { SmallTvLink(null, null) }
+
+/**
+ * The small TV, drawn by Movies and Series themselves beside the strip about the poster the remote is on, so the rows of
+ * posters run the full width under it (Kevin, 25 November 2026). Null when it is turned off or nothing has played.
+ */
+private val LocalSideTv = staticCompositionLocalOf<(@Composable (Modifier) -> Unit)?> { null }
 
 /** The key the player is opened with from the small TV, so Back lands on the small TV again. */
 private const val SMALL_TV_KEY = "smalltv"
@@ -2349,14 +2363,21 @@ private fun MainScreen(
                 }
             }
             Section.FILMS -> {
-                Categories(library.filmCategories + filmCatalogues.map(catCategory), filmCategory, state.filmCategoryList) {
+                // A film's own page fills the width; the categories come back with it closed.
+                val openFilm = state.openFilm
+                if (openFilm == null) Categories(library.filmCategories + filmCatalogues.map(catCategory), filmCategory, state.filmCategoryList) {
                     if (it != state.filmCategory) {
                         state.filmCategory = it
                         scope.launch { state.filmGrid.scrollToItem(0) }
                     }
                 }
                 val filmCatalogue = filmCatalogues.firstOrNull { it.key == filmCategory }
-                if (filmCatalogue != null) CatalogueGrid(filmCatalogue, state, resume, playCat, fill())
+                if (openFilm == null && filmCatalogue != null) CatalogueGrid(filmCatalogue, state, resume, { item, key ->
+                    // A film from a catalogue opens its own page too.
+                    state.resumeKey = key
+                    state.openFilmCat = item
+                    state.openFilm = Film(Catalogue.PREFIX + item.id, item.name, item.poster, filmCatalogue.key, "", rating = ratingOf(item.about.rating))
+                }, fill())
                 else {
                 val sort = remember(Listing.changes) { Listing.sort(context) }
                 val hideWatched = remember(Listing.changes) { Listing.hideWatched(context) }
@@ -2427,7 +2448,34 @@ private fun MainScreen(
                         onPeople = { peopleOf = film },
                     )
                 }
-                Column(fill()) {
+                if (openFilm != null) {
+                    val cat = state.openFilmCat
+                    val playIt = {
+                        if (cat != null) playCat(cat, "film:" + openFilm.id)
+                        else onPlay(listOf(Playable(openFilm.name, openFilm.url, find = finder("movie", openFilm.name, null, null), poster = openFilm.poster)), 0, false, "film:" + openFilm.id)
+                    }
+                    // Like it: the provider's films in the same category, the most like it first by rating.
+                    val alike = remember(openFilm.id, library) {
+                        library.films.filter { it.categoryId == openFilm.categoryId && it.id != openFilm.id }.sortedByDescending { it.rating }.take(24)
+                    }
+                    FilmPage(
+                        openFilm, cat?.about ?: state.filmAbout[openFilm.id], library.account, state,
+                        favourite = Favourites.key(openFilm, login) in favs,
+                        alike = alike,
+                        onPlay = playIt,
+                        onFavourite = { favourites.toggle(Favourites.key(openFilm, login)) },
+                        onMore = { menuFilm = openFilm },
+                        onOpen = { other -> state.openFilmCat = null; state.openFilm = other },
+                        modifier = fill(),
+                    )
+                } else Column(fill()) {
+                    LaunchedEffect(Unit) {
+                        if (!state.filmJustClosed) return@LaunchedEffect
+                        state.filmJustClosed = false
+                        withFrameNanos { }
+                        withFrameNanos { }
+                        runCatching { resume.requestFocus() }
+                    }
                     Heading((if (shown.size == 1) "1 movie" else "${shown.size} movies") + menuHint("film"))
                     ListingChips(watchedToo = true)
                     // Until the remote is on a film in this list, the first one is told about, so the box is never empty.
@@ -2440,10 +2488,10 @@ private fun MainScreen(
                             delay(600)
                             value = withContext(Dispatchers.IO) { runCatching { Provider.filmAbout(account, onFilm.id) }.getOrDefault(About()) }.also { state.filmAbout[onFilm.id] = it }
                         }
-                        AboutStrip(onFilm?.name, about, onFilm?.poster.orEmpty(), onFilm?.let { f -> if (f.id.startsWith(Catalogue.PREFIX)) "movie" to f.id.removePrefix(Catalogue.PREFIX) else null })
+                        StripWithTv { AboutStrip(onFilm?.name, about, onFilm?.poster.orEmpty(), onFilm?.let { f -> if (f.id.startsWith(Catalogue.PREFIX)) "movie" to f.id.removePrefix(Catalogue.PREFIX) else null }) }
                     }
                     LazyVerticalGrid(
-                        columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(4),
+                        columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(5),
                         state = state.filmGrid,
                         modifier = Modifier.fillMaxSize().focusRestorer(),
                         contentPadding = PaddingValues(4.dp),
@@ -2455,7 +2503,8 @@ private fun MainScreen(
                             val favKey = Favourites.key(film, login)
                             Poster(
                                 film.name, film.poster,
-                                { onPlay(listOf(Playable(film.name, film.url, find = finder("movie", film.name, null, null), poster = film.poster)), 0, false, key) },
+                                // OK opens the film's own page; Play is there (Kevin, 25 November 2026).
+                                { state.resumeKey = key; state.openFilmCat = null; state.openFilm = film },
                                 if (key == resumeKey) Modifier.focusRequester(resume) else Modifier,
                                 favourite = favKey in favs,
                                 onHold = { menuFilm = film },
@@ -3276,12 +3325,14 @@ private fun MainScreen(
         ) {
         TopBar(section, menuFocus, bar) { section = it }
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Pane(this, null).body()
             // The small TV: on every section the same size and place as Live TV's, on the right, with what is on
             // that channel underneath. Live TV draws its own, which follows the remote down the list. The TV Guide's
             // grid also draws its own, in its top right corner, so the grid can run the full width of the screen.
+            // Movies and Series draw it themselves, beside the strip above the posters (Kevin, 25 November 2026).
             val small = LastLive.item
             val wanted = remember(Choices.changes) { Choices.smallTv(context) }
+            val sideTv: (@Composable (Modifier) -> Unit)? = if (small != null && wanted) ({ m -> MiniTv(small, m.focusProperties { canFocus = !bar.inside }) }) else null
+            CompositionLocalProvider(LocalSideTv provides sideTv) { Pane(this, null).body() }
             val guideGrid = section == Section.GUIDE && state.guide.open == null
             // A series open: what it is about goes under the small TV, in place of the channel's programme details.
             // In Search, the same for the film or series the remote is on.
@@ -3289,7 +3340,8 @@ private fun MainScreen(
             // series the remote is on is told about in the bigger strip above the posters (Kevin, 23 November 2026).
             val seriesOpen = if (section == Section.SERIES) state.openShow?.let { InfoCard(it.name, "", it.about, if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null) }
                 else if (section == Section.SEARCH) state.searchInfo else null
-            if ((small != null && wanted && section != Section.LIVE && !guideGrid) || seriesOpen != null) {
+            val ownTv = section == Section.FILMS || section == Section.SERIES
+            if (!ownTv && ((small != null && wanted && section != Section.LIVE && !guideGrid) || seriesOpen != null)) {
                 val group = remember(small?.url, library) { small?.let { s -> library.groups.firstOrNull { g -> g.versions.any { it.channel.url == s.url } } } }
                 val narrow = section == Section.FILMS || section == Section.SERIES
                 Column(Modifier.width(if (narrow) 220.dp else SIDE_WIDTH).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -3958,7 +4010,7 @@ private fun Pane.SeriesPane(
     val account = library.account
     val opened = state.openShow
     if (opened != null && (account != null || opened.id.startsWith(Catalogue.PREFIX))) {
-        EpisodePage(opened, account, state, resume, finder, onPlay, library.shows)
+        EpisodePage(opened, account, state, resume, finder, onPlay, library.shows, favourites)
         return
     }
     if ((account == null || library.shows.isEmpty()) && catalogues.isEmpty()) {
@@ -4015,10 +4067,10 @@ private fun Pane.SeriesPane(
         ListingChips(watchedToo = false)
         // Until the remote is on a series in this list, the first one is told about, so the box is never empty.
         if (!LocalPhone.current) remember(shown, state.onShow) { state.onShow?.takeIf { s -> shown.any { it.id == s.id } } ?: shown.firstOrNull() }.let { sh ->
-            AboutStrip(sh?.name, sh?.about, sh?.poster.orEmpty(), sh?.let { if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null })
+            StripWithTv { AboutStrip(sh?.name, sh?.about, sh?.poster.orEmpty(), sh?.let { if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null }) }
         }
         LazyVerticalGrid(
-            columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(4),
+            columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(5),
             state = state.showGrid,
             modifier = Modifier.fillMaxSize().focusRestorer(),
             contentPadding = PaddingValues(4.dp),
@@ -4057,6 +4109,8 @@ private fun Pane.EpisodePage(
     onPlay: (items: List<Playable>, index: Int, live: Boolean, key: String) -> Unit,
     /** The provider's series, so another series an actor was in opens the provider's own copy when it has one. */
     shows: List<Show> = emptyList(),
+    /** For the star on the series' page. */
+    favourites: Favourites? = null,
 ) {
     BackHandler { state.showJustClosed = true; state.openShow = null }
     // Cast: who is in it (from TVmaze), then the other series one of them was in.
@@ -4139,107 +4193,98 @@ private fun Pane.EpisodePage(
         if (!back) runCatching { first.requestFocus() }
     }
 
-    Column(fill()) {
-        Heading(show.name)
-        val result = loaded
-        val episodes = result?.getOrNull()
+    // The series' own page (Kevin, 25 November 2026, from his pictures of another app): its wide picture across the top,
+    // its name, rating, what it is about and the buttons; under them a row of episode pictures for each season, then
+    // more like it. Order, cast and downloading the next episodes are under the "more" button.
+    val context = LocalContext.current
+    val result = loaded
+    val episodes = result?.getOrNull().orEmpty()
+    val watchedNow = Watched.changes
+    val placesNow = Positions.changes
+    val playables = remember(episodes, finder) {
+        episodes.map { Playable(show.name + " · S" + it.season + " E" + it.number, it.url, find = finder("series", show.name, it.season, it.number), poster = show.poster) }
+    }
+    val seriesPoster by produceState(show.poster, show.id) {
+        if (value.isBlank()) value = withContext(Dispatchers.IO) { PosterLookup.poster("series", show.name) }
+    }
+    val indexPictures by produceState(emptyMap<Pair<Int, Int>, String>(), show.id, episodes) {
+        if (episodes.any { it.image.isBlank() }) value = withContext(Dispatchers.IO) { PosterLookup.episodePictures(show.name) }
+    }
+    val pictureOf: (Episode) -> String = { e -> e.image.ifBlank { indexPictures[e.season to e.number].orEmpty() }.ifBlank { seriesPoster } }
+    val newest = remember(Listing.changes, show.id) { EpisodeOrder.newestFirst(context, show.id) }
+    // Seasons newest first or oldest first, as chosen for the series; the episodes in each in their own order.
+    val seasons = remember(episodes, newest) {
+        episodes.withIndex().groupBy { it.value.season }.toList().sortedBy { if (newest) -it.first else it.first }
+    }
+    // Play: the first episode not watched yet, in the series' own order; the first of all when every one is.
+    val next = remember(episodes, watchedNow) { episodes.indexOfFirst { !Watched.isWatched(context, it.url) }.takeIf { it >= 0 } ?: 0 }
+    val isFavourite = favourites?.let { Favourites.key(show) in it.keys } == true
+    var more by remember(show.id) { mutableStateOf(false) }
+    if (more) {
+        val toFetch = episodes.filter { it.url.isNotBlank() && !Watched.isWatched(context, it.url) }.take(5)
+        OptionsBox(show.name, listOfNotNull(
+            ("Order: " + (if (newest) "newest first" else "oldest first") + " · OK to change") to { EpisodeOrder.set(context, show.id, !newest) },
+            "Cast, and their other series" to { castAsked = true },
+            toFetch.takeIf { it.isNotEmpty() }?.let { list ->
+                ("Download the next " + (if (list.size == 1) "episode" else list.size.toString() + " episodes")) to {
+                    val problems = list.mapNotNull { e -> Downloads.start(context, show.name + " · S" + e.season + " E" + e.number, e.url) }
+                    kueToast(context, if (problems.size == list.size) problems.first() else "Downloading " + (list.size - problems.size) + " episodes, one after another. They will be in Recordings.")
+                }
+            },
+        )) { more = false }
+    }
+    val alike = remember(show.id, shows) { shows.filter { it.categoryId == show.categoryId && it.id != show.id }.sortedByDescending { ratingOf(it.about.rating) }.take(24) }
+    TitlePage(
+        name = show.name,
+        about = show.about,
+        type = "series",
+        imdb = if (show.id.startsWith(Catalogue.PREFIX)) show.id.removePrefix(Catalogue.PREFIX) else null,
+        poster = seriesPoster,
+        catalogue = if (show.id.startsWith(Catalogue.PREFIX)) "series" to show.id.removePrefix(Catalogue.PREFIX) else null,
+        modifier = fill(),
+        first = first,
+        buttons = { focusFirst ->
+            HeroButton(KueSettings.Icons.BACK, null, { state.showJustClosed = true; state.openShow = null }, if (episodes.isEmpty()) focusFirst else Modifier)
+            if (episodes.isNotEmpty()) {
+                val e = episodes[next]
+                HeroButton(KueSettings.Icons.PLAY, "Play S" + e.season + " E" + e.number, { onPlay(playables, next, false, "episode:" + e.id) }, focusFirst, main = true)
+            }
+            val trailer = show.about.trailer
+            if (!trailer.isNullOrBlank()) HeroButton(KueSettings.Icons.VIDEO, "Trailer", { if (!openTrailer(context, trailer)) kueToast(context, "Nothing on this device can play YouTube trailers.") })
+            if (favourites != null) HeroButton(KueSettings.Icons.STAR, null, { favourites.toggle(Favourites.key(show)) }, filled = isFavourite)
+            HeroButton(KueSettings.Icons.MORE, null, { more = true }, filled = true)
+        },
+    ) {
         when {
-            result == null -> Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentInk) }
-            episodes == null -> Note(result.exceptionOrNull()?.message ?: "Couldn't load the episodes for this series.")
-            episodes.isEmpty() -> Note(if (show.id.startsWith(Catalogue.PREFIX)) "No episodes are listed for this series." else "Your provider listed no episodes for this series.")
-            else -> {
-                val label: (Episode) -> String = { e ->
-                    val plain = "Episode " + e.number
-                    if (e.title.isBlank() || e.title.equals(plain, ignoreCase = true)) plain else e.number.toString() + ". " + e.title
-                }
-                val playables = remember(episodes, finder) {
-                    episodes.map { Playable(show.name + " · S" + it.season + " E" + it.number, it.url, find = finder("series", show.name, it.season, it.number), poster = show.poster) }
-                }
-                val context = LocalContext.current
-                val watchedNow = Watched.changes
-                val placesNow = Positions.changes
-                // Every episode with a picture (Kevin, 25 November 2026): the provider's, else the film index's for that
-                // episode, else the series' own poster. The series' poster too, when the provider gives none.
-                val seriesPoster by produceState(show.poster, show.id) {
-                    if (value.isBlank()) value = withContext(Dispatchers.IO) { PosterLookup.poster("series", show.name) }
-                }
-                val indexPictures by produceState(emptyMap<Pair<Int, Int>, String>(), show.id, episodes) {
-                    if (episodes.any { it.image.isBlank() }) value = withContext(Dispatchers.IO) { PosterLookup.episodePictures(show.name) }
-                }
-                val pictureOf: (Episode) -> String = { e -> e.image.ifBlank { indexPictures[e.season to e.number].orEmpty() }.ifBlank { seriesPoster } }
-                // Oldest first, as the provider lists them, or newest first: chosen for each series.
-                val newest = remember(Listing.changes, show.id) { EpisodeOrder.newestFirst(context, show.id) }
-                val inOrder = remember(episodes, newest) {
-                    episodes.withIndex().let { all -> if (newest) all.sortedWith(compareByDescending<IndexedValue<Episode>> { it.value.season }.thenByDescending { it.value.number }) else all.toList() }
-                }
-                LazyColumn(Modifier.fillMaxSize(), state = state.episodeList) {
-                    // The series' poster, with the order and the trailer beside it.
-                    item(key = "order") {
-                        Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
-                            if (seriesPoster.isNotBlank()) {
-                                Box(Modifier.size(width = 96.dp, height = 144.dp).clip(RoundedCornerShape(10.dp)).background(Looks.faint)) {
-                                    AsyncImage(model = seriesPoster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                }
-                            }
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                FocusRow("Order: " + if (newest) "newest first" else "oldest first", { EpisodeOrder.set(context, show.id, !newest) }, look = Look.OTHER, below = "OK to change")
-                                FocusRow("Cast", { castAsked = true }, look = Look.OTHER, below = "Who is in it, and their other series")
-                                // The next five not yet watched, in the series' own order, saved to watch offline.
-                                val toFetch = episodes.filter { it.url.isNotBlank() && !Watched.isWatched(context, it.url) }.take(5)
-                                if (toFetch.isNotEmpty()) {
-                                    FocusRow("⬇ Download the next " + (if (toFetch.size == 1) "episode" else toFetch.size.toString() + " episodes"), {
-                                        val problems = toFetch.mapNotNull { e -> Downloads.start(context, show.name + " · S" + e.season + " E" + e.number, e.url) }
-                                        kueToast(
-                                            context,
-                                            if (problems.size == toFetch.size) problems.first()
-                                            else "Downloading " + (toFetch.size - problems.size) + " episodes, one after another. They will be in Recordings.",
-                                        )
-                                    }, look = Look.OTHER, below = "To watch with no internet · the ones not watched yet")
-                                }
-                                // The series' trailer, when the provider gives one.
-                                val trailer = show.about.trailer
-                                if (!trailer.isNullOrBlank()) {
-                                    FocusRow("▶ Watch the trailer", {
-                                        if (!openTrailer(context, trailer)) kueToast(context, "Nothing on this device can play YouTube trailers.")
-                                    }, look = Look.OTHER)
-                                }
-                            }
-                        }
-                    }
-                    inOrder.forEachIndexed { at, (i, episode) ->
-                        if (at == 0 || inOrder[at - 1].value.season != episode.season) {
-                            item(key = "season:" + episode.season) {
-                                Box(Modifier.padding(top = if (at == 0) 0.dp else 14.dp)) { Heading("Season " + episode.season) }
-                            }
-                        }
-                        item(key = episode.id) {
-                            val key = "episode:" + episode.id
-                            val watched = watchedNow >= 0 && Watched.isWatched(context, episode.url)
-                            val part = if (placesNow >= 0) Positions.progress(context, episode.url) else null
-                            FocusRow(
-                                (if (watched) "✓ " else "") + label(episode),
+            result == null -> item(key = "loading") { Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentInk) } }
+            result.getOrNull() == null -> item(key = "problem") { Note(result.exceptionOrNull()?.message ?: "Couldn't load the episodes for this series.") }
+            episodes.isEmpty() -> item(key = "none") { Note(if (show.id.startsWith(Catalogue.PREFIX)) "No episodes are listed for this series." else "Your provider listed no episodes for this series.") }
+        }
+        for ((season, list) in seasons) {
+            item(key = "season:$season") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Season $season", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, top = 8.dp))
+                    val inOrder = if (newest) list.sortedByDescending { it.value.number } else list
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
+                        items(inOrder, key = { it.value.id }) { (i, e) ->
+                            val key = "episode:" + e.id
+                            val watched = watchedNow >= 0 && Watched.isWatched(context, e.url)
+                            EpisodeCard(
+                                e, pictureOf(e), watched, if (placesNow >= 0) Positions.progress(context, e.url) else null,
                                 { onPlay(playables, i, false, key) },
-                                (if (at == 0) Modifier.focusRequester(first) else Modifier)
-                                    .then(if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier),
-                                leading = pictureOf(episode).let { pic -> if (pic.isBlank()) null else ({ EpisodePicture(pic) }) },
-                                // Hold OK: marks it watched, or not watched.
-                                onHold = {
-                                    Watched.set(context, episode.url, !watched)
+                                {
+                                    Watched.set(context, e.url, !watched)
                                     kueToast(context, if (watched) "Marked as not watched." else "Marked as watched.", long = false)
                                 },
-                                below = listOfNotNull(
-                                    episode.aired.takeIf { it.isNotBlank() }?.let { "First aired " + EpisodeOrder.airedWords(it) },
-                                    when {
-                                        watched -> "Watched · hold OK to mark as not watched"
-                                        part != null -> (part * 100).toInt().toString() + "% watched"
-                                        else -> null
-                                    },
-                                ).joinToString(" · ").ifEmpty { null },
+                                if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier,
                             )
                         }
                     }
                 }
             }
+        }
+        if (alike.isNotEmpty()) item(key = "alike") {
+            AlikeRow(alike.map { Triple(it.name, it.poster, ratingOf(it.about.rating)) }, lookup = "series") { i -> state.openShow = alike[i] }
         }
     }
 }
@@ -7951,4 +7996,216 @@ private fun Fold(id: String, title: String, modifier: Modifier = Modifier, below
     // the end that turns down when it is open; the rows inside sit under it, set in a little.
     FocusRow(title, { Folds.flip(id) }, modifier, look = Look.OTHER, below = below, arrow = open, bold = true, fill = Looks.faint2)
     if (open) Column(Modifier.padding(start = if (phone) 12.dp else 20.dp), verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) { content() }
+}
+
+// --------------------------------------------------------------------------------------------- a film's or series' own page
+
+/** Movies' and Series' strip about the poster the remote is on, with the small TV beside it (Kevin, 25 November 2026). */
+@Composable
+private fun StripWithTv(strip: @Composable () -> Unit) {
+    val tv = LocalSideTv.current
+    if (tv == null || LocalPhone.current) { strip(); return }
+    val tall = 138.dp * LocalTextScale.current
+    Row(Modifier.fillMaxWidth().height(tall), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Box(Modifier.weight(1f)) { strip() }
+        tv(Modifier.fillMaxHeight().aspectRatio(16f / 9f))
+    }
+}
+
+/** A button on a film's or series' page: a drawn icon, and words when it needs them. Yellow under the remote. */
+@Composable
+private fun HeroButton(icon: String, label: String?, onClick: () -> Unit, modifier: Modifier = Modifier, main: Boolean = false, filled: Boolean = false) {
+    var focused by remember { mutableStateOf(false) }
+    val ink = if (focused || main) Color.Black else Ink
+    Row(
+        modifier.height(52.dp).clip(RoundedCornerShape(12.dp)).focusRing(focused)
+            .background(if (focused) Accent else if (main) Accent.copy(alpha = 0.85f) else Panel.copy(alpha = 0.85f))
+            .onFocusChanged { focused = it.isFocused }
+            .press(onClick, null)
+            .padding(horizontal = if (label == null) 14.dp else 20.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        KueSettings.Icon(icon, 24.dp, ink, 2.2f, filled = filled || icon == KueSettings.Icons.PLAY)
+        if (label != null) Text(label, color = ink, fontSize = 18.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    }
+}
+
+/** The rating out of 10 as five of KueTV's own stars, halves included. */
+@Composable
+private fun Stars(rating: Float) {
+    val five = (rating / 2f).coerceIn(0f, 5f)
+    Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        for (i in 0 until 5) {
+            val part = (five - i).coerceIn(0f, 1f)
+            Box(Modifier.size(24.dp)) {
+                KueSettings.Icon(KueSettings.Icons.STAR, 24.dp, Ink.copy(alpha = 0.45f), 1.8f)
+                if (part >= 0.75f) KueSettings.Icon(KueSettings.Icons.STAR, 24.dp, Ink, 1.8f, filled = true)
+                else if (part >= 0.25f) Box(Modifier.width(12.dp).height(24.dp).clipToBounds()) {
+                    Box(Modifier.wrapContentWidth(Alignment.Start, unbounded = true)) { KueSettings.Icon(KueSettings.Icons.STAR, 24.dp, Ink, 1.8f, filled = true) }
+                }
+            }
+        }
+        Spacer(Modifier.width(6.dp))
+        Text(String.format(java.util.Locale.UK, "%.1f", rating), color = Soft, fontSize = 15.sp)
+    }
+}
+
+/**
+ * A film's or series' own page (Kevin, 25 November 2026, from pictures of another app he likes): its wide picture
+ * across the whole page, its name, what kind it is, its stars and what it is about, then the buttons; under them
+ * [rows] (a series' seasons, more like it). The picture dims once the remote goes down to the rows.
+ */
+@Composable
+private fun TitlePage(
+    name: String,
+    about: About?,
+    type: String,
+    imdb: String?,
+    poster: String,
+    catalogue: Pair<String, String>?,
+    modifier: Modifier,
+    first: FocusRequester,
+    rating: Float = ratingOf(about?.rating.orEmpty()),
+    buttons: @Composable RowScope.(Modifier) -> Unit,
+    rows: androidx.compose.foundation.lazy.LazyListScope.() -> Unit,
+) {
+    val phone = LocalPhone.current
+    val fetched by produceState<CatItem?>(null, name, catalogue) {
+        val (kind, id) = catalogue ?: return@produceState
+        if (about != null && about.plot.isNotBlank()) return@produceState
+        value = withContext(Dispatchers.IO) { runCatching { AddOns.meta(kind, id) }.getOrNull() }
+    }
+    val shown = if (about == null || about.plot.isBlank()) fetched?.about ?: about else about
+    val picture = poster.ifBlank { fetched?.poster.orEmpty() }
+    val wide by produceState(about?.backdrop.orEmpty(), name) {
+        if (value.isBlank()) value = withContext(Dispatchers.IO) { Backdrops.of(type, name, imdb) }
+    }
+    var heroFocused by remember { mutableStateOf(true) }
+    val shade by androidx.compose.animation.core.animateFloatAsState(if (heroFocused) 1f else 0.35f, label = "hero")
+    Box(modifier.clip(RoundedCornerShape(16.dp)).background(Page)) {
+        // The poster first, then the wide picture over it: a wide picture that isn't found leaves the poster showing.
+        if (picture.isNotBlank()) AsyncImage(model = picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = shade * 0.6f })
+        if (wide.isNotBlank()) AsyncImage(model = wide, contentDescription = null, contentScale = ContentScale.Crop, alignment = Alignment.TopCenter, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = shade })
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.horizontalGradient(0f to Page.copy(alpha = 0.94f), 0.5f to Page.copy(alpha = 0.6f), 1f to Page.copy(alpha = 0.1f))))
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.45f to Color.Transparent, 1f to Page.copy(alpha = 0.95f))))
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(start = if (phone) 14.dp else 32.dp, end = if (phone) 14.dp else 20.dp, top = if (phone) 14.dp else 24.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            item(key = "hero") {
+                Column(
+                    Modifier.fillMaxWidth(if (phone) 1f else 0.66f).onFocusChanged { heroFocused = it.hasFocus },
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(name, color = Ink, fontSize = if (phone) 26.sp else 34.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    val line = shown?.line.orEmpty()
+                    if (line.isNotBlank()) Text(line, color = AccentInk, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (rating > 0f) Stars(rating)
+                    val plot = shown?.plot.orEmpty()
+                    if (plot.isNotBlank()) Box(Modifier.padding(top = 2.dp)) { AutoScrollText(plot, Ink, 17.sp, 4, msPerDot = 45) }
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        buttons(Modifier.focusRequester(first))
+                    }
+                }
+            }
+            rows()
+        }
+    }
+}
+
+/** One episode: its picture with "Episode 3" across the bottom, a tick when watched, a bar when part way through. */
+@Composable
+private fun EpisodeCard(e: Episode, picture: String, watched: Boolean, progress: Float?, onPlay: () -> Unit, onHold: () -> Unit, modifier: Modifier = Modifier) {
+    var focused by remember { mutableStateOf(false) }
+    val wide = if (LocalPhone.current) 168.dp else 208.dp
+    Column(Modifier.width(wide), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(
+            modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(10.dp))
+                .border((3 + Looks.outlineWidth).dp, if (focused) Accent else Color.Transparent, RoundedCornerShape(10.dp))
+                .background(Looks.faint)
+                .onFocusChanged { focused = it.isFocused }
+                .press(onPlay, onHold),
+        ) {
+            if (picture.isNotBlank()) AsyncImage(model = picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color(0xCC000000))))
+            Text("Episode " + e.number, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold, modifier = Modifier.align(Alignment.BottomStart).padding(start = 10.dp, bottom = if (progress != null && !watched) 12.dp else 8.dp))
+            if (watched) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0xFF6BD08A), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)) {
+                KueSettings.Icon(KueSettings.Icons.TICK, 16.dp, Color.Black, 2.6f)
+            }
+            if (progress != null && !watched) Box(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(5.dp).background(Color(0x99000000))) {
+                Box(Modifier.fillMaxWidth(progress.coerceIn(0.02f, 1f)).fillMaxHeight().background(Accent))
+            }
+        }
+        val plain = "Episode " + e.number
+        if (e.title.isNotBlank() && !e.title.equals(plain, ignoreCase = true)) {
+            Text(e.title, color = if (focused) AccentInk else Soft, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+/** More like it: a row of posters; OK on one opens its own page. */
+@Composable
+private fun AlikeRow(items: List<Triple<String, String, Float>>, lookup: String = "movie", onOpen: (Int) -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("More like this", color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 8.dp, top = 8.dp))
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
+            itemsIndexed(items) { i, (name, poster, rating) ->
+                Box(Modifier.width(if (LocalPhone.current) 112.dp else 150.dp)) { Poster(name, poster, { onOpen(i) }, rating = rating, lookup = lookup) }
+            }
+        }
+    }
+}
+
+/** A film's own page: Play, the trailer, the star, everything else under "more", and more films like it. */
+@Composable
+private fun FilmPage(
+    film: Film,
+    about: About?,
+    account: Account?,
+    state: BrowseState,
+    favourite: Boolean,
+    alike: List<Film>,
+    onPlay: () -> Unit,
+    onFavourite: () -> Unit,
+    onMore: () -> Unit,
+    onOpen: (Film) -> Unit,
+    modifier: Modifier,
+) {
+    val context = LocalContext.current
+    BackHandler { state.openFilm = null; state.openFilmCat = null; state.filmJustClosed = true }
+    val told by produceState(about, film.id) {
+        if (value != null || account == null || film.id.startsWith(Catalogue.PREFIX)) return@produceState
+        value = withContext(Dispatchers.IO) { runCatching { Provider.filmAbout(account, film.id) }.getOrDefault(About()) }.also { state.filmAbout[film.id] = it }
+    }
+    val poster by produceState(film.poster, film.id) {
+        if (value.isBlank()) value = withContext(Dispatchers.IO) { PosterLookup.poster("movie", film.name) }
+    }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(film.id) {
+        withFrameNanos { }
+        withFrameNanos { }
+        runCatching { first.requestFocus() }
+    }
+    val imdb = if (film.id.startsWith(Catalogue.PREFIX)) film.id.removePrefix(Catalogue.PREFIX) else null
+    TitlePage(
+        name = film.name, about = told, type = "movie", imdb = imdb, poster = poster,
+        catalogue = imdb?.let { "movie" to it },
+        modifier = modifier, first = first,
+        rating = if (film.rating > 0f) film.rating else ratingOf(told?.rating.orEmpty()),
+        buttons = { focusFirst ->
+            HeroButton(KueSettings.Icons.BACK, null, { state.openFilm = null; state.openFilmCat = null; state.filmJustClosed = true })
+            HeroButton(KueSettings.Icons.PLAY, "Play", onPlay, focusFirst, main = true)
+            val trailer = told?.trailer
+            if (!trailer.isNullOrBlank()) HeroButton(KueSettings.Icons.VIDEO, "Trailer", { if (!openTrailer(context, trailer)) kueToast(context, "Nothing on this device can play YouTube trailers.") })
+            HeroButton(KueSettings.Icons.STAR, null, onFavourite, filled = favourite)
+            HeroButton(KueSettings.Icons.MORE, null, onMore, filled = true)
+        },
+    ) {
+        if (alike.isNotEmpty()) item(key = "alike") {
+            AlikeRow(alike.map { Triple(it.name, it.poster, it.rating) }) { i -> onOpen(alike[i]) }
+        }
+    }
 }

@@ -116,6 +116,22 @@ object PosterLookup {
     }
 }
 
+/**
+ * A wide picture for the top of a film's or series' page (Kevin, 25 November 2026: the full-width poster), from the film
+ * index by the title's own number, found by name once. Empty when the title isn't in the index.
+ */
+object Backdrops {
+    private val found = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** [type] "movie" or "series"; [imdb] the title's number when it is already known. Call off the screen's thread. */
+    fun of(type: String, name: String, imdb: String? = null): String = found.getOrPut("$type|$name") {
+        runCatching {
+            val id = imdb?.takeIf { it.startsWith("tt") } ?: AddOns.idFor(type, name) ?: return@runCatching ""
+            "https://images.metahub.space/background/medium/$id/img"
+        }.getOrDefault("")
+    }
+}
+
 /** Each series' episode order: oldest first (as the provider lists them) or newest first. Kept on this device. */
 object EpisodeOrder {
     private fun prefs(context: Context) = context.getSharedPreferences("listing", Context.MODE_PRIVATE)
