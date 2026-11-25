@@ -65,6 +65,18 @@ android {
         buildConfig = true
     }
 
+    // Besides the whole app (for first installs), one half per kind of chip: updates download only their own
+    // half, much smaller (Kevin, 25 November 2026: updates to be as quick as they can be). The Play bundle is
+    // split by the store itself.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("armeabi-v7a", "arm64-v8a")
+            isUniversalApk = true
+        }
+    }
+
     packaging {
         resources {
             excludes += setOf("META-INF/versions/9/OSGI-INF/MANIFEST.MF", "META-INF/DEPENDENCIES", "META-INF/LICENSE*", "META-INF/NOTICE*")

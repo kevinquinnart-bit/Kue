@@ -76,6 +76,12 @@
 
         <!-- Hears back from the phone's installer when a newer KueVault is put on. -->
         <receiver android:name=".UpdateReceiver" android:exported="false" />
+        <!-- Android saying the update is on: a notice offers to open the app again. -->
+        <receiver android:name=".UpdatedReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Hands a downloaded newer KueVault to the installer, and a file being opened to the app that opens it. -->
         <provider

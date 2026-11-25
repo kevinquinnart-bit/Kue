@@ -69,7 +69,10 @@ jobs:
           # The download (updates itself), and the Google Play version as the bundle the store takes.
           ./gradlew :app:assembleDirectRelease :app:bundlePlayRelease --stacktrace
           mkdir -p dist
-          cp app/build/outputs/apk/direct/release/app-direct-release.apk dist/KueVault.apk
+          cp app/build/outputs/apk/direct/release/app-direct-universal-release.apk dist/KueVault.apk
+          # Each kind of chip's own half, which updates download.
+          for abi in armeabi-v7a arm64-v8a; do cp app/build/outputs/apk/direct/release/app-direct-$abi-release.apk dist/KueVault-$abi.apk; done
+          ls -l dist
           cp app/build/outputs/bundle/playRelease/app-play-release.aab dist/KueVault-play.aab
           printf 'KueVault, version %s\n' "$VERSION_NAME" > dist/NOTES.md
           # What the app reads each time it opens, to know whether a newer version is waiting.
@@ -87,6 +90,8 @@ jobs:
           name: KueVault (${{ env.VERSION_NAME }})
           files: |
             dist/KueVault.apk
+            dist/KueVault-armeabi-v7a.apk
+            dist/KueVault-arm64-v8a.apk
             dist/KueVault-play.aab
           body_path: dist/NOTES.md
           prerelease: false
