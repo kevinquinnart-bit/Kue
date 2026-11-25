@@ -300,10 +300,25 @@ object SpotifyLink {
         val id = clientId()
         if (id.isEmpty()) { problem = "Put in your Spotify Client ID first (below)."; return }
         if (!installed(context)) { problem = "The Spotify app isn't on this device. Install it and sign in, then try again."; return }
-        problem = ""
+        // Said on screen straight away, and in the report at every step (Kevin, 25 November 2026: Connect "doesn't do
+        // anything, doesn't reject or accept", and nothing was written down to show why).
+        problem = "Connecting to Spotify…"
+        val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+        Scanner.note("spotify: Connect pressed; Spotify app " + (runCatching { context.packageManager.getPackageInfo(SPOTIFY_APP, 0).versionName }.getOrNull() ?: "?") +
+            ", Client ID " + id.take(6) + "…, kit sees Spotify: " + runCatching { com.spotify.android.appremote.api.SpotifyAppRemote.isSpotifyInstalled(context) }.getOrDefault(false))
+        // No answer at all after 25 seconds: said, so Connect never just sits there.
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            if (!answered.get()) {
+                Scanner.note("spotify: no answer from the Spotify app after 25 seconds")
+                problem = "Spotify didn't answer. Open the Spotify app, play any song for a second, come back and tap Connect again."
+            }
+        }, 25_000)
         val params = com.spotify.android.appremote.api.ConnectionParams.Builder(id).setRedirectUri(REDIRECT).showAuthView(true).build()
         com.spotify.android.appremote.api.SpotifyAppRemote.connect(context, params, object : com.spotify.android.appremote.api.Connector.ConnectionListener {
             override fun onConnected(r: com.spotify.android.appremote.api.SpotifyAppRemote) {
+                answered.set(true)
+                Scanner.note("spotify: connected")
+                problem = ""
                 remote = r
                 connected = true
                 r.playerApi.subscribeToPlayerState().setEventCallback { s ->
@@ -317,6 +332,8 @@ object SpotifyLink {
             }
 
             override fun onFailure(error: Throwable) {
+                answered.set(true)
+                Scanner.note("spotify: refused: " + error.javaClass.simpleName + " · " + error.message)
                 connected = false
                 problem = when (error.javaClass.simpleName) {
                     "CouldNotFindSpotifyApp" -> "The Spotify app isn't on this device."

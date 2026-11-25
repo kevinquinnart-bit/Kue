@@ -25,6 +25,8 @@
         <package android:name="art.kquinn.kuetv" />
         <package android:name="art.kquinn.kuesounds" />
         <package android:name="art.kquinn.kuevault" />
+        <!-- The Spotify app, which KueSounds drives (Android 11 and later hide other apps unless named here). -->
+        <package android:name="com.spotify.music" />
     </queries>
 
     <application
