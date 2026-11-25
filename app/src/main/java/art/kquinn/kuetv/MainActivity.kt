@@ -1120,6 +1120,14 @@ private fun FocusRow(
     icon: Glyph? = null,
     /** A drawn Kue icon by its lines (KueSettings.Icons), for the settings groups and profile pictures. */
     drawn: String? = null,
+    /** Settings, as in KueSounds and KueVault (Kevin, 25 November 2026): the drawn icon sits in a rounded box of its own. */
+    boxed: Boolean = false,
+    /** An arrow at the end of the row: pointing right (false) for something that opens, down (true) when it is open. */
+    arrow: Boolean? = null,
+    /** The words in bold whatever the row's state: a settings group's or section's name. */
+    bold: Boolean = false,
+    /** The row's own background in place of the usual one, while the remote isn't on it: a section's raised box. */
+    fill: Color? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
     // A tick, cross, star or box written at the start of the words is drawn, never a symbol from the phone's font (Kevin, 24 Nov 2026).
@@ -1136,6 +1144,7 @@ private fun FocusRow(
             .background(
                 when {
                     focused || button == Look.MAIN -> Accent
+                    fill != null -> fill
                     chosen -> Looks.faint2
                     playing -> Accent.copy(alpha = 0.16f)
                     button == Look.OTHER -> Panel
@@ -1155,13 +1164,19 @@ private fun FocusRow(
     ) {
         leading?.invoke()
         if (icon != null) KueIcon(icon, if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else AccentInk, Modifier.size((textSize.value * 1.2f).dp))
-        if (lines != null) KueSettings.Icon(lines, (textSize.value * 1.25f).dp, if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else AccentInk, 2f, filled = drawn == null && markFilled)
-        Column {
+        val iconInk = if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else AccentInk
+        if (lines != null && boxed) {
+            Box(
+                Modifier.size(if (phoneRow) 42.dp else 46.dp).clip(RoundedCornerShape(12.dp)).background(if (focused) Color.Black.copy(alpha = 0.12f) else Looks.faint),
+                contentAlignment = Alignment.Center,
+            ) { KueSettings.Icon(lines, if (phoneRow) 24.dp else 26.dp, iconInk, 1.8f) }
+        } else if (lines != null) KueSettings.Icon(lines, (textSize.value * 1.25f).dp, iconInk, 2f, filled = drawn == null && markFilled)
+        Column(if (arrow != null) Modifier.weight(1f) else Modifier) {
             Text(
                 words,
                 color = if (focused || button == Look.MAIN) Color.Black else if (playing) Accent else Ink,
                 fontSize = textSize,
-                fontWeight = if (focused || chosen || playing || button == Look.MAIN) FontWeight.Bold else FontWeight.Normal,
+                fontWeight = if (bold || focused || chosen || playing || button == Look.MAIN) FontWeight.Bold else FontWeight.Normal,
                 // A phone has no remote to scroll a long row along, so there the words run onto more lines instead.
                 maxLines = if (phoneRow) 3 else 1,
                 // Too long for the row: cut short with "…", and while the remote is on it, scrolls along to show the rest.
@@ -1175,6 +1190,12 @@ private fun FocusRow(
                     overflow = if (focused) TextOverflow.Clip else TextOverflow.Ellipsis,
                     modifier = if (focused) Modifier.basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 1_200) else Modifier,
                 )
+            }
+        }
+        if (arrow != null) {
+            val turn by androidx.compose.animation.core.animateFloatAsState(if (arrow) 90f else 0f, androidx.compose.animation.core.tween(220), label = "arrow")
+            Box(Modifier.graphicsLayer { rotationZ = turn }) {
+                KueSettings.Icon(KueSettings.Icons.CHEVRON, if (phoneRow) 18.dp else 20.dp, if (focused || button == Look.MAIN) Color.Black else Soft, 2.2f)
             }
         }
     }
@@ -2496,7 +2517,8 @@ private fun MainScreen(
                 Column(
                     // The rows can run past the bottom of a TV screen, so the list scrolls as the remote moves down it.
                     fill().verticalScroll(rememberScrollState()),
-                    verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top,
+                    // A gap between the cards and rows on the TV too, as in KueSounds and KueVault (25 November 2026).
+                    verticalArrangement = Arrangement.spacedBy(if (phone) 8.dp else 6.dp),
                 ) {
                     if (page == null) {
                         Heading("Settings")
@@ -2553,49 +2575,55 @@ private fun MainScreen(
                                     // The VPN has a page of its own, opened straight away.
                                     name, { if (name == "VPN") Vpn.screenOpen = true else { leftFrom[0] = null; state.settingsPage = name } },
                                     (if (name == leftFrom[0]) Modifier.focusRequester(backTo) else Modifier).then(extra),
-                                    look = Look.OTHER, below = summary,
+                                    look = Look.OTHER, below = summary, bold = true, arrow = false, fill = Looks.faint2,
                                 )
                             }
                         }
-                        val inGroup = Modifier.padding(start = if (phone) 18.dp else 28.dp)
-                        val groupRow: @Composable (String, String, String, String?) -> Unit = { title, lines, summary, opens ->
+                        val inGroup = Modifier
+                        // Each group a card, as in KueSounds and KueVault (Kevin, 25 November 2026): its icon in a box, its name
+                        // in bold over how it is set, an arrow at the end. Open, its rows sit inside the same card.
+                        val groupRow: @Composable (String, String, String, String?, (@Composable () -> Unit)?) -> Unit = { title, lines, summary, opens, inside ->
                             val isOpen = state.settingsGroup == title
-                            FocusRow(
-                                title, {
-                                    if (opens != null) { leftFrom[0] = null; state.settingsPage = opens }
-                                    else state.settingsGroup = if (isOpen) "" else title
-                                },
-                                if (opens != null && opens == leftFrom[0]) Modifier.focusRequester(backTo) else Modifier,
-                                look = Look.OTHER, below = summary, drawn = lines, chosen = isOpen,
-                            )
+                            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Panel)) {
+                                FocusRow(
+                                    title, {
+                                        if (opens != null) { leftFrom[0] = null; state.settingsPage = opens }
+                                        else state.settingsGroup = if (isOpen) "" else title
+                                    },
+                                    if (opens != null && opens == leftFrom[0]) Modifier.focusRequester(backTo) else Modifier,
+                                    look = Look.OTHER, below = summary, drawn = lines, boxed = true, bold = true,
+                                    arrow = if (opens != null) false else isOpen,
+                                )
+                                if (isOpen && inside != null) Column(
+                                    Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 2.dp, bottom = 12.dp),
+                                    verticalArrangement = Arrangement.spacedBy(if (phone) 8.dp else 6.dp),
+                                ) { inside() }
+                            }
                         }
                         // 1. Account
-                        groupRow("Account", KueSettings.Icons.ACCOUNT, summaryOf["Your things"].orEmpty(), "Your things")
+                        groupRow("Account", KueSettings.Icons.ACCOUNT, summaryOf["Your things"].orEmpty(), "Your things", null)
                         // 2. KueTV
-                        groupRow("KueTV", KueSettings.Icons.APP, "Watching, your channels, movies and series" + (if (phone) "" else ", this TV") + ", VPN", null)
-                        if (state.settingsGroup == "KueTV") {
+                        groupRow("KueTV", KueSettings.Icons.APP, "Watching, your channels, movies and series" + (if (phone) "" else ", this TV") + ", VPN", null) {
                             for (name in listOf("Watching", "Your channels", "Movies and series", "This TV", "VPN")) part(name, inGroup)
                         }
                         // 3. Look and feel
-                        groupRow("Look and feel", KueSettings.Icons.LOOK, summaryOf["Look and feel"].orEmpty(), "Look and feel")
+                        groupRow("Look and feel", KueSettings.Icons.LOOK, summaryOf["Look and feel"].orEmpty(), "Look and feel", null)
                         // 4. Notifications: the programme reminders set in the TV guide
                         val reminders = remember(Reminders.changes) { Reminders.all(context) }
-                        groupRow("Notifications", KueSettings.Icons.NOTICES, if (reminders.isEmpty()) "No programme reminders set" else "Programme reminders: " + reminders.size, null)
-                        if (state.settingsGroup == "Notifications") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
+                        groupRow("Notifications", KueSettings.Icons.NOTICES, if (reminders.isEmpty()) "No programme reminders set" else "Programme reminders: " + reminders.size, null) {
                             if (reminders.isEmpty()) Note("None set. In the TV guide, OK on a later programme sets a reminder.")
                             val clock = java.text.SimpleDateFormat("EEE d MMM, HH:mm", java.util.Locale.UK)
                             for (r in reminders) {
                                 FocusRow(
-                                    r.title, {}, look = Look.OTHER, below = r.channel + " · " + clock.format(java.util.Date(r.startMs)) + (if (phone) " · press and hold to take it off" else " · hold OK to take it off"),
+                                    r.title, {}, look = Look.OTHER, fill = Looks.faint2, below = r.channel + " · " + clock.format(java.util.Date(r.startMs)) + (if (phone) " · press and hold to take it off" else " · hold OK to take it off"),
                                     onHold = { Reminders.remove(context, r) },
                                 )
                             }
                         }
                         // 5. Backup and sync
-                        groupRow("Backup and sync", KueSettings.Icons.BACKUP, summaryOf["Backup and sync"].orEmpty(), "Backup and sync")
+                        groupRow("Backup and sync", KueSettings.Icons.BACKUP, summaryOf["Backup and sync"].orEmpty(), "Backup and sync", null)
                         // 6. Privacy and storage
-                        groupRow("Privacy and storage", KueSettings.Icons.PRIVACY, "What leaves this " + (if (phone) "phone" else "TV") + ", permissions", null)
-                        if (state.settingsGroup == "Privacy and storage") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
+                        groupRow("Privacy and storage", KueSettings.Icons.PRIVACY, "What leaves this " + (if (phone) "phone" else "TV") + ", permissions", null) {
                             Fold("|What leaves this " + (if (phone) "phone" else "TV"), "What leaves this " + (if (phone) "phone" else "TV")) {
                             Note(
                                 "KueTV talks only to what you see in it: your TV provider, the add-ons, free channel lists and guides you choose, " +
@@ -2603,12 +2631,11 @@ private fun MainScreen(
                                     "recordings, and GitHub for updates. There is no KueTV server.",
                             )
                             }
-                            FocusRow("Permissions", { KueSettings.openPermissions(context) }, look = Look.OTHER, below = "KueTV's page in the " + (if (phone) "phone's" else "TV's") + " own settings")
-                            if (!phone) FocusRow("Storage", { leftFrom[0] = null; state.settingsPage = "This TV" }, look = Look.OTHER, below = "In This TV, with the TV's space and apps")
+                            FocusRow("Permissions", { KueSettings.openPermissions(context) }, look = Look.OTHER, bold = true, arrow = false, fill = Looks.faint2, below = "KueTV's page in the " + (if (phone) "phone's" else "TV's") + " own settings")
+                            if (!phone) FocusRow("Storage", { leftFrom[0] = null; state.settingsPage = "This TV" }, look = Look.OTHER, bold = true, arrow = false, fill = Looks.faint2, below = "In This TV, with the TV's space and apps")
                         }
                         // 7. Your Kue apps
-                        groupRow("Your Kue apps", KueSettings.Icons.KUE, "KueSounds, KueVault", null)
-                        if (state.settingsGroup == "Your Kue apps") Column(inGroup, verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) {
+                        groupRow("Your Kue apps", KueSettings.Icons.KUE, "KueSounds, KueVault", null) {
                             for (app in KueSettings.apps.filter { it.pkg != context.packageName }) {
                                 val launch = context.packageManager.getLeanbackLaunchIntentForPackage(app.pkg) ?: context.packageManager.getLaunchIntentForPackage(app.pkg)
                                 FocusRow(
@@ -2618,12 +2645,12 @@ private fun MainScreen(
                                         }.isSuccess
                                         if (!opened) kueToast(context, "Get " + app.name + " from " + app.download)
                                     },
-                                    look = Look.OTHER, drawn = KueSettings.Icons.APP, below = if (launch != null) "On this " + (if (phone) "phone" else "TV") + " · OK to open" else "Not on this " + (if (phone) "phone" else "TV") + " · OK to get it",
+                                    look = Look.OTHER, drawn = KueSettings.Icons.APP, boxed = true, bold = true, arrow = false, fill = Looks.faint2, below = if (launch != null) "On this " + (if (phone) "phone" else "TV") + " · OK to open" else "Not on this " + (if (phone) "phone" else "TV") + " · OK to get it",
                                 )
                             }
                         }
                         // 8. Help and about
-                        groupRow("Help and about", KueSettings.Icons.HELP, summaryOf["Help and about"].orEmpty(), "Help and about")
+                        groupRow("Help and about", KueSettings.Icons.HELP, summaryOf["Help and about"].orEmpty(), "Help and about", null)
                     } else {
                     Heading("Settings › $page")
                     // The remote lands on the page's first row.
@@ -5791,7 +5818,7 @@ private fun CategoriesScreen(library: Library, onDone: () -> Unit) {
                 val kindOpen = sorting == kind.key || Folds.isOpen(foldId)
                 item(key = "h:" + kind.key) {
                     FocusRow(
-                        kind.title, { if (sorting == null) Folds.flip(foldId) }, look = Look.OTHER, chosen = kindOpen, drawn = KueSettings.Icons.CHEVRON,
+                        kind.title, { if (sorting == null) Folds.flip(foldId) }, look = Look.OTHER, arrow = kindOpen, bold = true, fill = Looks.faint2,
                         below = (kind.categories.size - kind.categories.count { it.id in off }).toString() + " of " + kind.categories.size + " showing" + if (kindOpen && sorting == null) " · OK to close" else "",
                     )
                 }
@@ -5847,7 +5874,7 @@ private fun CategoriesScreen(library: Library, onDone: () -> Unit) {
                 val hiddenNames = library.channels.filter { it.id in hiddenIds }.groupBy { it.name }
                 val hiddenOpen = Folds.isOpen("Categories|hidden")
                 item(key = "h:channels") {
-                    FocusRow("Hidden channels", { Folds.flip("Categories|hidden") }, look = Look.OTHER, chosen = hiddenOpen, drawn = KueSettings.Icons.CHEVRON,
+                    FocusRow("Hidden channels", { Folds.flip("Categories|hidden") }, look = Look.OTHER, arrow = hiddenOpen, bold = true, fill = Looks.faint2,
                         below = hiddenNames.size.toString() + " hidden" + if (hiddenOpen) " · OK to close" else "")
                 }
                 if (!hiddenOpen) Unit else if (hiddenNames.isEmpty()) {
@@ -7920,6 +7947,8 @@ internal object Folds {
 private fun Fold(id: String, title: String, modifier: Modifier = Modifier, below: String? = null, content: @Composable () -> Unit) {
     val phone = LocalPhone.current
     val open = Folds.isOpen(id)
-    FocusRow(title, { Folds.flip(id) }, modifier, look = Look.OTHER, chosen = open, drawn = KueSettings.Icons.CHEVRON, below = if (open) "OK to close" else below)
-    if (open) Column(Modifier.padding(start = if (phone) 14.dp else 24.dp), verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) { content() }
+    // Drawn as KueSounds' and KueVault's sections (Kevin, 25 November 2026): a raised box, the name in bold, an arrow at
+    // the end that turns down when it is open; the rows inside sit under it, set in a little.
+    FocusRow(title, { Folds.flip(id) }, modifier, look = Look.OTHER, below = below, arrow = open, bold = true, fill = Looks.faint2)
+    if (open) Column(Modifier.padding(start = if (phone) 12.dp else 20.dp), verticalArrangement = if (phone) Arrangement.spacedBy(8.dp) else Arrangement.Top) { content() }
 }
