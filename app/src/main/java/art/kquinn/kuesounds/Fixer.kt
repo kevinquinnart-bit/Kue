@@ -56,6 +56,7 @@ object Fixer {
 
     /** Fixes [albums], asking for the edit permission first when it hasn't been given. */
     fun fix(context: Context, albums: List<Album>) {
+        // Fixed or stuck, every song is accounted for; Fix only starts on albums with something left to do.
         val app = context.applicationContext
         if (Google.canEdit) start(app, albums) else askPermission { start(app, albums) }
     }
@@ -85,10 +86,35 @@ object Fixer {
 
     fun isWaiting(al: Album): Boolean = synchronized(waiting) { al.key in waiting }
 
+    /**
+     * A song whose file got stuck last time (Kevin, 25 November 2026: "skip but record any it gets stuck on and do
+     * the rest"): skipped by Fix, listed in Settings with why, and tried again only with "Try the stuck ones again".
+     */
+    fun stuck(t: Track, d: LibraryData = Scanner.data): Boolean = t.id in d.fixProblems
+
+    /** The album's songs still to fix, the stuck ones apart. */
+    fun toDo(al: Album, d: LibraryData = Scanner.data): List<Track> =
+        al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) && !stuck(it, d) }
+
+    /** Whether Fix has anything to do on this album: matched, and a song left that isn't stuck. */
+    fun hasWork(al: Album, d: LibraryData = Scanner.data): Boolean = canFix(al, d) && toDo(al, d).isNotEmpty()
+
+    /** True for a run started by "Try the stuck ones again": the stuck songs are tried too. */
+    @Volatile private var retrying = false
+
     /** Adds albums to fix and starts the work, which carries on with the screens closed. */
-    fun start(context: Context, albums: List<Album>) {
-        synchronized(waiting) { albums.filter { canFix(it) && !isFixed(it) }.forEach { waiting += it.key } }
+    fun start(context: Context, albums: List<Album>, retry: Boolean = false) {
+        if (retry) retrying = true
+        synchronized(waiting) { albums.filter { canFix(it) && (if (retry) !isFixed(it) else hasWork(it)) }.forEach { waiting += it.key } }
         WorkService.start(context)
+    }
+
+    /** Tries the stuck songs once more. */
+    fun retryStuck(context: Context) {
+        val d = Scanner.data
+        val albums = Library.albums(d.tracks).filter { al -> al.tracks.any { stuck(it, d) } }
+        val app = context.applicationContext
+        if (Google.canEdit) start(app, albums, retry = true) else askPermission { start(app, albums, retry = true) }
     }
 
     val hasWork: Boolean get() = synchronized(waiting) { waiting.isNotEmpty() }
@@ -109,8 +135,14 @@ object Fixer {
                 val al = Library.albums(Scanner.data.tracks).firstOrNull { it.key == key } ?: continue  // fresh, not the screens' copy
                 // A single of its own has no catalogue record: no list of songs, and no cover (the compilation's comes out).
                 val own = key in Scanner.data.ownSingles && key !in Scanner.data.releases
-                val cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers } ?: continue
-                val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) }
+                val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) && (retrying || !stuck(it)) }
+                val cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers }
+                if (!own && cover == null) {
+                    // Recorded, not passed over without a word (it used to be): each song is listed as stuck, with why.
+                    songs.forEach { Scanner.fixTried(it.id, "Its album's cover isn't on this phone. Look for new music fetches it again.") }
+                    failed += songs.size
+                    continue
+                }
                 // 1 and 2: the album's own list of songs, with each one's proper name and artist.
                 status = "Fixing files · " + al.title + " · finding its songs' proper names"
                 progress(status)
@@ -129,7 +161,8 @@ object Fixer {
         } finally {
             status = ""
             running = false
-            lastResult = "Last time: " + count(fixedCount, "song") + " fixed" + (if (failed > 0) ", " + failed + " couldn't be" else "") +
+            retrying = false
+            lastResult = "Last time: " + count(fixedCount, "song") + " fixed" + (if (failed > 0) ", " + failed + " stuck and skipped" else "") +
                 (if (notLookedUp > 0) ". The music catalogue was busy for " + count(notLookedUp, "album") + ": press Fix again later." else ".")
             Scanner.note("fixing finished: $fixedCount fixed, $failed not fixed, $notLookedUp albums not looked up")
         }

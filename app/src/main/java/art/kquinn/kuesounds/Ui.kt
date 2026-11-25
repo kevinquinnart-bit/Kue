@@ -979,7 +979,7 @@ object Ui {
             Button("Play", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0); onClose() }
             Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0, shuffled = true); onClose() }
             CommonChoices(al.tracks, { adding = true }, onClose)
-            if (Fixer.canFix(al) && !Fixer.isFixed(al)) Button("Fix the files", main = false, icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { Fixer.fix(context, listOf(al)); onClose() }
+            if (Fixer.hasWork(al)) Button("Fix the files", main = false, icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { Fixer.fix(context, listOf(al)); onClose() }
             Button("Edit album name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editing = true }
             Button("Match every song by sound", main = false, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth()) { matching = true }
             if (Scanner.view.artists.any { it.name == al.artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(al.artist)) }
@@ -1240,8 +1240,8 @@ object Ui {
     private fun FixFiles(albums: List<Album>, label: String = "Fix the files", main: Boolean = false) {
         val context = LocalContext.current
         var sure by remember { mutableStateOf(false) }
-        val todo = albums.filter { Fixer.canFix(it) && !Fixer.isFixed(it) }
-        val songs = todo.sumOf { al -> al.tracks.count { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) } }
+        val todo = albums.filter { Fixer.hasWork(it) }
+        val songs = todo.sumOf { al -> Fixer.toDo(al).size }
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when {
                 // Nothing matched yet: nothing has been fixed either, so it mustn't say so.
@@ -1290,14 +1290,14 @@ object Ui {
             view.matched.isEmpty() -> Words(if (Scanner.running) "Nothing to fix until the albums are looked up." else "No albums matched yet.", 15, K.Soft, lines = 2)
             view.leftToFix == 0 -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 KueSettings.Icon(KueSettings.Icons.TICK, 22.dp, K.Accent, 2.6f)
-                Words("Every matched album is fixed.", 15, lines = 2)
+                Words(if (notFixed.isEmpty()) "Every matched album is fixed." else "Everything else is fixed.", 15, lines = 2)
             }
             else -> Words(count(view.leftToFix, "album") + " to fix", 17, bold = true)
         }
         if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 3)
         if (!Fixer.running && view.leftToFix > 0) FixFiles(view.matched, "Fix them", main = true)
         if (notFixed.isNotEmpty() && !Fixer.running) {
-            Words("Not fixed yet", 15, bold = true)
+            Words("Stuck, skipped: " + count(notFixed.size, "song"), 15, bold = true)
             for (t in notFixed) {
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable { held = t }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
@@ -1311,6 +1311,8 @@ object Ui {
                     MoreButton("Everything you can do with it") { held = t }
                 }
             }
+            val context = LocalContext.current
+            Button("Try the stuck ones again", main = false, icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { Fixer.retryStuck(context) }
         }
     }
 

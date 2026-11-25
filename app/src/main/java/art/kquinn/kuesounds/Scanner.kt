@@ -81,7 +81,7 @@ object Scanner {
                         songs = Library.songs(d.tracks),
                         withCover = albums.count { d.art[it.key]?.let { p -> File(p).exists() } == true },
                         matched = matched,
-                        leftToFix = matched.count { !Fixer.isFixed(it) },
+                        leftToFix = matched.count { Fixer.hasWork(it, d) },
                         lookedUp = albums.count { al -> al.tracks.all { it.checked } },
                     )
                 }
