@@ -42,7 +42,7 @@ class VpnPageTest {
         press(Key.DirectionDown)
         press(Key.DirectionDown)
         assertTrue("▼ ▼ reaches the one-press Dublin server button · remote on " + where(), remoteOn("Use VPN Jantit's Dublin server"))
-        assertTrue("…and there is still a way to add another VPN's file", shows("Or a link to its OpenVPN file"))
+        assertTrue("…and there is still a way to add another VPN's file, folded under Another VPN", shows("Another VPN"))
         assertTrue("…and says where to get a free Irish one", shows("Where to get a free Irish one"))
         assertTrue("…and offers the Dublin server's file in one press", shows("VPN Jantit's Dublin server"))
 
