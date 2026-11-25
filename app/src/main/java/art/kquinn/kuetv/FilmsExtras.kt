@@ -53,10 +53,11 @@ object Listing {
 
     private fun prefs(context: Context) = context.getSharedPreferences("listing", Context.MODE_PRIVATE)
 
-    // Kept under a new name: the old one counted from "Provider's order", and Top rated is the start now.
-    fun sort(context: Context): Int = prefs(context).getInt("sort2", 0).coerceIn(0, sorts.size - 1)
+    // Kept under a new name each time the start changes. 25 November 2026: Newest added is the start (Kevin: "the most
+    // recent is top of any listing"); for a series that is the one with the newest episode added.
+    fun sort(context: Context): Int = prefs(context).getInt("sort3", 1).coerceIn(0, sorts.size - 1)
     fun sort(context: Context, value: Int) {
-        prefs(context).edit().putInt("sort2", value).apply()
+        prefs(context).edit().putInt("sort3", value).apply()
         changes++
     }
 
@@ -84,10 +85,42 @@ object Listing {
         name.trim().replace(Regex("^(\\[[^]]*]|\\|[^|]*\\||[A-Z]{2,4}\\s*[-:|]\\s)\\s*"), "").replace(Regex("^(the|a|an)\\s+", RegexOption.IGNORE_CASE), "").trim()
 }
 
+/**
+ * Pictures for films and series the provider gives none for, and for episodes with none: from the film index, found
+ * by name, once each (Kevin, 25 November 2026: a picture on every show and every episode).
+ */
+object PosterLookup {
+    private val posters = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val episodes = java.util.concurrent.ConcurrentHashMap<String, Map<Pair<Int, Int>, String>>()
+
+    /** A name with the provider's tags, any year in brackets and a leading "The" left off, for searching. */
+    internal fun searchName(name: String): String =
+        Listing.plainName(name).replace(Regex("\\s*[\\[(][^\\])]*[\\])]"), "").replace(Regex("\\s+(19|20)\\d\\d$"), "").trim()
+
+    /** The poster for a film ("movie") or "series" called [name]; empty when none is found. Call off the screen's thread. */
+    fun poster(type: String, name: String): String = posters.getOrPut("$type|$name") {
+        runCatching {
+            val plain = searchName(name)
+            if (plain.isBlank()) return@runCatching ""
+            val found = AddOns.search(type, plain)
+            (found.firstOrNull { Listing.plainName(it.name).equals(plain, ignoreCase = true) } ?: found.firstOrNull())?.poster.orEmpty()
+        }.getOrDefault("")
+    }
+
+    /** Each episode's picture for the series called [name], by season and number; empty when none are found. Call off the screen's thread. */
+    fun episodePictures(name: String): Map<Pair<Int, Int>, String> = episodes.getOrPut(name) {
+        runCatching {
+            val show = AddOns.seriesByName(searchName(name)) ?: return@runCatching emptyMap()
+            AddOns.episodes(show.id).orEmpty().filter { it.image.isNotBlank() }.associate { (it.season to it.number) to it.image }
+        }.getOrDefault(emptyMap())
+    }
+}
+
 /** Each series' episode order: oldest first (as the provider lists them) or newest first. Kept on this device. */
 object EpisodeOrder {
     private fun prefs(context: Context) = context.getSharedPreferences("listing", Context.MODE_PRIVATE)
-    fun newestFirst(context: Context, showId: String): Boolean = prefs(context).getBoolean("newest.$showId", false)
+    // Newest first unless changed for that series (Kevin, 25 November 2026: the most recent at the top).
+    fun newestFirst(context: Context, showId: String): Boolean = prefs(context).getBoolean("newest.$showId", true)
     fun set(context: Context, showId: String, newest: Boolean) {
         prefs(context).edit().putBoolean("newest.$showId", newest).apply()
         Listing.touch()

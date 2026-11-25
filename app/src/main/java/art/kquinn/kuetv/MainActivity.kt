@@ -1815,6 +1815,9 @@ private class ChannelPick {
     val programmeList = LazyListState()
     var open by mutableStateOf<Channel?>(null)
 
+    /** Catch-up: the show open on a channel's page (its name as [CatchUpApps.plain] writes it), or null for all its shows. */
+    var openShow by mutableStateOf<String?>(null)
+
     /** Null: the programme list. -1: choosing a day. Otherwise: choosing a time on the day that starts then. */
     var pickDay by mutableStateOf<Long?>(null)
 
@@ -2434,6 +2437,7 @@ private fun MainScreen(
                                 onHold = { menuFilm = film },
                                 onFocus = { state.onFilm = film },
                                 rating = film.rating,
+                                lookup = "movie",
                                 watched = watchedNow >= 0 && Watched.isWatched(context, film.url),
                                 progress = Positions.changes.let { Positions.progress(context, film.url) },
                             )
@@ -2860,6 +2864,8 @@ private fun MainScreen(
                             )
                             val shiftOn = remember(Choices.changes) { Choices.timeShift(context) }
                             FocusRow("Pause and rewind live TV: " + if (shiftOn) "on" else "off", { Choices.timeShift(context, !shiftOn) }, look = Look.OTHER)
+                            val autoNext = remember(Choices.changes) { Choices.autoNext(context) }
+                            FocusRow("Play the next episode by itself: " + if (autoNext) "on" else "off", { Choices.autoNext(context, !autoNext) }, look = Look.OTHER, below = "After a 10 second countdown. Off: OK starts it")
                             val appFirst = remember(Choices.changes) { Choices.catchUpAppFirst(context) }
                             FocusRow(
                                 "Catch-up plays: " + if (appFirst) "in the channel's own app first" else "from your provider first", { Choices.catchUpAppFirst(context, !appFirst) },
@@ -3308,8 +3314,12 @@ private fun Poster(
     progress: Float? = null,
     /** The rating out of 10, shown in the bottom corner of the picture; 0 for none. */
     rating: Float = 0f,
+    /** "movie" or "series": with no [poster] from the provider, one is found by name in the film index. */
+    lookup: String? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val picture = if (poster.isNotBlank() || lookup == null) poster
+    else produceState("", name, lookup) { value = withContext(Dispatchers.IO) { PosterLookup.poster(lookup, name) } }.value
     Column(
         modifier
             .clip(RoundedCornerShape(12.dp))
@@ -3322,7 +3332,8 @@ private fun Poster(
             .padding(6.dp),
     ) {
         Box(Modifier.fillMaxWidth().aspectRatio(2f / 3f).clip(RoundedCornerShape(8.dp)).background(Panel)) {
-            if (poster.isNotBlank()) AsyncImage(model = poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            if (picture.isNotBlank()) AsyncImage(model = picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            else Text(name, color = Soft, fontSize = 15.sp, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.Center).padding(8.dp))
             if (favourite) {
                 Box(Modifier.align(Alignment.TopStart).padding(6.dp).background(Looks.page.copy(alpha = 0.8f), RoundedCornerShape(8.dp)).padding(horizontal = 6.dp, vertical = 4.dp)
                     .semantics { contentDescription = "Favourite" }) {
@@ -3455,6 +3466,7 @@ private fun Pane.ChannelGuide(
     val openPage: (ChannelGroup) -> Unit = { channel ->
         state.resumeKey = "pick:" + channel.id
         pick.pickDay = null
+        pick.openShow = null
         scope.launch { pick.programmeList.scrollToItem(0) }
         // The version asked about: for catch-up the best one the provider keeps, else the one that plays first.
         val version = if (catchUp) channel.versions.firstOrNull { it.channel.catchupDays > 0 } ?: channel.versions[channel.start] else channel.versions[channel.start]
@@ -3553,7 +3565,14 @@ private fun Pane.ProgrammePage(
     val app = remember(channel.name) { CatchUpApps.appFor(channel.name) }
     val rteNow = RteCatchUp.list
     val providerHas: (Programme) -> Boolean = { p -> channel.catchupDays > 0 && p.startMs >= now - windowMs }
-    val inApp: (Programme) -> Boolean = { p -> rteNow.size >= 0 && CatchUpApps.programmeLink(channel.name, p.title) != null }
+    // Links and pictures found for this channel's shows (ITVX asks ITV's search), by show; filled in as they arrive.
+    val found = remember(channel.id) { androidx.compose.runtime.mutableStateMapOf<String, Pair<Pair<String, String>?, String>>() }
+    val inApp: (Programme) -> Boolean = { p -> rteNow.size >= 0 && (found[CatchUpApps.plain(p.title)]?.first ?: CatchUpApps.knownLink(channel.name, p.title)) != null }
+    val scope = rememberCoroutineScope()
+    // The show open on this page (catch-up): its showings, newest first. Back returns to the shows. Kept in [pick], so
+    // coming back from watching one lands on the same show.
+    val openShow = pick.openShow
+    BackHandler(enabled = openShow != null && step == null && !byTime) { pick.openShow = null }
     val whereText: (Programme) -> String = { p ->
         val appName = app?.title?.substringBefore(" (").orEmpty()
         when {
@@ -3565,16 +3584,19 @@ private fun Pane.ProgrammePage(
         }
     }
     val playPast: (Programme, String) -> Unit = { p, key ->
-        val provider = { onPlay(listOf(catchupPlayable(channel.name, account, channel.id, p, serverAheadSec)), 0, false, key) }
-        when {
-            appFirst && CatchUpApps.openProgramme(context, channel.name, p.title) -> Unit
-            providerHas(p) -> provider()
-            CatchUpApps.openProgramme(context, channel.name, p.title) -> Unit
-            app != null -> {
-                kueToast(context, "Opening " + app.title.substringBefore(" (") + ". Find \"" + p.title.ifBlank { "the programme" } + "\" there.")
-                kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch { CatchUpApps.openApp(context, app) }
+        scope.launch {
+            val link = withContext(Dispatchers.IO) { CatchUpApps.programmeLink(channel.name, p.title) }
+            val provider = { onPlay(listOf(catchupPlayable(channel.name, account, channel.id, p, serverAheadSec)), 0, false, key) }
+            when {
+                appFirst && link != null && CatchUpApps.open(context, link) -> Unit
+                providerHas(p) -> provider()
+                link != null && CatchUpApps.open(context, link) -> Unit
+                app != null -> {
+                    kueToast(context, "Opening " + app.title.substringBefore(" (") + ". Find \"" + p.title.ifBlank { "the programme" } + "\" there.")
+                    withContext(Dispatchers.IO) { CatchUpApps.openApp(context, app) }
+                }
+                else -> kueToast(context, "Your provider doesn't keep this channel, and it has no app to watch it in.")
             }
-            else -> kueToast(context, "Your provider doesn't keep this channel, and it has no app to watch it in.")
         }
     }
     Column(fill()) {
@@ -3659,10 +3681,52 @@ private fun Pane.ProgrammePage(
                     catchUp -> all.filter { it.startMs < now && it.startMs >= now - maxOf(windowMs, 7 * DAY_MS) }.sortedByDescending { it.startMs }
                     else -> all.filter { it.stopMs > now }
                 }
-                val lead = if (catchUp && channel.catchupDays > 0) 1 else 0
+                // Catch-up shows each show once, newest showing first, with its picture; OK on one with several showings
+                // opens them, newest first (Kevin, 25 November 2026: pick the show, then the episode).
+                val groups = remember(rows, catchUp) { if (!catchUp) emptyList() else rows.groupBy { CatchUpApps.plain(it.title).ifEmpty { "-" + it.startMs } }.values.toList() }
+                LaunchedEffect(groups) {
+                    for (g in groups) {
+                        val t = g.first().title
+                        val k = CatchUpApps.plain(t)
+                        if (t.isBlank() || k in found) continue
+                        val link = withContext(Dispatchers.IO) { runCatching { CatchUpApps.programmeLink(channel.name, t) }.getOrNull() }
+                        val pic = withContext(Dispatchers.IO) { runCatching { CatchUpApps.picture(channel.name, t) }.getOrDefault("") }
+                        found[k] = link to pic
+                    }
+                }
+                val openGroup = openShow?.let { o -> groups.firstOrNull { CatchUpApps.plain(it.first().title) == o } }
+                // What the list shows: every programme (the guide), each show once (catch-up), or one show's showings.
+                val listed: List<Pair<Programme, List<Programme>?>> = when {
+                    !catchUp -> rows.map { it to null }
+                    openGroup != null -> openGroup.map { it to null }
+                    else -> groups.map { g -> g.first() to g.takeIf { it.size > 1 } }
+                }
+                // Opening or closing a show puts the remote on the top row (not when coming back from the player).
+                var openedBefore by remember(channel.id) { mutableStateOf(openShow) }
+                LaunchedEffect(openShow) {
+                    if (openedBefore == openShow) return@LaunchedEffect
+                    openedBefore = openShow
+                    withFrameNanos { }
+                    runCatching { pick.programmeList.scrollToItem(0) }
+                    withFrameNanos { }
+                    runCatching { first.requestFocus() }
+                }
+                val pictureOf: (Programme) -> String? = { p -> if (!catchUp) null else found[CatchUpApps.plain(p.title)]?.second.orEmpty() }
+                val lead = if (catchUp && openGroup == null && channel.catchupDays > 0) 1 else if (openGroup != null) 1 else 0
                 LazyColumn(Modifier.fillMaxSize(), state = pick.programmeList) {
+                    // One show open: its name, and the show itself in its app when there is a link.
+                    if (openGroup != null) item(key = "show") {
+                        val t = openGroup.first().title
+                        val link = found[CatchUpApps.plain(t)]?.first
+                        FocusRow(
+                            if (link != null) "Open " + t + " in " + (app?.title?.substringBefore(" (") ?: "its app") else t + " · " + openGroup.size + " showings",
+                            { if (link != null && !CatchUpApps.open(context, link)) kueToast(context, "Couldn't open " + (app?.title ?: "the app") + ".") },
+                            Modifier.focusRequester(first), look = Look.OTHER,
+                            below = if (link != null) openGroup.size.toString() + " showings below · Back for all the shows" else "Back for all the shows",
+                        )
+                    }
                     // Picking a time needs the provider's own catch-up.
-                    if (catchUp && channel.catchupDays > 0) item(key = "pick") {
+                    if (catchUp && openGroup == null && channel.catchupDays > 0) item(key = "pick") {
                         FocusRow("Pick a date and time", { pick.pickDay = CHOOSING_DAY }, Modifier.focusRequester(first))
                     }
                     if (!catchUp) item(key = "bytime") {
@@ -3679,7 +3743,7 @@ private fun Pane.ProgrammePage(
                     if (!catchUp && rows.isEmpty()) item(key = "watch") {
                         FocusRow("Watch " + channel.name, { onPlay(listOf(watch), 0, true, rowKey) }, Modifier.focusRequester(first))
                     }
-                    itemsIndexed(rows, key = { _, p -> p.startMs }) { i, programme ->
+                    itemsIndexed(listed, key = { _, (p, _) -> p.startMs }) { i, (programme, group) ->
                         val key = "prog:" + programme.startMs
                         val onNow = programme.startMs <= now && programme.stopMs > now
                         val later = !catchUp && programme.startMs > System.currentTimeMillis()
@@ -3688,12 +3752,16 @@ private fun Pane.ProgrammePage(
                         val remind = Reminder.make(channel.id, channel.name, programme.title.ifBlank { "Programme" }, programme.startMs, programme.stopMs)
                         val reminded = reminders.any { it.id == remind.id }
                         ProgrammeRow(
-                            whenText = (if (linksNow >= 0 && SeriesLinks.has(context, channel.name, programme.title)) "●● Every showing · " else if (set) "● Will record · " else "") + (if (reminded) "◆ Reminder · " else "") + (if (onNow) "Now · " else day(programme.startMs) + " · ") + time(programme.startMs) + " to " + time(programme.stopMs) +
+                            whenText = if (group != null) group.size.toString() + " showings · latest " + day(programme.startMs) + " " + time(programme.startMs) + " · " + whereText(programme)
+                            else (if (linksNow >= 0 && SeriesLinks.has(context, channel.name, programme.title)) "●● Every showing · " else if (set) "● Will record · " else "") + (if (reminded) "◆ Reminder · " else "") + (if (onNow) "Now · " else day(programme.startMs) + " · ") + time(programme.startMs) + " to " + time(programme.stopMs) +
                                 (if (catchUp) " · " + whereText(programme) else ""),
                             title = programme.title.ifBlank { "No title" },
                             description = programme.description,
+                            picture = pictureOf(programme),
                             onClick = {
-                                if (catchUp) {
+                                if (group != null) {
+                                    pick.openShow = CatchUpApps.plain(programme.title)
+                                } else if (catchUp) {
                                     playPast(programme, key)
                                 } else if (later) {
                                     // A programme that hasn't started: OK sets a reminder, again sets it to record, again sets neither.
@@ -3705,7 +3773,7 @@ private fun Pane.ProgrammePage(
                             modifier = (if (i == 0 && lead == 0) Modifier.focusRequester(first) else Modifier)
                                 .then(if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier),
                             // Catch-up: holding OK saves the whole programme to Recordings, without watching it.
-                            onHold = if (!catchUp || !providerHas(programme)) null else ({
+                            onHold = if (!catchUp || group != null || !providerHas(programme)) null else ({
                                 val p = catchupPlayable(channel.name, account, channel.id, programme, serverAheadSec)
                                 TimedStore.add(context, Timed.whole(channel.name, programme.title.ifBlank { "Programme" }, p.url, programme.startMs, programme.stopMs - programme.startMs, System.currentTimeMillis()))
                                 kueToast(context, "Saving \"" + programme.title.ifBlank { "this programme" } + "\" to Recordings. It carries on with the app closed.")
@@ -3733,9 +3801,13 @@ private fun startOfDay(ms: Long): Long {
 
 /** A programme: when it is on, its title, and its description while the row is focused. */
 @Composable
-private fun ProgrammeRow(whenText: String, title: String, description: String, onClick: () -> Unit, modifier: Modifier = Modifier, onHold: (() -> Unit)? = null) {
+private fun ProgrammeRow(
+    whenText: String, title: String, description: String, onClick: () -> Unit, modifier: Modifier = Modifier, onHold: (() -> Unit)? = null,
+    /** Catch-up: the show's picture on the left (empty while it is being found). Null for none. */
+    picture: String? = null,
+) {
     var focused by remember { mutableStateOf(false) }
-    Column(
+    Row(
         modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
@@ -3744,11 +3816,20 @@ private fun ProgrammeRow(whenText: String, title: String, description: String, o
             .onFocusChanged { focused = it.isFocused }
             .press(onClick, onHold)
             .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        if (picture != null) {
+            Box(Modifier.size(width = 128.dp, height = 72.dp).clip(RoundedCornerShape(8.dp)).background(Looks.faint)) {
+                if (picture.isNotBlank()) AsyncImage(model = picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+            Spacer(Modifier.width(14.dp))
+        }
+        Column(Modifier.weight(1f)) {
         Text(whenText, color = if (focused) Color.Black else Soft, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(title, color = if (focused) Color.Black else Ink, fontSize = Sizes.ROW, fontWeight = if (focused) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (focused && description.isNotBlank()) {
             Text(description, color = Color.Black, fontSize = 17.sp, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+        }
         }
     }
 }
@@ -3857,6 +3938,7 @@ private fun Pane.SeriesPane(
                     onFocus = { state.onShow = show },
                     progress = partWay[show.name],
                     rating = ratingOf(show.about.rating),
+                    lookup = "series",
                 )
             }
         }
@@ -3974,6 +4056,15 @@ private fun Pane.EpisodePage(
                 val context = LocalContext.current
                 val watchedNow = Watched.changes
                 val placesNow = Positions.changes
+                // Every episode with a picture (Kevin, 25 November 2026): the provider's, else the film index's for that
+                // episode, else the series' own poster. The series' poster too, when the provider gives none.
+                val seriesPoster by produceState(show.poster, show.id) {
+                    if (value.isBlank()) value = withContext(Dispatchers.IO) { PosterLookup.poster("series", show.name) }
+                }
+                val indexPictures by produceState(emptyMap<Pair<Int, Int>, String>(), show.id, episodes) {
+                    if (episodes.any { it.image.isBlank() }) value = withContext(Dispatchers.IO) { PosterLookup.episodePictures(show.name) }
+                }
+                val pictureOf: (Episode) -> String = { e -> e.image.ifBlank { indexPictures[e.season to e.number].orEmpty() }.ifBlank { seriesPoster } }
                 // Oldest first, as the provider lists them, or newest first: chosen for each series.
                 val newest = remember(Listing.changes, show.id) { EpisodeOrder.newestFirst(context, show.id) }
                 val inOrder = remember(episodes, newest) {
@@ -3983,9 +4074,9 @@ private fun Pane.EpisodePage(
                     // The series' poster, with the order and the trailer beside it.
                     item(key = "order") {
                         Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Top) {
-                            if (show.poster.isNotBlank()) {
+                            if (seriesPoster.isNotBlank()) {
                                 Box(Modifier.size(width = 96.dp, height = 144.dp).clip(RoundedCornerShape(10.dp)).background(Looks.faint)) {
-                                    AsyncImage(model = show.poster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                    AsyncImage(model = seriesPoster, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                                 }
                             }
                             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -4028,7 +4119,7 @@ private fun Pane.EpisodePage(
                                 { onPlay(playables, i, false, key) },
                                 (if (at == 0) Modifier.focusRequester(first) else Modifier)
                                     .then(if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier),
-                                leading = if (episode.image.isBlank()) null else ({ EpisodePicture(episode.image) }),
+                                leading = pictureOf(episode).let { pic -> if (pic.isBlank()) null else ({ EpisodePicture(pic) }) },
                                 // Hold OK: marks it watched, or not watched.
                                 onHold = {
                                     Watched.set(context, episode.url, !watched)

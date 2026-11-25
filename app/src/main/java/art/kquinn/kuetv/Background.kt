@@ -150,6 +150,13 @@ object Choices {
         changes++
     }
 
+    /** After an episode or catch-up programme ends, the next one starts by itself after the countdown; off waits for OK. */
+    fun autoNext(context: Context): Boolean = prefs(context).getBoolean("autoNext", true)
+    fun autoNext(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("autoNext", on).apply()
+        changes++
+    }
+
     fun timeShift(context: Context): Boolean = prefs(context).getBoolean("timeShift", true)
     fun timeShift(context: Context, on: Boolean) {
         prefs(context).edit().putBoolean("timeShift", on).apply()

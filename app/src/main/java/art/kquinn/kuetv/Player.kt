@@ -929,6 +929,8 @@ fun PlayerScreen(
     // The next episode or programme: a few seconds to see what it is, then it starts. OK starts it now, Back stays here.
     LaunchedEffect(upNext) {
         if (upNext < 0) return@LaunchedEffect
+        // Settings › Watching › Play the next one by itself: off waits for OK.
+        if (!Choices.autoNext(context)) { upNextIn = 0; return@LaunchedEffect }
         for (s in UP_NEXT_SECONDS downTo 1) {
             upNextIn = s
             delay(1_000)
@@ -1761,7 +1763,7 @@ fun PlayerScreen(
                 ) {
                     Text("Next", color = Color(0xFFFFD23F), fontSize = 16.sp, fontWeight = FontWeight.Bold)
                     Text(items.getOrNull(upNext)?.name.orEmpty(), color = Color.White, fontSize = 21.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                    Text("Starts in $upNextIn s", color = Color(0xFFB9C2D3), fontSize = 17.sp, modifier = Modifier.padding(top = 4.dp))
+                    Text(if (upNextIn > 0) "Starts in $upNextIn s" else "OK to play it", color = Color(0xFFB9C2D3), fontSize = 17.sp, modifier = Modifier.padding(top = 4.dp))
                     if (phone) {
                         Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             PlayerChip("Play now", main = true) { go(upNext) }

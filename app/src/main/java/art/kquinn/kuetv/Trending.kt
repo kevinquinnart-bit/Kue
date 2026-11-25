@@ -354,18 +354,28 @@ object LiveInApps {
 }
 
 /**
- * Catch-up in the channel's own app (Kevin, 24 November 2026): which app holds a channel's past programmes, and the
- * programme's own page in it where a link is known. RTÉ Player's programme pages were tried on Kevin's TV on
- * 20-23 November 2026. Channel 4's programme pages (channel4.com/programmes/<name>) haven't been tried on the TV yet.
- * ITVX, iPlayer, 5, Virgin Media Play, TG4 and the rest take no link to a programme, so they open on their home page.
+ * Catch-up in the channel's own app (Kevin, 24 November 2026), with each show's picture. Tried on Kevin's TV on
+ * 25 November 2026:
+ * - ITVX: https://www.itv.com/watch/<name>/<programme id> opens the show and plays its latest episode (Coronation
+ *   Street). The id comes from ITV's own search. Older episodes can't be picked by a link.
+ * - Channel 4: channel4://www.channel4.com/programmes/<name> opens the show's page with Play and its episodes
+ *   (Hollyoaks). The same address starting https:// isn't taken by the app.
+ * - RTÉ Player: the series page, from RTÉ's own feeds (tried 20-23 November).
+ * - iPlayer and Virgin Media Play take no links; 5, U and TG4 open on their home page (tried before).
  */
 object CatchUpApps {
     private val marks = Regex("\\p{Mn}+")
     private val tag = Regex("^[a-z]{2,3}\\s*[:|]\\s*")
     private val versionWords = Regex("\\b(hd|fhd|uhd|4k|sd|uk|london|ni|\\(.*?\\))\\b")
+    private val http by lazy { Provider.http.newBuilder().callTimeout(15, TimeUnit.SECONDS).build() }
 
-    private fun plain(text: String): String =
+    internal fun plain(text: String): String =
         java.text.Normalizer.normalize(text, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace("&", "and").replace(Regex("[^a-z0-9]"), "")
+
+    /** A title as the shows' web addresses write it: "The Chase: Celebrity" is "the-chase-celebrity". */
+    internal fun slug(title: String): String =
+        java.text.Normalizer.normalize(title, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace("&", "and")
+            .replace("'", "").replace(Regex("[^a-z0-9]+"), "-").trim('-')
 
     private fun channelKey(name: String): String =
         java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace(tag, "").replace(versionWords, " ")
@@ -389,29 +399,75 @@ object CatchUpApps {
         return TvAppList.all.firstOrNull { it.title == title }
     }
 
-    /** The programme's own page in its app, as (link, app package), or null where no link is known. */
-    fun programmeLink(channelName: String, title: String): Pair<String, String>? {
+    /** One show as ITVX knows it: its id for links, and its picture. */
+    class ItvShow(val id: String, val title: String, val picture: String)
+
+    private val itv = java.util.concurrent.ConcurrentHashMap<String, java.util.Optional<ItvShow>>()
+
+    /** Reads ITV's search answer: the show whose name matches [title]. */
+    internal fun itvFrom(json: String, title: String): ItvShow? {
+        val want = plain(title)
+        val results = JSONObject(json).optJSONArray("results") ?: return null
+        for (i in 0 until results.length()) {
+            val r = results.optJSONObject(i) ?: continue
+            if (r.optString("entityType") != "programme") continue
+            val d = r.optJSONObject("data") ?: continue
+            val name = d.optString("programmeTitle")
+            if (plain(name) != want) continue
+            val id = d.optString("programmeCCId").ifBlank { continue }
+            val picture = d.optJSONObject("latestAvailableEpisode")?.optString("imageHref").orEmpty()
+                .replace("{width}", "640").replace("{height}", "360").replace("{quality}", "80").replace("{blur}", "0").replace("{bg}", "false")
+            return ItvShow(id, name, picture)
+        }
+        return null
+    }
+
+    /** ITVX's show for a title, asked of ITV's own search once. Call off the screen's thread. */
+    fun itvShow(title: String): ItvShow? = itv.getOrPut(plain(title)) {
+        java.util.Optional.ofNullable(runCatching {
+            val q = java.net.URLEncoder.encode(title, "UTF-8").replace("+", "%20")
+            val url = "https://textsearch.prd.oasvc.itv.com/search?broadcaster=itv&featureSet=clearkey,outband-webvtt,hls,aes,playready,widevine,fairplay,bbts,progressive,hd,rtmpe&onlyFree=false&platform=dotcom&query=$q"
+            http.newCall(Request.Builder().url(url).header("User-Agent", Provider.USER_AGENT).build()).execute().use { r -> if (r.isSuccessful) itvFrom(r.body.string(), title) else null }
+        }.getOrNull())
+    }.orElse(null)
+
+    /** A link already known without asking anyone: RTÉ (from its feed) and Channel 4 (from the name). ITVX needs [itvShow] first. */
+    fun knownLink(channelName: String, title: String): Pair<String, String>? {
         val app = appFor(channelName) ?: return null
         val want = plain(title)
         if (want.isEmpty()) return null
         return when (app.title) {
             "RTÉ Player" -> RteCatchUp.list.firstOrNull { plain(it.title) == want }?.let { RteCatchUp.link(it) to "com.twentyfouri.tvbridge.rte" }
-            "Channel 4" -> {
-                val slug = java.text.Normalizer.normalize(title, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase().replace("&", "and")
-                    .replace("'", "").replace(Regex("[^a-z0-9]+"), "-").trim('-')
-                if (slug.isEmpty()) null else ("https://www.channel4.com/programmes/" + slug) to "com.channel4.ondemand"
-            }
+            "Channel 4" -> slug(title).takeIf { it.isNotEmpty() }?.let { "channel4://www.channel4.com/programmes/$it" to "com.channel4.ondemand" }
+            "ITVX" -> itv[want]?.orElse(null)?.let { "https://www.itv.com/watch/" + slug(it.title) + "/" + it.id to "air.ITVMobilePlayer" }
             else -> null
         }
     }
 
-    /** Opens the programme's page in its app. False when there is no link, or the app isn't on the TV. */
-    fun openProgramme(context: Context, channelName: String, title: String): Boolean {
-        val (link, pkg) = programmeLink(channelName, title) ?: return false
-        return runCatching {
-            context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link)).setPackage(pkg).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        }.isSuccess
+    /** The show's own page (or, for ITVX, its latest episode) in its app, as (link, app package). Asks ITV when needed: call off the screen's thread. */
+    fun programmeLink(channelName: String, title: String): Pair<String, String>? {
+        if (appFor(channelName)?.title == "ITVX" && title.isNotBlank()) itvShow(title)
+        return knownLink(channelName, title)
     }
+
+    /** Opens a link in its app. False when the app isn't on the TV or won't take it. */
+    fun open(context: Context, link: Pair<String, String>): Boolean = runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, android.net.Uri.parse(link.first)).setPackage(link.second).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.isSuccess
+
+    /** A picture for a show: ITVX's or RTÉ's own, else the series' poster from the film index. Empty when none. Call off the screen's thread. */
+    fun picture(channelName: String, title: String): String = pictures.getOrPut(plain(title)) {
+        val app = appFor(channelName)?.title
+        runCatching {
+            when (app) {
+                "ITVX" -> itvShow(title)?.picture
+                "RTÉ Player" -> RteCatchUp.list.firstOrNull { plain(it.title) == plain(title) }?.image
+                else -> null
+            }?.takeIf { it.isNotBlank() } ?: AddOns.seriesByName(title)?.poster.orEmpty()
+        }.getOrDefault("")
+    }
+
+    private val pictures = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     /** Opens the channel's app on its home page; if it isn't on the TV, the app store on a search for it. Call off the screen's thread. */
     fun openApp(context: Context, app: TvAppList.TvApp): Boolean {
