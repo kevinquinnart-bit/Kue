@@ -13,6 +13,8 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
@@ -1715,8 +1717,9 @@ private const val SMALL_TV_KEY = "smalltv"
 @Composable
 private fun TopBar(section: Section, focus: FocusRequester, bar: BarReach, onPick: (Section) -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        // Sized so the whole bar, Settings and the time included, fits across the TV without sliding along.
-        KueLogo(26.dp, 18.sp)
+        // Sized so the whole bar, Settings and the time included, fits across the TV without sliding along. A tap on it
+        // (phone, or a touch screen) goes Home, as in every Kue app; the remote doesn't stop on it.
+        KueLogo(26.dp, 18.sp, Modifier.pointerInput(Unit) { detectTapGestures { onPick(Section.HOME) } })
         Spacer(Modifier.width(10.dp))
         Row(
             Modifier.weight(1f).focusProperties { onEnter = { runCatching { focus.requestFocus() } } }.focusGroup()
@@ -5532,16 +5535,20 @@ internal fun dayName(now: Long, day: Int): String = when (day) {
 @Composable
 private fun GuideChip(text: String, chosen: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    // The Kue second row (Kevin, 25 November 2026, the same in every Kue app): chosen is dark with yellow words, the
+    // rest an outline; the one the remote is on is yellow with black words.
+    val raised = if (Looks.theme == 0) Color(0xFF263A63) else Panel
     Text(
         text,
-        color = if (focused || chosen) Color.Black else Ink,
+        color = if (focused) Color.Black else if (chosen) AccentInk else Soft,
         fontSize = 15.sp,
         fontWeight = if (focused || chosen) FontWeight.Bold else FontWeight.Normal,
         maxLines = 1,
         modifier = Modifier
             .clip(RoundedCornerShape(16.dp))
             .focusRing(focused, RoundedCornerShape(16.dp))
-            .background(if (focused) Accent else if (chosen) Color(0xFFB9C2D3) else Panel)
+            .then(if (!focused && !chosen) Modifier.border(1.dp, raised, RoundedCornerShape(16.dp)) else Modifier)
+            .background(if (focused) Accent else if (chosen) raised else Color.Transparent)
             .onFocusChanged { focused = it.isFocused }
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 5.dp),
