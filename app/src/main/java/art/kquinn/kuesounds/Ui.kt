@@ -1187,9 +1187,9 @@ object Ui {
         KueSettings.Place("privacy", "Privacy and storage", null, "Permissions"),
         KueSettings.Place("kue", "Your Kue apps", null, "KueTV"),
         KueSettings.Place("kue", "Your Kue apps", null, "KueVault"),
-        KueSettings.Place("help", "Help and about", null, "Version"),
-        KueSettings.Place("help", "Help and about", null, "Check for updates"),
-        KueSettings.Place("help", "Help and about", null, "Copy report for Claude"),
+        KueSettings.Place("help", "Help and about", "Version and updates", "Version"),
+        KueSettings.Place("help", "Help and about", "Version and updates", "Check for updates"),
+        KueSettings.Place("help", "Help and about", "Report for Claude", "Copy report for Claude"),
     )
 
     @Composable
@@ -1320,11 +1320,12 @@ object Ui {
 
             // 8. Help and about
             KueSettings.Group(KueSettings.Icons.HELP, "Help and about", "Version " + BuildConfig.VERSION_NAME, open == "help", look, { toggle("help") }) {
-                KueSettings.Fact("Version", BuildConfig.VERSION_NAME, look)
                 var copied by remember { mutableStateOf(false) }
                 // Checking by hand, as well as the pop-up: finds a newer version and puts it on now.
                 var updateSays by remember { mutableStateOf("") }
                 var checking by remember { mutableStateOf(false) }
+                KueSettings.Section("Version and updates", sectionOpen("help|Version and updates"), look, { flip("help|Version and updates") }) {
+                KueSettings.Fact("Version", BuildConfig.VERSION_NAME, look)
                 Button(if (checking) "Checking…" else "Check for updates", main = false, modifier = Modifier.fillMaxWidth()) {
                     if (checking) return@Button
                     checking = true
@@ -1334,6 +1335,8 @@ object Ui {
                     }
                 }
                 if (updateSays.isNotEmpty()) Words(updateSays, 14, K.Accent, lines = 3)
+                }
+                KueSettings.Section("Report for Claude", sectionOpen("help|Report for Claude"), look, { flip("help|Report for Claude") }) {
                 Button(if (copied) "Copied. Paste it to Claude." else "Copy report for Claude", main = false, modifier = Modifier.fillMaxWidth()) {
                     scope.launch {
                         val text = withContext(Dispatchers.Default) { Scanner.report() }
@@ -1341,6 +1344,7 @@ object Ui {
                         clip?.setPrimaryClip(android.content.ClipData.newPlainText("KueSounds report", text))
                         copied = true
                     }
+                }
                 }
             }
         }
