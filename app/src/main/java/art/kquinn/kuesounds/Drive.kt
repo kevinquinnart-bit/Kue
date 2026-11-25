@@ -167,6 +167,22 @@ object Drive {
         }
     }
 
+    /**
+     * Puts a file in the Drive's bin (Kevin, 25 November 2026: delete a song). Google keeps it there for 30 days, so it
+     * can be brought back from drive.google.com. Needs the edit permission's pass. Call off the main thread.
+     */
+    fun trash(id: String, token: String) {
+        val request = Request.Builder()
+            .url("$API/$id?fields=trashed")
+            .header("Authorization", "Bearer $token")
+            .patch("{\"trashed\":true}".toRequestBody("application/json; charset=UTF-8".toMediaType()))
+            .build()
+        http.newCall(request).execute().use { r ->
+            if (r.code == 401) { Google.forget(); throw SignedOut() }
+            if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code)
+        }
+    }
+
     /** The sign-in has run out or was taken back: the person needs to sign in again. */
     class SignedOut : IOException("signed out")
 }

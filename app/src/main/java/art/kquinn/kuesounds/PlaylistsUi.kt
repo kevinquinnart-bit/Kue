@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -63,7 +64,7 @@ object ListUi {
     // The Playlists tab
 
     @Composable
-    fun Home(go: (Screen) -> Unit) {
+    fun Home(go: (Screen) -> Unit, layout: Views.Layout = Views.Layout.LIST) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         val lists = remember(Sync.entries) { Playlists.all() }
@@ -92,36 +93,61 @@ object ListUi {
                 }
             }
         }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item {
+        // Shown the chosen way (Kevin, 25 November 2026): a list, a list with small pictures, or large covers. A
+        // playlist's picture is the cover of its first song that has one.
+        val full: (androidx.compose.foundation.lazy.grid.LazyGridItemSpanScope.() -> androidx.compose.foundation.lazy.grid.GridItemSpan) = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }
+        val byId = remember(Scanner.data) { Scanner.data.tracks.associateBy { it.id } }
+        val pictureOf = { pl: Playlists.Playlist -> pl.ids.asSequence().mapNotNull { byId[it] }.firstNotNullOfOrNull { Scanner.artForTrack(it) ?: Scanner.singleArtFor(it) } }
+        androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+            columns = if (layout == Views.Layout.COVERS) androidx.compose.foundation.lazy.grid.GridCells.Adaptive(150.dp) else androidx.compose.foundation.lazy.grid.GridCells.Fixed(1),
+            modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp), horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            item(span = full) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Ui.Button("New playlist", modifier = Modifier.weight(1f)) { naming = "" }
                     Ui.Button(if (busy) "Reading…" else "Bring one in", main = false, modifier = Modifier.weight(1f)) { bringIn.launch(arrayOf("*/*")) }
                 }
             }
-            item {
+            item(span = full) {
                 Ui.Words(
                     "Bring one in from another player's playlist file (M3U, PLS, XSPF, WPL, or CSV, as Spotify's exports are). " +
                         "Each song is matched to the same song in your music.",
                     14, K.Soft, lines = 4,
                 )
             }
-            if (note.isNotEmpty()) item { Ui.Words(note, 15, K.Accent, lines = 4) }
-            if (lists.isEmpty()) item { Ui.Words("No playlists yet. Hold a song to add it to one, or tap + while one is playing.", 16, K.Soft, lines = 3) }
-            items(lists, key = { it.id }) { p ->
-                Row(
+            if (note.isNotEmpty()) item(span = full) { Ui.Words(note, 15, K.Accent, lines = 4) }
+            if (lists.isEmpty()) item(span = full) { Ui.Words("No playlists yet. Hold a song to add it to one, or tap + while one is playing.", 16, K.Soft, lines = 3) }
+            items(lists.size, key = { lists[it].id }) { n ->
+                val p = lists[n]
+                val songs = p.ids.size.toString() + if (p.ids.size == 1) " song" else " songs"
+                if (layout == Views.Layout.COVERS) {
+                    Column(Modifier.clickable { go(Screen.PlaylistPage(p.id)) }, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Box(Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(14.dp)).background(K.Panel), contentAlignment = Alignment.Center) {
+                            val pic = pictureOf(p)
+                            if (pic != null) coil3.compose.AsyncImage(model = pic, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            else KueSettings.Icon(KueSettings.Icons.PLAYLIST, 40.dp, K.Soft, 2f)
+                        }
+                        Ui.Words(p.name, 15, bold = true)
+                        Ui.Words(songs, 13, K.Soft)
+                    }
+                } else Row(
                     Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable { go(Screen.PlaylistPage(p.id)) }.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(K.Raised), contentAlignment = Alignment.Center) { Sign(Glyph.NOTE, 22.dp, K.Soft) }
+                    val pic = if (layout == Views.Layout.PICTURES) pictureOf(p) else null
+                    Box(Modifier.size(if (layout == Views.Layout.PICTURES) 56.dp else 44.dp).clip(RoundedCornerShape(10.dp)).background(K.Raised), contentAlignment = Alignment.Center) {
+                        if (pic != null) coil3.compose.AsyncImage(model = pic, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                        else Sign(Glyph.NOTE, 22.dp, K.Soft)
+                    }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Ui.Words(p.name, 16, bold = true)
-                        Ui.Words(p.ids.size.toString() + if (p.ids.size == 1) " song" else " songs", 13, K.Soft)
+                        Ui.Words(songs, 13, K.Soft)
                     }
                 }
             }
-            item { Spacer(Modifier.height(20.dp)) }
+            item(span = full) { Spacer(Modifier.height(20.dp)) }
         }
         naming?.let { typed ->
             NameBox("New playlist", typed, onChange = { naming = it }, onCancel = { naming = null }) {

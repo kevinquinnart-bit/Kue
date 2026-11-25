@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- The equaliser, deep bass, surround and louder on KueSounds' own sound (25 November 2026). -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Putting a newer KueSounds on. The phone asks first. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 

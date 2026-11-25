@@ -68,6 +68,8 @@ class MainActivity : ComponentActivity() {
         Offline.init(this)
         Sync.init(this)
         Podcasts.init(this)
+        Sound.init(this)
+        Views.init(this)
         Backup.init(this)
         SpotifyLink.init(this)
         takeShared(intent)

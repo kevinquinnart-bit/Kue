@@ -76,11 +76,39 @@ class PlaybackService : MediaSessionService() {
             }
         })
         listenToPodcasts(player)
+        listenForSound(player)
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         session = MediaSession.Builder(this, player).setSessionActivity(open).build()
+    }
+
+    private var effects: Sound.Effects? = null
+
+    /**
+     * The equaliser and the rest (Settings › KueSounds › Sound): put on the player's sound, with the music profile for
+     * songs and the podcast one for episodes and radio, changed over as the player moves between them.
+     */
+    private fun listenForSound(player: ExoPlayer) {
+        Sound.init(this)
+        val apply = {
+            val kind = Sound.kindOf(player.currentMediaItem?.mediaId.orEmpty())
+            val p = Sound.profile(kind)
+            effects?.apply(p)
+            player.skipSilenceEnabled = kind == Sound.Kind.PODCASTS && p.skipSilence
+        }
+        val make = { session: Int ->
+            effects?.release()
+            effects = if (session == C.AUDIO_SESSION_ID_UNSET) null else Sound.Effects(session).also { Sound.missing = it.missing }
+            apply()
+        }
+        make(player.audioSessionId)
+        player.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) = make(audioSessionId)
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) = apply()
+        })
+        Sound.onChange = { apply() }
     }
 
     private val tick = android.os.Handler(android.os.Looper.getMainLooper())
@@ -139,6 +167,9 @@ class PlaybackService : MediaSessionService() {
 
     override fun onDestroy() {
         tick.removeCallbacksAndMessages(null)
+        Sound.onChange = null
+        effects?.release()
+        effects = null
         scope.cancel()
         session?.run {
             player.release()

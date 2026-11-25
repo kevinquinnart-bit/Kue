@@ -740,6 +740,15 @@ object Scanner {
         MessageDigest.getInstance("SHA-1").digest(key.toByteArray()).joinToString("") { "%02x".format(it) } + ".jpg"
 
     /** The cover of the single a song came out as, if it did and there is one. */
+    /** The catalogue's record a song's album was matched to: its id and its group's id, or null. */
+    fun releaseFor(t: Track): Pair<String, String>? = data.releases[keyOf(t)]?.split('|')?.let { it[0] to it.getOrElse(1) { "" } }
+
+    /** Takes songs out of the library (they were deleted from the Drive). */
+    fun removeTracks(ids: Set<String>) = synchronized(this) {
+        data = data.copy(tracks = data.tracks.filter { it.id !in ids })
+        save()
+    }
+
     fun singleArtFor(t: Track): File? = data.singleArt[t.id]?.let { File(it) }?.takeIf { it.exists() }
 
     /** The cover picture kept for an album, if there is one. */

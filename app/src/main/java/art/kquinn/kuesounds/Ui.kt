@@ -114,10 +114,15 @@ sealed class Screen {
 }
 
 enum class Tab(val label: String) {
-    ALBUMS("Albums"), PLAYLISTS("Playlists"), PODCASTS("Podcasts"), RADIO("Radio"), SPOTIFY("Spotify"), YOUTUBE("YouTube"), ARTISTS("Artists"), SONGS("Songs"), SINGLES("Singles"), FOLDERS("Folders"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
+    // The music first (Kevin, 25 November 2026), then everything else, in the order it was before.
+    ALBUMS("Albums"), SINGLES("Singles"), SONGS("Songs"), ARTISTS("Artists"), PLAYLISTS("Playlists"), FAVOURITES("Favourites"), ON_PHONE("On phone"),
+    PODCASTS("Podcasts"), RADIO("Radio"), SPOTIFY("Spotify"), YOUTUBE("YouTube"), FOLDERS("Folders"),
 }
 
 object Ui {
+    /** Where Settings opens next: a group and section ("app|Your music"), set by tapping the message on the main screen. */
+    var settingsAt by mutableStateOf<String?>(null)
+
     /** A link shared to KueSounds from another app, to open. */
     var sharedLink by mutableStateOf<String?>(null)
 
@@ -304,18 +309,34 @@ object Ui {
                 }
                 SearchBox(query) { query = it }
                 if (query.isBlank()) {
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(Tab.entries) { t ->
-                            val on = t == tab
+                    var choosingView by remember { mutableStateOf(false) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            items(Tab.entries) { t ->
+                                val on = t == tab
+                                Box(
+                                    Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) K.Accent else K.Panel)
+                                        .clickable { tab = t }.padding(horizontal = 16.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) { Words(t.label, 15, if (on) K.Page else K.Ink, bold = on) }
+                            }
+                        }
+                        // How this part is shown: a list, a list with small pictures, or large covers (Kevin, 25 Nov 2026).
+                        if (tab in Views.defaults) {
+                            Spacer(Modifier.width(8.dp))
                             Box(
-                                Modifier.height(40.dp).clip(RoundedCornerShape(20.dp)).background(if (on) K.Accent else K.Panel)
-                                    .clickable { tab = t }.padding(horizontal = 16.dp),
+                                Modifier.size(40.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClickLabel = "How it's shown") { choosingView = true },
                                 contentAlignment = Alignment.Center,
-                            ) { Words(t.label, 15, if (on) K.Page else K.Ink, bold = on) }
+                            ) { KueSettings.Icon(Views.layout(tab).icon, 20.dp, K.Ink, 2f) }
+                        }
+                    }
+                    if (choosingView) HoldBox("Show " + tab.label.lowercase() + " as", "", { choosingView = false }) {
+                        for (l in Views.Layout.entries) {
+                            Button(l.label, main = Views.layout(tab) == l, icon = l.icon, modifier = Modifier.fillMaxWidth()) { Views.set(tab, l); choosingView = false }
                         }
                     }
                 }
-                Status()
+                Status(go)
             }
             Box(Modifier.weight(1f)) {
                 when {
@@ -324,33 +345,33 @@ object Ui {
                     tab == Tab.RADIO && query.isBlank() -> OnlineUi.RadioTab()
                     tab == Tab.SPOTIFY && query.isBlank() -> OnlineUi.SpotifyTab()
                     tab == Tab.YOUTUBE && query.isBlank() -> OnlineUi.YouTubeTab(go)
-                    tab == Tab.PLAYLISTS && query.isBlank() && Scanner.data.tracks.isNotEmpty() -> ListUi.Home(go)
+                    tab == Tab.PLAYLISTS && query.isBlank() && Scanner.data.tracks.isNotEmpty() -> ListUi.Home(go, Views.layout(Tab.PLAYLISTS))
                     Scanner.data.tracks.isEmpty() -> Empty()
                     query.isNotBlank() -> {
                         val results = remember(query, albums) { Library.search(query, Scanner.data.tracks, albums, artists) }
                         SearchResults(results, go)
                     }
-                    tab == Tab.ALBUMS -> AlbumGrid(albums, go)
-                    tab == Tab.ARTISTS -> ArtistList(artists, go)
-                    tab == Tab.SONGS -> SongList(songs, go)
+                    tab == Tab.ALBUMS -> AlbumShelf(albums, Views.layout(Tab.ALBUMS), go)
+                    tab == Tab.ARTISTS -> ArtistList(artists, Views.layout(Tab.ARTISTS), go)
+                    tab == Tab.SONGS -> SongList(songs, go, Views.layout(Tab.SONGS))
                     tab == Tab.SINGLES -> {
                         val titles = Scanner.data.singleTitles
                         val singles = remember(titles, songs) {
                             songs.filter { it.id in titles }.sortedWith(compareBy({ Library.sortName(it.artist) }, { Library.sortName(it.title) }))
                         }
                         if (singles.isEmpty()) Note("Songs that came out as singles show here, with the single's cover. They are found at step 3 in Settings.")
-                        else SingleList(singles, titles)
+                        else SingleList(singles, titles, Views.layout(Tab.SINGLES), go)
                     }
                     tab == Tab.FAVOURITES -> {
                         val ids = Sync.favouriteIds()
                         val favs = remember(ids, songs) { songs.filter { it.id in ids } }
-                        if (favs.isEmpty()) Note("Tap the heart on a playing song to keep it here.") else SongList(favs, go)
+                        if (favs.isEmpty()) Note("Tap the heart on a playing song to keep it here.") else SongList(favs, go, Views.layout(Tab.FAVOURITES))
                     }
                     tab == Tab.ON_PHONE -> {
                         val saved = Offline.saved
                         val onPhone = remember(saved, albums) { albums.filter { al -> al.tracks.any { it.id in saved } } }
                         if (onPhone.isEmpty()) Note("Save an album to play it with no internet. Open an album and tap Save to phone.")
-                        else AlbumGrid(onPhone, go)
+                        else AlbumShelf(onPhone, Views.layout(Tab.ON_PHONE), go)
                     }
                     else -> FolderList(null, Scanner.data, go)
                 }
@@ -393,7 +414,7 @@ object Ui {
 
     /** One line saying what the scan is doing, or what went wrong, or that a newer KueSounds is ready. */
     @Composable
-    private fun Status() {
+    private fun Status(go: (Screen) -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var updating by remember { mutableStateOf("") }
@@ -433,10 +454,22 @@ object Ui {
         }
         val status = Scanner.status.ifEmpty { Fixer.status }.ifEmpty { Offline.status }.ifEmpty { Updates.doing }
         if (status.isNotEmpty()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Tapped, it opens the part of Settings that shows it in full (Kevin, 25 November 2026).
+            val where = when {
+                Scanner.status.isNotEmpty() -> "app|Your music"
+                Fixer.status.isNotEmpty() -> "app|Fix the files"
+                Offline.status.isNotEmpty() -> "privacy|Space on this phone"
+                else -> "help|Version and updates"
+            }
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "Open in Settings") { settingsAt = where; go(Screen.Settings) }
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 CircularProgressIndicator(color = K.Accent, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(10.dp))
-                Words(status, 14, K.Soft)
+                Words(status, 14, K.Soft, modifier = Modifier.weight(1f))
+                KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
             }
         }
         if (Scanner.problem.isNotEmpty() && status.isEmpty()) {
@@ -466,14 +499,103 @@ object Ui {
     }
 
     @Composable
-    private fun Cover(file: File?, modifier: Modifier, corner: Dp = 14.dp, glyphSize: Dp = 40.dp) {
-        Box(modifier.clip(RoundedCornerShape(corner)).background(K.Panel), contentAlignment = Alignment.Center) {
+    private fun Cover(file: File?, modifier: Modifier, corner: Dp = 14.dp, glyphSize: Dp = 40.dp, glyph: Glyph = Glyph.DISC, round: Boolean = false) {
+        Box(modifier.clip(if (round) CircleShape else RoundedCornerShape(corner)).background(K.Panel), contentAlignment = Alignment.Center) {
             if (file != null) {
                 AsyncImage(model = file, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
             } else {
-                Sign(Glyph.DISC, glyphSize, K.Soft)
+                Sign(glyph, glyphSize, K.Soft)
             }
         }
+    }
+
+    /** One thing in a list: its name, the line under it, its picture, and what a tap, a hold and its ⋮ do. */
+    private class Item(
+        val key: String,
+        val title: String,
+        val below: String,
+        val glyph: Glyph,
+        val cover: () -> File?,
+        val highlight: Boolean = false,
+        val round: Boolean = false,
+        val onHold: (() -> Unit)? = null,
+        val onClick: () -> Unit,
+    )
+
+    /** The ⋮ on a row or cover: every action for it (Kevin, 25 November 2026). */
+    @Composable
+    private fun MoreButton(label: String, onClick: () -> Unit) {
+        Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClickLabel = label, onClick = onClick), contentAlignment = Alignment.Center) {
+            KueSettings.Icon(KueSettings.Icons.MORE, 22.dp, K.Soft, 2f, filled = true)
+        }
+    }
+
+    /**
+     * A part of the music section shown the chosen way (Settings button by the parts, Kevin 25 November 2026): a
+     * plain list, a list with small pictures, or large covers. A tap opens or plays; a hold or the ⋮ gives every action.
+     */
+    @Composable
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    private fun Shelf(things: List<Item>, layout: Views.Layout) {
+        if (layout == Views.Layout.COVERS) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(150.dp),
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                items(things, key = { it.key }) { x ->
+                    Column(Modifier.combinedClickable(onClick = x.onClick, onLongClick = x.onHold), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Cover(x.cover(), Modifier.fillMaxWidth().aspectRatio(1f), glyph = x.glyph, round = x.round)
+                        Row(verticalAlignment = Alignment.Top) {
+                            Column(Modifier.weight(1f).padding(top = 2.dp)) {
+                                Words(x.title, 15, if (x.highlight) K.Accent else K.Ink, bold = true)
+                                if (x.below.isNotEmpty()) Words(x.below, 13, K.Soft)
+                            }
+                            if (x.onHold != null) MoreButton("Everything you can do with it", x.onHold)
+                        }
+                    }
+                }
+            }
+        } else {
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
+                items(things, key = { it.key }) { x ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = if (layout == Views.Layout.PICTURES) 72.dp else 60.dp).clip(RoundedCornerShape(12.dp))
+                            .background(if (x.highlight) K.Panel else Color.Transparent)
+                            .combinedClickable(onClick = x.onClick, onLongClick = x.onHold)
+                            .padding(start = 12.dp, top = 6.dp, bottom = 6.dp, end = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (layout == Views.Layout.PICTURES) Cover(x.cover(), Modifier.size(56.dp), corner = 10.dp, glyphSize = 24.dp, glyph = x.glyph, round = x.round)
+                        else Box(Modifier.size(44.dp).clip(if (x.round) CircleShape else RoundedCornerShape(10.dp)).background(K.Panel), contentAlignment = Alignment.Center) { Sign(x.glyph, 22.dp, K.Soft) }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Words(x.title, 16, if (x.highlight) K.Accent else K.Ink, bold = x.highlight)
+                            if (x.below.isNotEmpty()) Words(x.below, 13, K.Soft)
+                        }
+                        if (x.onHold != null) MoreButton("Everything you can do with it", x.onHold)
+                    }
+                }
+            }
+        }
+    }
+
+    /** Albums, shown the chosen way. */
+    @Composable
+    private fun AlbumShelf(albums: List<Album>, layout: Views.Layout, go: (Screen) -> Unit) {
+        var held by remember { mutableStateOf<Album?>(null) }
+        held?.let { al -> AlbumBox(al, go) { held = null } }
+        val things = remember(albums) {
+            albums.map { al ->
+                Item(
+                    al.key, al.title, listOfNotNull(al.artist, al.year.takeIf { it > 0 }?.toString()).joinToString(" · "), Glyph.DISC, { Scanner.artFor(al) },
+                    onHold = { held = al },
+                ) { go(Screen.AlbumPage(al.key)) }
+            }
+        }
+        Shelf(things, layout)
     }
 
     @Composable
@@ -522,32 +644,39 @@ object Ui {
                 Words(top, 16, if (highlight) K.Accent else K.Ink, bold = highlight)
                 if (below.isNotEmpty()) Words(below, 13, K.Soft)
             }
+            if (onHold != null) MoreButton("Everything you can do with it", onHold)
         }
     }
 
     @Composable
-    private fun ArtistList(artists: List<Artist>, go: (Screen) -> Unit) {
-        // Hold an artist: play or queue everything of theirs, add it to a playlist, save it to the phone.
+    private fun ArtistList(artists: List<Artist>, layout: Views.Layout, go: (Screen) -> Unit) {
+        // Hold an artist, or its ⋮: play or queue everything of theirs, add it to a playlist, save it to the phone.
         var held by remember { mutableStateOf<Artist?>(null) }
         held?.let { a -> ArtistBox(a) { held = null } }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
-            items(artists, key = { "a:" + it.name }) { a ->
-                Row2(a.name, count(a.albums.size, "album") + " · " + count(a.songCount, "song"), Glyph.PERSON, onHold = { held = a }) { go(Screen.ArtistPage(a.name)) }
+        val things = remember(artists) {
+            artists.map { a ->
+                // An artist's picture: the cover of their first album that has one.
+                Item("a:" + a.name, a.name, count(a.albums.size, "album") + " · " + count(a.songCount, "song"), Glyph.PERSON,
+                    { a.albums.firstNotNullOfOrNull { Scanner.artFor(it) } }, round = true, onHold = { held = a }) { go(Screen.ArtistPage(a.name)) }
             }
         }
+        Shelf(things, layout)
     }
 
     private fun count(n: Int, word: String): String = String.format("%,d", n) + " " + word + if (n == 1) "" else "s"
 
     @Composable
-    private fun SongList(songs: List<Track>, go: (Screen) -> Unit) {
-        // Hold a song: the song's own menu (see SongBox).
+    private fun SongList(songs: List<Track>, go: (Screen) -> Unit, layout: Views.Layout = Views.Layout.LIST) {
+        // A tap plays; a hold or the ⋮ gives the song's every action (see SongBox).
         var held by remember { mutableStateOf<Track?>(null) }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
-            itemsIndexed(songs, key = { _, t -> t.id }) { i, t ->
-                Row2(t.title, t.artist, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { held = t }) { Playing.play(songs, i) }
+        val playing = Playing.currentId
+        val things = remember(songs, playing) {
+            songs.mapIndexed { i, t ->
+                Item(t.id, t.title, listOf(t.artist, t.album).filter { it.isNotBlank() }.joinToString(" · "), Glyph.NOTE,
+                    { Scanner.artForTrack(t) ?: Scanner.singleArtFor(t) }, highlight = t.id == playing, onHold = { held = t }) { Playing.play(songs, i) }
             }
         }
+        Shelf(things, layout)
         held?.let { t -> SongBox(t, go) { held = null } }
     }
 
@@ -591,8 +720,11 @@ object Ui {
         when (doing) {
             "add" -> ListUi.AddBox("\"" + t.title + "\"", listOf(t.id), onClose)
             "edit" -> EditSong(t, onClose)
+            "info" -> SongInfo(t, onClose)
+            "delete" -> DeleteSong(t, onClose)
             else -> HoldBox(t.title, listOf(t.artist, t.album).filter { it.isNotBlank() }.joinToString(" · "), onClose) {
                 Button("Add to a playlist", icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) { doing = "add" }
+                Button("Play it now", main = false, glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(listOf(t), 0); onClose() }
                 Button("Play next", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.fillMaxWidth()) { Playing.playNext(listOf(t)); onClose() }
                 Button("Add to the queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.fillMaxWidth()) { Playing.addToQueue(listOf(t)); onClose() }
                 val fav = Sync.isFavourite(t.id)
@@ -608,7 +740,98 @@ object Ui {
                     val artist = album?.artist ?: t.artist
                     if (Scanner.view.artists.any { it.name == artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(artist)) }
                 }
+                Button("Song info", main = false, icon = KueSettings.Icons.INFO, modifier = Modifier.fillMaxWidth()) { doing = "info" }
                 Button("Edit name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { doing = "edit" }
+                Button("Delete from your Drive", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.fillMaxWidth()) { doing = "delete" }
+            }
+        }
+    }
+
+    /**
+     * Everything about one song, as Shazam shows it (Kevin, 25 November 2026): its cover big, its name, artist and
+     * album, the file's own details, what the music catalogue matched it to, and a way to see it on YouTube or the web.
+     */
+    @Composable
+    fun SongInfo(t: Track, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val open = { url: String ->
+            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            Unit
+        }
+        val words = java.net.URLEncoder.encode(listOf(t.artist.takeIf { it != Library.UNKNOWN_ARTIST }.orEmpty(), t.title).filter { it.isNotBlank() }.joinToString(" "), "UTF-8")
+        Dialog(onDismissRequest = onClose) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Cover(Scanner.artForTrack(t) ?: Scanner.singleArtFor(t), Modifier.fillMaxWidth().aspectRatio(1f), corner = 16.dp, glyphSize = 72.dp)
+                Words(t.title, 22, bold = true, lines = 3)
+                Words(t.artist, 17, K.Accent, lines = 2)
+                val album = listOfNotNull(t.album.takeIf { it.isNotBlank() }, t.year.takeIf { it > 0 }?.toString()).joinToString(" · ")
+                if (album.isNotEmpty()) Words(album, 15, K.Soft, lines = 2)
+                val facts = buildList {
+                    if (t.albumArtist.isNotBlank() && t.albumArtist != t.artist) add("Album artist" to t.albumArtist)
+                    if (t.trackNo > 0) add("Song" to (t.trackNo.toString() + if (t.discNo > 0) " on disc " + t.discNo else ""))
+                    if (t.genre.isNotBlank()) add("Kind of music" to t.genre)
+                    if (t.durationMs > 0) add("Length" to Library.clock(t.durationMs))
+                    Scanner.data.singleTitles[t.id]?.let { add("Came out as a single" to it) }
+                    add("File" to t.fileName)
+                    add("Type" to Library.ending(t.fileName).uppercase())
+                    if (t.size > 0) add("Size" to String.format("%.1f MB", t.size / 1_000_000.0))
+                    if (t.size > 0 && t.durationMs > 0) add("Quality" to ((t.size * 8 / (t.durationMs / 1000.0)) / 1000).toInt().toString() + " kbps")
+                    Scanner.data.folders.firstOrNull { it.id == t.folderId }?.let { add("Folder in your Drive" to it.name) }
+                    add("On this phone" to if (t.id in Offline.saved) "Yes, plays with no internet" else "No")
+                    add("Files fixed" to if (t.fixed) "Yes" else "Not yet")
+                }
+                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((label, value) in facts) Row {
+                        Words(label, 14, K.Soft, modifier = Modifier.width(130.dp))
+                        Words(value, 14, lines = 3, modifier = Modifier.weight(1f))
+                    }
+                }
+                val release = Scanner.releaseFor(t)
+                Words(if (release != null) "Matched in the MusicBrainz music catalogue." else "Not matched in the music catalogue.", 14, K.Soft, lines = 2)
+                Button("Play it", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(listOf(t), 0); onClose() }
+                Button("Watch it on YouTube", main = false, icon = KueSettings.Icons.VIDEO, modifier = Modifier.fillMaxWidth()) { open("https://www.youtube.com/results?search_query=$words") }
+                Button("Look it up on the web", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://www.google.com/search?q=$words") }
+                if (release != null) Button("Its record in the catalogue", main = false, icon = KueSettings.Icons.OPEN, modifier = Modifier.fillMaxWidth()) { open("https://musicbrainz.org/release/" + release.first) }
+                Button("Close", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+            }
+        }
+    }
+
+    /** Deletes a song: its file goes to the Drive's bin (kept 30 days there), and it leaves KueSounds. Asked first. */
+    @Composable
+    private fun DeleteSong(t: Track, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var busy by remember { mutableStateOf(false) }
+        var saying by remember { mutableStateOf("") }
+        HoldBox("Delete \"" + t.title + "\"?", t.artist, { if (!busy) onClose() }) {
+            Words("Its file goes to your Google Drive's bin. Google keeps it there for 30 days, so it can be put back from drive.google.com.", 14, K.Soft, lines = 4)
+            if (saying.isNotEmpty()) Words(saying, 14, K.Accent, lines = 3)
+            Button(if (busy) "Deleting…" else "Delete it", icon = KueSettings.Icons.BIN, modifier = Modifier.fillMaxWidth()) {
+                if (busy) return@Button
+                val go = {
+                    busy = true
+                    scope.launch {
+                        val said = withContext(Dispatchers.IO) {
+                            runCatching {
+                                Drive.trash(t.id, Google.editToken() ?: throw Drive.SignedOut())
+                                Offline.remove(listOf(t))
+                                Scanner.removeTracks(setOf(t.id))
+                                Scanner.note("deleted by hand (to the Drive's bin): " + t.fileName)
+                            }.exceptionOrNull()
+                        }
+                        busy = false
+                        if (said == null) {
+                            android.widget.Toast.makeText(context, "Deleted. It's in your Drive's bin for 30 days.", android.widget.Toast.LENGTH_SHORT).show()
+                            onClose()
+                        } else saying = if (said is Drive.SignedOut) "Not deleted: Google needs the edit permission. Try again." else "Not deleted: " + (said.message ?: "it didn't work")
+                    }
+                    Unit
+                }
+                if (Google.canEdit) go() else Fixer.askPermission { go() }
             }
         }
     }
@@ -708,24 +931,17 @@ object Ui {
 
     /** Songs that came out as singles, each with its single's cover and name. */
     @Composable
-    private fun SingleList(songs: List<Track>, titles: Map<String, String>) {
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
-            itemsIndexed(songs, key = { _, t -> t.id }) { i, t ->
-                val on = t.id == Playing.currentId
-                Row(
-                    Modifier.fillMaxWidth().heightIn(min = 72.dp).clip(RoundedCornerShape(12.dp))
-                        .background(if (on) K.Panel else Color.Transparent).clickable { Playing.play(songs, i) }.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Cover(Scanner.singleArtFor(t), Modifier.size(56.dp), corner = 10.dp, glyphSize = 24.dp)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Words(t.title, 16, if (on) K.Accent else K.Ink, bold = on)
-                        Words(t.artist + " · single, " + (titles[t.id] ?: t.title), 13, K.Soft)
-                    }
-                }
+    private fun SingleList(songs: List<Track>, titles: Map<String, String>, layout: Views.Layout, go: (Screen) -> Unit) {
+        var held by remember { mutableStateOf<Track?>(null) }
+        val playing = Playing.currentId
+        val things = remember(songs, titles, playing) {
+            songs.mapIndexed { i, t ->
+                Item(t.id, t.title, t.artist + " · single, " + (titles[t.id] ?: t.title), Glyph.DISC, { Scanner.singleArtFor(t) },
+                    highlight = t.id == playing, onHold = { held = t }) { Playing.play(songs, i) }
             }
         }
+        Shelf(things, layout)
+        held?.let { t -> SongBox(t, go) { held = null } }
     }
 
     @Composable
@@ -1004,6 +1220,28 @@ object Ui {
                     Words(Library.clock(duration), 14, K.Soft)
                 }
             }
+            // The tools under the song (Kevin, 25 November 2026): its sound, what plays next, the sleep timer, its details.
+            var tool by remember { mutableStateOf("") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ToolChip(KueSettings.Icons.EQUALISER, "Sound", Sound.profile(Sound.kindOf(Playing.currentId)).let { it.eqOn || it.bass > 0 || it.surround > 0 || it.louder > 0 }, Modifier.weight(1f)) { tool = "sound" }
+                if (!Playing.isRadio) ToolChip(KueSettings.Icons.QUEUE, "Up next", false, Modifier.weight(1f)) { tool = "queue" }
+                if (!Playing.isRadio && !Playing.isPodcast) {
+                    val sleeping = Playing.sleepAt > 0 || Playing.sleepAtEnd
+                    val sleepWords = when {
+                        Playing.sleepAtEnd -> "End of song"
+                        Playing.sleepAt > 0 -> ((Playing.sleepAt - System.currentTimeMillis()) / 60_000 + 1).toString() + " min"
+                        else -> "Sleep"
+                    }
+                    ToolChip(KueSettings.Icons.SLEEP, sleepWords, sleeping, Modifier.weight(1f)) { Playing.nextMusicSleep() }
+                    val track = Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }
+                    if (track != null) ToolChip(KueSettings.Icons.INFO, "Info", false, Modifier.weight(1f)) { tool = "info" }
+                }
+            }
+            when (tool) {
+                "sound" -> SoundBox(Sound.kindOf(Playing.currentId)) { tool = "" }
+                "queue" -> UpNext { tool = "" }
+                "info" -> Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }?.let { SongInfo(it) { tool = "" } } ?: run { tool = "" }
+            }
             if (Playing.isRadio) OnlineUi.RadioControls() else
             if (Playing.isPodcast) PodUi.Controls() else
             Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1023,6 +1261,115 @@ object Ui {
                 ) { Playing.nextRepeat() }
             }
         }
+    }
+
+    /** A small button under the song: a drawn icon and a word, yellow when it is on. */
+    @Composable
+    private fun ToolChip(icon: String, label: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
+        Column(
+            modifier.clip(RoundedCornerShape(14.dp)).background(if (on) K.Accent else K.Panel).clickable(onClickLabel = label, onClick = onClick).padding(vertical = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            KueSettings.Icon(icon, 22.dp, if (on) K.Page else K.Ink, 2f)
+            Words(label, 12, if (on) K.Page else K.Soft)
+        }
+    }
+
+    /** What is lined up to play: tap one to play it, the cross to take it out. */
+    @Composable
+    private fun UpNext(onClose: () -> Unit) {
+        var lined by remember { mutableStateOf(Playing.queue()) }
+        Dialog(onDismissRequest = onClose) {
+            Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Words("Up next", 19, bold = true)
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 460.dp)) {
+                    items(lined, key = { it.index }) { q ->
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(if (q.now) K.Panel else Color.Transparent)
+                                .clickable { Playing.jumpTo(q.index); lined = Playing.queue() }.padding(start = 10.dp, top = 6.dp, bottom = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Words(q.title, 15, if (q.now) K.Accent else K.Ink, bold = q.now)
+                                if (q.artist.isNotEmpty()) Words(q.artist, 13, K.Soft)
+                            }
+                            if (!q.now) Box(Modifier.size(40.dp).clickable(onClickLabel = "Take it out") { Playing.removeAt(q.index); lined = Playing.queue() }, contentAlignment = Alignment.Center) {
+                                KueSettings.Icon(KueSettings.Icons.CROSS, 18.dp, K.Soft, 2.2f)
+                            }
+                        }
+                    }
+                }
+                Button("Close", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+            }
+        }
+    }
+
+    /** The sound settings for music or for podcasts, in a box over Now playing. */
+    @Composable
+    private fun SoundBox(kind: Sound.Kind, onClose: () -> Unit) {
+        Dialog(onDismissRequest = onClose) {
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Words("Sound for " + kind.label.lowercase(), 19, bold = true)
+                SoundPanel(kind)
+                Button("Close", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(), onClick = onClose)
+            }
+        }
+    }
+
+    /**
+     * The graphic equaliser and the rest, for one profile (Kevin, 25 November 2026): on or off, a ready-made setting or
+     * your own, the five bands to set by hand, then deep bass, surround and louder; for podcasts, skipping silences.
+     */
+    @Composable
+    fun SoundPanel(kind: Sound.Kind) {
+        @Suppress("UNUSED_VARIABLE") val changed = Sound.changes
+        val p = Sound.profile(kind)
+        var presetsOpen by remember { mutableStateOf(false) }
+        KueSettings.Toggle("Equaliser", "Shapes the sound: more bass, clearer voices, and the rest.", p.eqOn, look) { on -> Sound.change(kind) { it.copy(eqOn = on) } }
+        KueSettings.FanOut("Setting", Sound.presets.map { it.name }, p.preset, presetsOpen, look, { presetsOpen = it }) { i ->
+            presetsOpen = false
+            // Picking your own starts from the setting in use, so it can be changed a little.
+            Sound.change(kind) { it.copy(eqOn = true, preset = i, own = if (i == Sound.OWN && it.preset != Sound.OWN) it.levels else it.own) }
+        }
+        val levels = p.levels
+        Sound.bands.forEachIndexed { b, hz ->
+            val shown = if (p.eqOn) levels[b] else 0f
+            Column {
+                Row {
+                    Words(Sound.bandNames[b] + " · " + (if (hz >= 1000) (if (hz % 1000 == 0) (hz / 1000).toString() else String.format("%.1f", hz / 1000f)) + " kHz" else "$hz Hz"), 14, K.Soft, modifier = Modifier.weight(1f))
+                    Words((if (shown > 0) "+" else "") + String.format("%.0f", shown) + " dB", 14, if (shown != 0f) K.Accent else K.Soft)
+                }
+                Slider(
+                    value = shown, valueRange = -Sound.RANGE..Sound.RANGE, steps = (Sound.RANGE * 2).toInt() - 1,
+                    onValueChange = { v -> Sound.change(kind) { it.copy(eqOn = true, preset = Sound.OWN, own = it.levels.toMutableList().also { l -> l[b] = v }) } },
+                    colors = SliderDefaults.colors(thumbColor = K.Ink, activeTrackColor = K.Accent, inactiveTrackColor = K.Raised),
+                )
+            }
+        }
+        val extra: @Composable (String, Int, (Int) -> Sound.Profile) -> Unit = { label, value, set ->
+            Column {
+                Row {
+                    Words(label, 14, K.Soft, modifier = Modifier.weight(1f))
+                    Words(if (value == 0) "Off" else "$value%", 14, if (value > 0) K.Accent else K.Soft)
+                }
+                Slider(
+                    value = value.toFloat(), valueRange = 0f..100f, steps = 9,
+                    onValueChange = { v -> Sound.save(kind, set(v.toInt())) },
+                    colors = SliderDefaults.colors(thumbColor = K.Ink, activeTrackColor = K.Accent, inactiveTrackColor = K.Raised),
+                )
+            }
+        }
+        extra("Deep bass", p.bass) { p.copy(bass = it) }
+        extra("Surround, for headphones", p.surround) { p.copy(surround = it) }
+        extra("Louder", p.louder) { p.copy(louder = it) }
+        if (kind == Sound.Kind.PODCASTS) {
+            KueSettings.Toggle("Skip silences", "Gaps in an episode are skipped over, so it takes less time.", p.skipSilence, look) { on -> Sound.change(kind) { it.copy(skipSilence = on) } }
+        }
+        Button("Back to how it was made", main = false, modifier = Modifier.fillMaxWidth()) { Sound.save(kind, Sound.Profile()) }
+        if (Sound.missing.isNotEmpty()) KueSettings.Note("This phone doesn't have " + Sound.missing.joinToString(", ") + ", so those don't change anything.", look)
     }
 
     /**
@@ -1176,6 +1523,10 @@ object Ui {
         KueSettings.Place("app", "KueSounds", "Your music", "Look for new music"),
         KueSettings.Place("app", "KueSounds", "Fix the files", "Fix all matched albums"),
         KueSettings.Place("app", "KueSounds", "Fix the files", "Albums still to fix"),
+        KueSettings.Place("app", "KueSounds", "Sound for music", "Equaliser for music"),
+        KueSettings.Place("app", "KueSounds", "Sound for music", "Bass, surround and louder for music"),
+        KueSettings.Place("app", "KueSounds", "Sound for podcasts and radio", "Equaliser for podcasts and radio"),
+        KueSettings.Place("app", "KueSounds", "Sound for podcasts and radio", "Skip silences in podcasts"),
         KueSettings.Place("look", "Look and feel", null, "Text size"),
         KueSettings.Place("look", "Look and feel", null, "Stronger contrast"),
         KueSettings.Place("notices", "Notifications", null, "Progress in the pull-down"),
@@ -1197,11 +1548,12 @@ object Ui {
         val data = Scanner.data
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        var open by rememberSaveable { mutableStateOf("app") }
+        val askedFor = remember { settingsAt.also { settingsAt = null } }
+        var open by rememberSaveable { mutableStateOf(askedFor?.substringBefore('|') ?: "app") }
         val toggle = { id: String -> open = if (open == id) "" else id }
         val stamp = { at: Long -> java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(at)) }
         // Sections inside a group fold away too (Kevin, 25 November 2026); Search all settings opens the right one.
-        var sections by rememberSaveable { mutableStateOf("") }
+        var sections by rememberSaveable { mutableStateOf(askedFor?.let { "\n" + it } ?: "") }
         // One open section a line. Not "|" between them: a section's own id has a "|" in it ("app|Fix the files"),
         // so split on "|" no section ever counted as open and none could be opened (Kevin, 25 November 2026).
         val sectionOpen = { id: String -> id in sections.split("\n") }
@@ -1247,6 +1599,10 @@ object Ui {
                     if (Fixer.status.isNotEmpty()) Words(Fixer.status, 14, K.Accent, lines = 2)
                     if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 2)
                     FixFiles(fixable, "Fix all matched albums", main = true)
+                }
+                KueSettings.Section("Sound for music", sectionOpen("app|Sound for music"), look, { flip("app|Sound for music") }) { SoundPanel(Sound.Kind.MUSIC) }
+                KueSettings.Section("Sound for podcasts and radio", sectionOpen("app|Sound for podcasts and radio"), look, { flip("app|Sound for podcasts and radio") }) {
+                    SoundPanel(Sound.Kind.PODCASTS)
                 }
             }
 

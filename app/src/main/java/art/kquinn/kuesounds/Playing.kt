@@ -280,6 +280,46 @@ object Playing {
         if (sleepAt > 0 || sleepAtEnd) clock.post(sleepCheck)
     }
 
+    /** What is lined up to play: each item's place, name and artist, and which one is playing (Up next). */
+    data class Lined(val index: Int, val title: String, val artist: String, val now: Boolean)
+
+    fun queue(): List<Lined> {
+        val c = controller ?: return emptyList()
+        return (0 until c.mediaItemCount).map { i ->
+            val m = c.getMediaItemAt(i).mediaMetadata
+            Lined(i, m.title?.toString().orEmpty(), m.artist?.toString().orEmpty(), i == c.currentMediaItemIndex)
+        }
+    }
+
+    /** Plays the item at [index] in the line-up from its start. */
+    fun jumpTo(index: Int) {
+        val c = controller ?: return
+        if (index in 0 until c.mediaItemCount) { c.seekTo(index, 0L); c.play() }
+    }
+
+    /** Takes an item out of the line-up (not the one playing). */
+    fun removeAt(index: Int) {
+        val c = controller ?: return
+        if (index in 0 until c.mediaItemCount && index != c.currentMediaItemIndex) c.removeMediaItem(index)
+    }
+
+    /** The sleep timer for music, along: off, 15, 30, 45, 60, 90 minutes, the end of this song, then off again. */
+    fun nextMusicSleep() {
+        val now = System.currentTimeMillis()
+        val minutesLeft = if (sleepAt > 0) ((sleepAt - now) / 60_000 + 1).toInt() else 0
+        when {
+            sleepAtEnd -> { sleepAtEnd = false; sleepAt = 0 }
+            sleepAt == 0L -> sleepAt = now + 15 * 60_000L
+            minutesLeft <= 15 -> sleepAt = now + 30 * 60_000L
+            minutesLeft <= 30 -> sleepAt = now + 45 * 60_000L
+            minutesLeft <= 45 -> sleepAt = now + 60 * 60_000L
+            minutesLeft <= 60 -> sleepAt = now + 90 * 60_000L
+            else -> { sleepAt = 0; sleepAtEnd = true }
+        }
+        clock.removeCallbacks(sleepCheck)
+        if (sleepAt > 0 || sleepAtEnd) clock.post(sleepCheck)
+    }
+
     fun toggle() {
         val c = controller ?: return
         if (c.isPlaying) c.pause() else {
