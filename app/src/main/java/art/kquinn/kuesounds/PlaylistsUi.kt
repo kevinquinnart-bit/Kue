@@ -135,8 +135,8 @@ object ListUi {
                     Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable { go(Screen.PlaylistPage(p.id)) }.padding(14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    val pic = if (layout == Views.Layout.PICTURES) pictureOf(p) else null
-                    Box(Modifier.size(if (layout == Views.Layout.PICTURES) 56.dp else 44.dp).clip(RoundedCornerShape(10.dp)).background(K.Raised), contentAlignment = Alignment.Center) {
+                    val pic = pictureOf(p)
+                    Box(Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)).background(K.Raised), contentAlignment = Alignment.Center) {
                         if (pic != null) coil3.compose.AsyncImage(model = pic, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
                         else Sign(Glyph.NOTE, 22.dp, K.Soft)
                     }
@@ -266,7 +266,7 @@ object ListUi {
 
     /** The box for adding [ids] (one song, or an album's) to a playlist, or to a new one. */
     @Composable
-    fun AddBox(label: String, ids: List<String>, onClose: () -> Unit) {
+    fun AddBox(label: String, ids: List<String>, onAdded: (String) -> Unit = {}, onClose: () -> Unit) {
         val lists = remember(Sync.entries) { Playlists.all() }
         var naming by remember { mutableStateOf<String?>(null) }
         Dialog(onDismissRequest = onClose) {
@@ -275,12 +275,12 @@ object ListUi {
                 val typed = naming
                 if (typed != null) {
                     Field("The new playlist's name", typed) { naming = it }
-                    Ui.Button("Make it and add", modifier = Modifier.fillMaxWidth()) { Playlists.create(typed, ids); onClose() }
+                    Ui.Button("Make it and add", modifier = Modifier.fillMaxWidth()) { Playlists.create(typed, ids); onAdded(typed); onClose() }
                 } else {
                     Ui.Button("New playlist", modifier = Modifier.fillMaxWidth()) { naming = "" }
                     LazyColumn(Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(lists, key = { it.id }) { p ->
-                            Ui.Button(p.name + " (" + p.ids.size + ")", main = false, modifier = Modifier.fillMaxWidth()) { Playlists.add(p.id, ids); onClose() }
+                            Ui.Button(p.name + " (" + p.ids.size + ")", main = false, modifier = Modifier.fillMaxWidth()) { Playlists.add(p.id, ids); onAdded(p.name); onClose() }
                         }
                     }
                 }

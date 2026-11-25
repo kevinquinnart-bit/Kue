@@ -220,13 +220,15 @@ object OnlineUi {
 
     /** YouTube's own player, on KueSounds' screen. It stops when this screen closes. */
     @Composable
-    fun YouTubePlayer(url: String, back: () -> Unit) {
+    fun YouTubePlayer(url: String, back: () -> Unit, tries: List<String> = emptyList(), name: String = "") {
         val link = remember(url) { YouTube.read(url) }
-        var title by remember { mutableStateOf("") }
+        var title by remember { mutableStateOf(name) }
+        val context = androidx.compose.ui.platform.LocalContext.current
         LaunchedEffect(url) {
+            // KueSounds' own sound stops while the video plays (Kevin, 25 November 2026).
             Playing.pause()
             if (SpotifyLink.connected && !SpotifyLink.paused) SpotifyLink.toggle()
-            if (link != null) {
+            if (link != null && name.isEmpty()) {
                 title = withContext(Dispatchers.IO) { YouTube.title(link) }
                 YouTube.remember(link, title)
             }
@@ -250,8 +252,23 @@ object OnlineUi {
                             settings.mediaPlaybackRequiresUserGesture = false
                             webChromeClient = android.webkit.WebChromeClient()
                             setBackgroundColor(android.graphics.Color.BLACK)
+                            // A song's found videos: the next is tried when one won't play inside another app, and the
+                            // YouTube app opens it when none will.
+                            val main = android.os.Handler(android.os.Looper.getMainLooper())
+                            addJavascriptInterface(object {
+                                @android.webkit.JavascriptInterface fun trying(id: String) { Scanner.note("YouTube: video wouldn't play here, trying $id") }
+                                @android.webkit.JavascriptInterface fun failed(id: String) {
+                                    main.post {
+                                        Scanner.note("YouTube: none of the found videos would play here; opened in the YouTube app")
+                                        val app = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("vnd.youtube:$id")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        val web = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=$id")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        runCatching { context.startActivity(app) }.onFailure { runCatching { context.startActivity(web) } }
+                                        back()
+                                    }
+                                }
+                            }, "Kue")
                             // A web address of KueSounds' own as the page's home, so YouTube sees where its player is shown.
-                            loadDataWithBaseURL("https://kevinquinnart-bit.github.io/kuesounds/", YouTube.page(link), "text/html", "UTF-8", null)
+                            loadDataWithBaseURL("https://kevinquinnart-bit.github.io/kuesounds/", if (tries.isNotEmpty()) YouTube.pageFor(tries) else YouTube.page(link), "text/html", "UTF-8", null)
                             view = this
                         }
                     },
