@@ -2490,6 +2490,7 @@ private fun MainScreen(
                         }
                         StripWithTv { AboutStrip(onFilm?.name, about, onFilm?.poster.orEmpty(), onFilm?.let { f -> if (f.id.startsWith(Catalogue.PREFIX)) "movie" to f.id.removePrefix(Catalogue.PREFIX) else null }) }
                     }
+                    val filmRowTop = rowToTop(state.filmGrid)
                     LazyVerticalGrid(
                         columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(5),
                         state = state.filmGrid,
@@ -2498,7 +2499,7 @@ private fun MainScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
-                        itemsIndexed(shown, key = { _, f -> f.id }) { _, film ->
+                        itemsIndexed(shown, key = { _, f -> f.id }) { i, film ->
                             val key = "film:" + film.id
                             val favKey = Favourites.key(film, login)
                             Poster(
@@ -2508,7 +2509,7 @@ private fun MainScreen(
                                 if (key == resumeKey) Modifier.focusRequester(resume) else Modifier,
                                 favourite = favKey in favs,
                                 onHold = { menuFilm = film },
-                                onFocus = { state.onFilm = film },
+                                onFocus = { state.onFilm = film; filmRowTop(i) },
                                 rating = film.rating,
                                 lookup = "movie",
                                 watched = watchedNow >= 0 && Watched.isWatched(context, film.url),
@@ -4069,6 +4070,7 @@ private fun Pane.SeriesPane(
         if (!LocalPhone.current) remember(shown, state.onShow) { state.onShow?.takeIf { s -> shown.any { it.id == s.id } } ?: shown.firstOrNull() }.let { sh ->
             StripWithTv { AboutStrip(sh?.name, sh?.about, sh?.poster.orEmpty(), sh?.let { if (it.id.startsWith(Catalogue.PREFIX)) "series" to it.id.removePrefix(Catalogue.PREFIX) else null }) }
         }
+        val showRowTop = rowToTop(state.showGrid)
         LazyVerticalGrid(
             columns = if (LocalPhone.current) GridCells.Adaptive(104.dp) else GridCells.Fixed(5),
             state = state.showGrid,
@@ -4077,7 +4079,7 @@ private fun Pane.SeriesPane(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            itemsIndexed(shown, key = { _, s -> s.id }) { _, show ->
+            itemsIndexed(shown, key = { _, s -> s.id }) { i, show ->
                 val key = "show:" + show.id
                 Poster(
                     show.name, show.poster,
@@ -4089,7 +4091,7 @@ private fun Pane.SeriesPane(
                     if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier,
                     favourite = Favourites.key(show) in favs,
                     onHold = { favourites.toggle(Favourites.key(show)) },
-                    onFocus = { state.onShow = show },
+                    onFocus = { state.onShow = show; showRowTop(i) },
                     progress = partWay[show.name],
                     rating = ratingOf(show.about.rating),
                     lookup = "series",
@@ -7106,13 +7108,15 @@ private fun CatalogueGrid(catalogue: Catalogue, state: BrowseState, resume: Focu
     }
     Column(modifier) {
         Heading(catalogue.name + " · " + items.size + (if (catalogue.key in state.catDone) "" else "+") + (if (catalogue.type == "movie") " movies" else " series") + " from the catalogue")
-        if (!phone) AboutStrip(on?.name, on?.about)
+        // Like Movies' and Series' own lists: the small TV beside the strip, 5 posters across (Kevin, 25 November 2026).
+        if (!phone) StripWithTv { AboutStrip(on?.name, on?.about) }
+        val catRowTop = rowToTop(grid)
         when {
             problem -> Note("This catalogue didn't answer. Check the internet, or see Settings › Health check.")
             items.isEmpty() && busy -> Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentInk) }
             items.isEmpty() -> Note("This catalogue is empty.")
             else -> LazyVerticalGrid(
-                columns = if (phone) GridCells.Adaptive(104.dp) else GridCells.Fixed(4),
+                columns = if (phone) GridCells.Adaptive(104.dp) else GridCells.Fixed(5),
                 state = grid,
                 modifier = Modifier.fillMaxSize().focusRestorer(),
                 contentPadding = PaddingValues(4.dp),
@@ -7129,6 +7133,7 @@ private fun CatalogueGrid(catalogue: Catalogue, state: BrowseState, resume: Focu
                         if (key == state.resumeKey) Modifier.focusRequester(resume) else Modifier,
                         onFocus = {
                             on = item
+                            catRowTop(i)
                             if (i >= items.size - 8) wanted = items.size
                         },
                         rating = ratingOf(item.about.rating),
@@ -8219,4 +8224,19 @@ private fun FilmPage(
             AlikeRow(alike.map { Triple(it.name, it.poster, it.rating) }) { i -> onOpen(alike[i]) }
         }
     }
+}
+
+/**
+ * TV: the row of posters the remote is on moves to the top of the list, so the names under the row above don't hang
+ * along the top (Kevin, 25 November 2026). Gives back what each poster calls with its place in the list.
+ */
+@Composable
+private fun rowToTop(grid: androidx.compose.foundation.lazy.grid.LazyGridState, across: Int = 5): (Int) -> Unit {
+    val phone = LocalPhone.current
+    var row by remember(grid) { mutableIntStateOf(-1) }
+    LaunchedEffect(row) {
+        if (phone || row < 0) return@LaunchedEffect
+        runCatching { grid.animateScrollToItem(row * across) }
+    }
+    return { i -> row = i / across }
 }
