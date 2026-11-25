@@ -62,8 +62,26 @@ object Tagger {
      * cover was given), and the song must be as long as before. Throws when the check fails, so a damaged
      * file is never sent back to the Drive.
      */
-    fun fix(file: File, d: Details) {
-        val length = AudioFileIO.read(file).audioHeader?.trackLength ?: 0
+    fun fix(file: File, d: Details, knownSeconds: Int = 0, rebuild: ((File, File) -> Boolean)? = null) {
+        val mp4 = Library.ending(file.name) in setOf("m4a", "m4b", "mp4")
+        if (!mp4 || rebuild == null) return write(file, d, knownSeconds)
+        // An M4A the tag library can't write is rebuilt first (see Fixer.rebuildMp4), from the untouched copy.
+        val original = File(file.parentFile, file.name.substringBeforeLast('.') + ".original." + Library.ending(file.name))
+        file.copyTo(original, overwrite = true)
+        try {
+            write(file, d, knownSeconds)
+        } catch (first: Exception) {
+            val rebuilt = File(file.parentFile, file.name.substringBeforeLast('.') + ".rebuilt." + Library.ending(file.name))
+            if (!rebuild(original, rebuilt)) throw first
+            write(rebuilt, d, knownSeconds)
+            rebuilt.copyTo(file, overwrite = true)
+        } finally {
+            original.delete()
+        }
+    }
+
+    private fun write(file: File, d: Details, knownSeconds: Int) {
+        val length = runCatching { AudioFileIO.read(file).audioHeader?.trackLength ?: 0 }.getOrDefault(0)
         // Everything written inside the file goes: every kind of details block it holds, and its pictures.
         AudioFileIO.delete(AudioFileIO.read(file))
         val clean = AudioFileIO.read(file)
@@ -87,7 +105,9 @@ object Tagger {
         check(after.album == d.album) { "the album name didn't stick" }
         check(d.title.isBlank() || after.title == d.title) { "the song name didn't stick" }
         check(after.pictures == (if (d.cover != null) 1 else 0)) { "the file holds " + after.pictures + " pictures after the change" }
-        check(kotlin.math.abs(after.lengthSeconds - length) <= 1) { "the song's length changed" }
+        // As long as before, or as long as the phone measured it when the music was read: the tag library's own reading of
+        // an MP3's length can be thrown off by what was inside it before (Kevin's "Walk Like An Egyptian", 24-25 Nov 2026).
+        check(kotlin.math.abs(after.lengthSeconds - length) <= 1 || (knownSeconds > 0 && kotlin.math.abs(after.lengthSeconds - knownSeconds) <= 2)) { "the song's length changed" }
     }
 
     /**

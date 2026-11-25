@@ -1074,21 +1074,13 @@ object Ui {
         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             when {
                 // Nothing matched yet: nothing has been fixed either, so it mustn't say so.
-                albums.isEmpty() -> Words(
-                    if (Scanner.running) "Nothing to fix yet. Albums are looked up once the song details are read." else "No albums matched yet.",
-                    14, K.Soft, lines = 2,
-                )
-                todo.isEmpty() -> Words("Files fixed in your Drive.", 14, K.Soft, centre = albums.size == 1)
-                Fixer.running && todo.any { Fixer.isWaiting(it) } -> Words("Waiting to be fixed.", 14, K.Soft, centre = albums.size == 1)
-                Fixer.running && albums.size == 1 && Fixer.status.contains(todo.first().title) -> Words(Fixer.status, 14, K.Accent, lines = 2, centre = true)
+                albums.isEmpty() -> Words(if (Scanner.running) "Nothing to fix until the albums are looked up." else "No albums matched yet.", 14, K.Soft, lines = 2)
+                todo.isEmpty() -> Words("Fixed.", 14, K.Soft, centre = albums.size == 1)
+                Fixer.running && (todo.any { Fixer.isWaiting(it) } || Fixer.status.contains(todo.first().title)) -> Working(if (Fixer.status.contains(todo.first().title)) Fixer.status.removePrefix("Fixing files · ") else "Waiting its turn")
                 // Settings shows it as the yellow button (Kevin, 24 Nov 2026: the blue one on a panel looked like text).
                 !sure -> Button(label, main = main, modifier = Modifier.fillMaxWidth()) { sure = true }
                 else -> {
-                    Words(
-                        "For " + count(songs, "song file") + " in your Drive: puts each song's name and artist right, takes out " +
-                            "everything else inside the file, then writes the album and its cover. Google keeps the old versions for 30 days.",
-                        14, K.Soft, lines = 5,
-                    )
+                    Words(count(songs, "song") + ": the right name, artist, album and cover written into each file in your Drive. Google keeps the old version for 30 days.", 14, K.Soft, lines = 4)
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Button("Fix them", modifier = Modifier.weight(1f)) {
                             sure = false
@@ -1099,6 +1091,43 @@ object Ui {
                 }
             }
             if (Fixer.permissionProblem.isNotEmpty()) Words(Fixer.permissionProblem, 14, K.Accent, lines = 6)
+        }
+    }
+
+    /** A spinner and what is being done: shown whenever KueSounds is working on something (Kevin, 25 November 2026). */
+    @Composable
+    private fun Working(text: String) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
+            Words(text, 14, K.Accent, lines = 2, modifier = Modifier.weight(1f))
+        }
+    }
+
+    /**
+     * Settings › KueSounds › Fix the files, in one place (Kevin, 25 November 2026: it was shown twice, with long words):
+     * what is left, one button, a spinner while it works, and the songs whose files can't be changed.
+     */
+    @Composable
+    private fun FixPanel(view: Scanner.LibraryView) {
+        val data = Scanner.data
+        val aside = remember(data) { data.tracks.filter { Fixer.setAside(it, data) } }
+        var showAside by remember { mutableStateOf(false) }
+        when {
+            Fixer.running -> Working(Fixer.status.removePrefix("Fixing files · ").ifBlank { "Fixing" })
+            view.matched.isEmpty() -> Words(if (Scanner.running) "Nothing to fix until the albums are looked up." else "No albums matched yet.", 15, K.Soft, lines = 2)
+            view.leftToFix == 0 -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                KueSettings.Icon(KueSettings.Icons.TICK, 22.dp, K.Accent, 2.6f)
+                Words("Every matched album is fixed.", 15, lines = 2)
+            }
+            else -> Words(count(view.leftToFix, "album") + " to fix", 17, bold = true)
+        }
+        if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 3)
+        if (!Fixer.running && view.leftToFix > 0) FixFiles(view.matched, "Fix them", main = true)
+        if (aside.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().clickable { showAside = !showAside }, verticalAlignment = Alignment.CenterVertically) {
+                Words(count(aside.size, "song") + " can't be changed: their files are damaged. " + if (showAside) "Hide" else "See which", 14, K.Soft, lines = 3, modifier = Modifier.weight(1f))
+            }
+            if (showAside) for (t in aside) Words(t.artist + " · " + t.title + " (" + t.fileName + ")", 13, K.Soft, lines = 2)
         }
     }
 
@@ -1434,41 +1463,20 @@ object Ui {
         val albums = view.albums.size
         val stage = Scanner.stage
         val n = { x: Int -> String.format("%,d", x) }
+        // Short and plain, with a spinner on the step that is working (Kevin, 25 November 2026). Fixing has its own section.
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Words("Steps 1 to 3 only read your music. Your files are only changed at step 4, when you choose.", 14, K.Soft, lines = 3)
-            Step(
-                1, "Find your music", "Lists every song in your Google Drive.",
-                state = if (stage == 1) NOW else if (songs > 0) DONE else WAITING,
-                progress = if (stage == 1) "" else if (songs > 0) count(songs, "song") + " found" else "",
-            )
-            Step(
-                2, "Read the song details", "Reads each song's title, artist, album and any picture inside it.",
-                state = if (stage == 2) NOW else if (songs > 0 && read >= songs) DONE else WAITING,
-                progress = n(read) + " of " + n(songs) + " read",
-            )
+            Words("This only reads your music. Files change only when you press Fix.", 14, K.Soft, lines = 2)
+            Step(1, "Find your music", "", state = if (stage == 1) NOW else if (songs > 0) DONE else WAITING, progress = if (songs > 0 && stage != 1) count(songs, "song") + " found" else "")
+            Step(2, "Read the song details", "", state = if (stage == 2) NOW else if (songs > 0 && read >= songs) DONE else WAITING, progress = n(read) + " of " + n(songs))
             val singlesChecked = data.tracks.count { it.singleChecked }
             Step(
-                3, "Look up albums and singles",
-                "Finds each album's proper name, year and cover in an online music catalogue. No greatest hits or compilations: each of their songs is given the album it first came out on, or failing that its single. Songs that came out as singles get the single's cover, in the Singles tab.",
+                3, "Look up albums, covers and singles", "",
                 state = if (stage == 3) NOW else if (albums > 0 && view.lookedUp >= albums && singlesChecked >= songs) DONE else WAITING,
-                progress = n(view.lookedUp) + " of " + n(albums) + " albums looked up · " + n(view.matched.size) + " matched\n" +
-                    n(singlesChecked) + " of " + n(songs) + " songs checked for singles · " + n(data.singleTitles.size) + " found" +
-
-                    (if (Scanner.waitingForWifi && !Scanner.running) "\nLooking for singles carries on when the phone is on Wi-Fi." else "") +
+                progress = n(view.lookedUp) + " of " + n(albums) + " albums · " + n(view.withCover) + " with a cover" +
+                    (if (singlesChecked < songs) "\nSingles: " + n(singlesChecked) + " of " + n(songs) + " songs checked" else "") +
+                    (if (Scanner.waitingForWifi && !Scanner.running) "\nSingles carry on when the phone is on Wi-Fi." else "") +
                     (if (!Scanner.running && Scanner.problem.isNotEmpty()) "\n" + Scanner.problem else ""),
             )
-            Step(
-                4, "Fix the files", "Only when you press Fix, for each song: its name and artist put right, everything else inside the file taken out, then the album's name and cover written in. Google keeps the old files for 30 days.",
-                state = if (Fixer.running) NOW else if (view.matched.isNotEmpty() && view.leftToFix == 0) DONE else WAITING,
-                progress = if (view.matched.isEmpty()) "Nothing ready to fix yet"
-                else n(view.leftToFix) + " of " + count(view.matched.size, "matched album") + " still to fix" +
-                    (if (Scanner.running && !Fixer.running) "\nFixing starts once step 3 has finished." else ""),
-            )
-            // The button is here, under step 4, as well as further down.
-            if (view.matched.isNotEmpty()) {
-                if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 3)
-                FixFiles(view.matched, "Fix all matched albums", main = true)
-            }
         }
     }
 
@@ -1489,7 +1497,7 @@ object Ui {
             }
             Column(Modifier.weight(1f)) {
                 Words(name + when (state) { DONE -> " · done"; NOW -> " · now"; else -> "" }, 16, if (state == NOW) K.Accent else K.Ink, bold = true)
-                Words(what, 14, K.Soft, lines = 8)
+                if (what.isNotEmpty()) Words(what, 14, K.Soft, lines = 8)
                 if (progress.isNotEmpty()) Words(progress, 14, if (state == NOW) K.Accent else K.Ink, lines = 10)
                 if (state == NOW && Scanner.running) {
                     // Turning while it works, and how far through the part it is on.
@@ -1525,7 +1533,7 @@ object Ui {
         KueSettings.Place("app", "KueSounds", "Your music", "Songs and albums"),
         KueSettings.Place("app", "KueSounds", "Your music", "Covers"),
         KueSettings.Place("app", "KueSounds", "Your music", "Look for new music"),
-        KueSettings.Place("app", "KueSounds", "Fix the files", "Fix all matched albums"),
+        KueSettings.Place("app", "KueSounds", "Fix the files", "Fix them"),
         KueSettings.Place("app", "KueSounds", "Fix the files", "Albums still to fix"),
         KueSettings.Place("app", "KueSounds", "Sound for music", "Equaliser for music"),
         KueSettings.Place("app", "KueSounds", "Sound for music", "Bass, surround and louder for music"),
@@ -1590,20 +1598,10 @@ object Ui {
                 open == "app", look, { toggle("app") },
             ) {
                 KueSettings.Section("Your music", sectionOpen("app|Your music"), look, { flip("app|Your music") }) {
-                    Words(count(data.tracks.size, "song") + " · " + count(view.albums.size, "album"), 17)
-                    Words(String.format("%,d", view.withCover) + " with a cover", 14, K.Soft)
-                    Spacer(Modifier.height(6.dp))
                     MusicSteps(view)
-                    Spacer(Modifier.height(4.dp))
-                    if (!Scanner.running) Button("Look for new music", modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
+                    if (!Scanner.running) Button("Look for new music", main = false, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
                 }
-                KueSettings.Section("Fix the files", sectionOpen("app|Fix the files"), look, { flip("app|Fix the files") }) {
-                    val fixable = Scanner.view.matched
-                    Words(count(fixable.size, "album") + " matched · " + String.format("%,d", view.leftToFix) + " still to fix", 17)
-                    if (Fixer.status.isNotEmpty()) Words(Fixer.status, 14, K.Accent, lines = 2)
-                    if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 2)
-                    FixFiles(fixable, "Fix all matched albums", main = true)
-                }
+                KueSettings.Section("Fix the files", sectionOpen("app|Fix the files"), look, { flip("app|Fix the files") }) { FixPanel(view) }
                 KueSettings.Section("Sound for music", sectionOpen("app|Sound for music"), look, { flip("app|Sound for music") }) { SoundPanel(Sound.Kind.MUSIC) }
                 KueSettings.Section("Sound for podcasts and radio", sectionOpen("app|Sound for podcasts and radio"), look, { flip("app|Sound for podcasts and radio") }) {
                     SoundPanel(Sound.Kind.PODCASTS)

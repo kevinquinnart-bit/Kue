@@ -63,4 +63,30 @@ class TaggerTest {
         assertTrue(!Tagger.canFix("a.3ga"))
         assertTrue(!Tagger.canFix("a.aac"))
     }
+
+    // 25 November 2026: 3 of Kevin's M4A files could never be written ("incorrect offsets", "identifier is invalid").
+    // Such a file is now rebuilt from an untouched copy and written again; here the rebuild is a plain good M4A.
+    @Test
+    fun anM4aThatCantBeWrittenIsRebuiltFromAnUntouchedCopyAndWritten() {
+        val broken = File("build/tagger-out", "broken.m4a").apply { parentFile?.mkdirs(); writeBytes(ByteArray(4096) { 7 }) }
+        var askedWith: ByteArray? = null
+        Tagger.fix(broken, Tagger.Details("Right Song", "Right Singer", "Right Album", "Right Artist", 1995, 3, 1, right)) { from, to ->
+            askedWith = from.readBytes()
+            copyOf("song.m4a").copyTo(to, overwrite = true)
+            true
+        }
+        assertTrue("the rebuild was given the file as it came, untouched", askedWith?.all { it == 7.toByte() } == true)
+        assertEquals("Right Album", Tagger.read(broken).album)
+        assertEquals(1, Tagger.read(broken).pictures)
+    }
+
+    @Test
+    fun aLengthMisreadBeforeIsCheckedAgainstThePhonesOwnMeasure() {
+        // The file's length as the phone measured it when the music was read stands in when the tag library's own
+        // first reading was thrown off: a right length after fixing then passes.
+        val f = copyOf("song.mp3")
+        val real = Tagger.read(f).lengthSeconds
+        Tagger.fix(f, Tagger.Details("Right Song", "Right Singer", "Right Album", "Right Artist", 1995, 3, 1, right), knownSeconds = real)
+        assertEquals("Right Album", Tagger.read(f).album)
+    }
 }

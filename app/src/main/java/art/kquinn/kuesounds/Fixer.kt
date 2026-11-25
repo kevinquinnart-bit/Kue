@@ -67,8 +67,14 @@ object Fixer {
     fun canFix(al: Album, d: LibraryData = Scanner.data): Boolean =
         ((al.key in d.releases && al.key in d.catalogueCovers) || al.key in d.ownSingles) && al.tracks.any { Tagger.canFix(it.fileName) }
 
-    /** Fixed the full way (song name and artist put right, the rest taken out, album and cover written). */
-    fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(it.fileName) }.all { it.fixed && it.fixedFully }
+    /**
+     * A song whose file failed to fix twice is set aside (Kevin, 25 November 2026: the same 4 files failed on every
+     * press, so the albums never showed as done and Fix did the same thing over and over). It is named in Settings.
+     */
+    fun setAside(t: Track, d: LibraryData = Scanner.data): Boolean = (d.fixFailures[t.id] ?: 0) >= 2
+
+    /** Fixed the full way (song name and artist put right, the rest taken out, album and cover written), set-aside songs apart. */
+    fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(it.fileName) && !setAside(it) }.all { it.fixed && it.fixedFully }
 
     fun isWaiting(al: Album): Boolean = synchronized(waiting) { al.key in waiting }
 
@@ -97,7 +103,7 @@ object Fixer {
                 // A single of its own has no catalogue record: no list of songs, and no cover (the compilation's comes out).
                 val own = key in Scanner.data.ownSingles && key !in Scanner.data.releases
                 val cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers } ?: continue
-                val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) }
+                val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) && !setAside(it) }
                 // 1 and 2: the album's own list of songs, with each one's proper name and artist.
                 status = "Fixing files · " + al.title + " · finding its songs' proper names"
                 progress(status)
@@ -116,8 +122,8 @@ object Fixer {
         } finally {
             status = ""
             running = false
-            lastResult = "Files fixed: $fixedCount" + (if (failed > 0) ". Not fixed: $failed (see the report)" else "") +
-                (if (notLookedUp > 0) ". $notLookedUp albums couldn't be looked up (the music catalogue was busy): press Fix again later." else ".")
+            lastResult = "Last time: " + count(fixedCount, "song") + " fixed" + (if (failed > 0) ", " + failed + " couldn't be" else "") +
+                (if (notLookedUp > 0) ". The music catalogue was busy for " + count(notLookedUp, "album") + ": press Fix again later." else ".")
             Scanner.note("fixing finished: $fixedCount fixed, $failed not fixed, $notLookedUp albums not looked up")
         }
     }
@@ -139,7 +145,7 @@ object Fixer {
             Drive.downloadWhole(t.id, file, token)
             if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
             val albumArtist = Library.albumArtistOf(t)
-            Tagger.fix(file, Tagger.Details(title, artist, t.album, albumArtist, t.year, t.trackNo, t.discNo, cover))
+            Tagger.fix(file, Tagger.Details(title, artist, t.album, albumArtist, t.year, t.trackNo, t.discNo, cover), (t.durationMs / 1000).toInt()) { from, to -> rebuildMp4(from, to) }
             val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token)
             Scanner.changeTracks(setOf(t.id)) {
                 it.copy(size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = artist, albumArtist = albumArtist, named = true)
@@ -153,6 +159,8 @@ object Fixer {
             "Not saved: " + (e.message ?: e.javaClass.simpleName)
         } finally {
             file.delete()
+            File(work, t.id + ".rebuilt." + Library.ending(t.fileName)).delete()
+            File(work, t.id + ".original." + Library.ending(t.fileName)).delete()
         }
     }
 
@@ -177,6 +185,44 @@ object Fixer {
         }
     }
 
+    private fun count(n: Int, word: String) = n.toString() + " " + word + if (n == 1) "" else "s"
+
+    /**
+     * An M4A whose inside the tag library can't rewrite ("incorrect offsets", "identifier is invalid", seen on 4 of
+     * Kevin's files 24-25 November 2026): its sound is copied, untouched, into a fresh file of the same kind, which
+     * the tag library can then write. The sound isn't re-encoded, so it is exactly as it was. Android does the copy.
+     */
+    private fun rebuildMp4(from: File, to: File): Boolean = runCatching {
+        val ex = android.media.MediaExtractor()
+        ex.setDataSource(from.path)
+        val track = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(android.media.MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
+            ?: run { ex.release(); return false }
+        ex.selectTrack(track)
+        val format = ex.getTrackFormat(track)
+        val size = if (format.containsKey(android.media.MediaFormat.KEY_MAX_INPUT_SIZE)) format.getInteger(android.media.MediaFormat.KEY_MAX_INPUT_SIZE) else 0
+        val buffer = java.nio.ByteBuffer.allocate(maxOf(size, 1 shl 20))
+        val mux = android.media.MediaMuxer(to.path, android.media.MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        try {
+            val out = mux.addTrack(format)
+            mux.start()
+            val info = android.media.MediaCodec.BufferInfo()
+            while (true) {
+                info.offset = 0
+                info.size = ex.readSampleData(buffer, 0)
+                if (info.size < 0) break
+                info.presentationTimeUs = ex.sampleTime
+                info.flags = if (ex.sampleFlags and android.media.MediaExtractor.SAMPLE_FLAG_SYNC != 0) android.media.MediaCodec.BUFFER_FLAG_KEY_FRAME else 0
+                mux.writeSampleData(out, buffer, info)
+                ex.advance()
+            }
+            mux.stop()
+        } finally {
+            runCatching { mux.release() }
+            ex.release()
+        }
+        to.length() > 0
+    }.getOrDefault(false)
+
     /** One try at one song. Throws [Drive.SignedOut] when Google refuses the pass; any other failure is noted. */
     private suspend fun fixOnce(context: Context, t: Track, al: Album, cover: File?, song: Catalogue.Song?): Boolean {
         val work = File(context.cacheDir, "fix").apply { mkdirs() }
@@ -192,7 +238,7 @@ object Fixer {
             val singer = if (t.named) t.artist else song?.artist?.ifBlank { null } ?: t.artist
             val trackNo = song?.position?.takeIf { it > 0 } ?: t.trackNo
             val discNo = song?.disc?.takeIf { it > 0 } ?: t.discNo
-            Tagger.fix(file, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover))
+            Tagger.fix(file, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover), (t.durationMs / 1000).toInt()) { from, to -> rebuildMp4(from, to) }
             val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token)
             Scanner.changeTracks(setOf(t.id)) {
                 it.copy(
@@ -200,14 +246,18 @@ object Fixer {
                     albumArtist = artist, fixed = true, fixedFully = true,
                 )
             }
+            Scanner.fixTried(t.id, true)
             true
         } catch (e: Drive.SignedOut) {
             throw e
         } catch (e: Exception) {
             Scanner.note("not fixed: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
+            Scanner.fixTried(t.id, false)
             false
         } finally {
             file.delete()
+            File(work, t.id + ".rebuilt." + Library.ending(t.fileName)).delete()
+            File(work, t.id + ".original." + Library.ending(t.fileName)).delete()
         }
     }
 }

@@ -743,6 +743,14 @@ object Scanner {
     /** The catalogue's record a song's album was matched to: its id and its group's id, or null. */
     fun releaseFor(t: Track): Pair<String, String>? = data.releases[keyOf(t)]?.split('|')?.let { it[0] to it.getOrElse(1) { "" } }
 
+    /** Counts a failed fix of a song's file, or clears the count when it worked. */
+    fun fixTried(id: String, worked: Boolean) = synchronized(this) {
+        val n = data.fixFailures[id] ?: 0
+        if (worked && n == 0) return@synchronized
+        data = data.copy(fixFailures = if (worked) data.fixFailures - id else data.fixFailures + (id to n + 1))
+        save()
+    }
+
     /** Takes songs out of the library (they were deleted from the Drive). */
     fun removeTracks(ids: Set<String>) = synchronized(this) {
         data = data.copy(tracks = data.tracks.filter { it.id !in ids })
