@@ -33,7 +33,7 @@ import java.net.URLEncoder
 
 /**
  * Open song in (Kevin, 26 November 2026, from Shazam's own "Open song in"): one tap takes a song to YouTube, YouTube
- * Music, Spotify or Apple Music. Each opens in its app when it is on the phone, otherwise its website. YouTube goes
+ * Music, Spotify, Apple Music or Apple Music Classical. Each opens in its app when it is on the phone, otherwise its website. YouTube goes
  * straight to the artist's own video; the others open a search for the song. KueSounds pauses first.
  */
 object OpenSong {
@@ -42,16 +42,27 @@ object OpenSong {
         YOUTUBE_MUSIC("YouTube Music", "com.google.android.apps.youtube.music"),
         SPOTIFY("Spotify", SpotifyLink.SPOTIFY_APP),
         APPLE_MUSIC("Apple Music", "com.apple.android.music"),
+        // Apple's own app for classical music (Kevin, 26 November 2026: "add all apple stuff in").
+        APPLE_CLASSICAL("Apple Music Classical", "com.apple.android.music.classical"),
     }
 
     // Drawn for Kue, not the services' own logos.
     private const val ROUND_PLAY = "M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM10 8.5l5.5 3.5-5.5 3.5z"
+    private const val STAFF = "M3 7h18M3 11h18M3 15h18M15 5v11.5M15 16.5a2.3 2.3 0 1 1-2.3-2.3 2.3 2.3 0 0 1 2.3 2.3z"
 
     private fun icon(p: Place) = when (p) {
         Place.YOUTUBE -> KueSettings.Icons.VIDEO
         Place.YOUTUBE_MUSIC -> ROUND_PLAY
         Place.SPOTIFY -> KueSettings.Icons.MUSIC
         Place.APPLE_MUSIC -> KueSettings.Icons.DISC
+        Place.APPLE_CLASSICAL -> STAFF
+    }
+
+    /** Opens an app at its start, or its page in the Play Store when it isn't on the phone. */
+    private fun openApp(context: Context, pkg: String) {
+        val start = context.packageManager.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (start != null && runCatching { context.startActivity(start) }.isSuccess) return
+        go(context, "market://details?id=$pkg", null, "https://play.google.com/store/apps/details?id=$pkg")
     }
 
     /** Opens [url] in [pkg]'s app, or the website when the app isn't on the phone. */
@@ -88,6 +99,8 @@ object OpenSong {
                 Place.YOUTUBE_MUSIC -> go(context, "https://music.youtube.com/search?q=$q", p.pkg)
                 Place.SPOTIFY -> SpotifyLink.openSearch(context, words)
                 Place.APPLE_MUSIC -> go(context, "https://music.apple.com/gb/search?term=$q", p.pkg)
+                // Apple's classical app takes no song links from other apps: it opens at its start, to search there.
+                Place.APPLE_CLASSICAL -> openApp(context, p.pkg)
             }
             Unit
         }
@@ -109,6 +122,7 @@ object OpenSong {
                             Ui.Words(p.label, 15, modifier = Modifier.weight(1f))
                         }
                     }
+                    if (pair.size == 1) androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
                 }
             }
         }
