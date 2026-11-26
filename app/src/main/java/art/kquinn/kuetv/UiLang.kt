@@ -186,10 +186,13 @@ fun TrText(
 ) {
     // Read here, so every line changes when the language does.
     val shown = if (UiLang.code == "en") text else UiLang.tr(text)
+    // On a phone nothing is cut short with "…" (Kevin, 26 November 2026: nothing truncated at the normal text size, in
+    // every Kue phone app); the words take the lines they need. The TV keeps its line limits: its rows are fixed sizes.
+    val phone = LocalPhone.current
     androidx.compose.material3.Text(
         text = shown, modifier = modifier, color = color, fontSize = fontSize, fontStyle = fontStyle, fontWeight = fontWeight,
         fontFamily = fontFamily, letterSpacing = letterSpacing, textDecoration = textDecoration, textAlign = textAlign,
-        lineHeight = lineHeight, overflow = overflow, softWrap = softWrap, maxLines = maxLines, minLines = minLines,
+        lineHeight = lineHeight, overflow = overflow, softWrap = if (phone) true else softWrap, maxLines = if (phone) Int.MAX_VALUE else maxLines, minLines = minLines,
         onTextLayout = onTextLayout, style = style,
     )
 }
