@@ -7914,8 +7914,14 @@ private fun AerialChannels(
     val names = remember(tick) {
         (AerialLists.own?.channels.orEmpty() + plan?.channels.orEmpty()).groupBy({ it.number }, { Aerial.key(it.name) })
     }
-    val byKey = remember(library) { HashMap<String, ChannelGroup>().also { all -> library.groups.forEach { g -> all.putIfAbsent(Aerial.key(g.name), g) } } }
-    val matchOf: (Int) -> ChannelGroup? = { n -> names[n].orEmpty().firstNotNullOfOrNull { byKey[it] } }
+    // Each aerial number's provider channel (for its logo and what is on), worked out away from the screen: there are thousands.
+    val matched by produceState(emptyMap<Int, ChannelGroup>(), library, names) {
+        value = withContext(Dispatchers.Default) {
+            val byKey = HashMap<String, ChannelGroup>()
+            library.groups.forEach { g -> byKey.putIfAbsent(Aerial.key(g.name), g) }
+            names.mapNotNull { (n, keys) -> keys.firstNotNullOfOrNull { byKey[it] }?.let { n to it } }.toMap()
+        }
+    }
     Column(m) {
         Heading((if (rows.size == 1) "1 aerial channel" else "${rows.size} aerial channels") + " · free, no internet needed" + (plan?.let { " · " + it.label } ?: ""))
         if (rows.isEmpty()) {
@@ -7928,7 +7934,7 @@ private fun AerialChannels(
             }
             items(rows, key = { it.number }) { c ->
                 val key = "aerial:" + c.number
-                val group = remember(byKey, c.number) { matchOf(c.number) }
+                val group = matched[c.number]
                 FocusRow(
                     c.number.toString() + "   " + c.name,
                     {
@@ -7958,7 +7964,8 @@ private fun ChannelMenu(
     val favourite = favKeys.any { it in favourites.keys }
     // TV: where else this channel plays free. Only what is really on this TV is offered.
     val phone = LocalPhone.current
-    val aerialNumber = remember(channel.name) { if (phone) null else Aerial.numberFor(channel.name)?.takeIf { runCatching { Aerial.available(context) }.getOrDefault(false) } }
+    val aerialHere = remember { !phone && runCatching { Aerial.available(context) }.getOrDefault(false) }
+    val aerialNumber = remember(channel.name) { if (aerialHere) Aerial.numberFor(channel.name) else null }
     val ownApp = remember(channel.name) {
         if (phone) null else LiveInApps.forChannel(channel.name)?.takeIf { c -> runCatching { context.packageManager.getPackageInfo(c.pkg, 0) }.isSuccess }
     }
@@ -8011,9 +8018,14 @@ private fun ChannelMenu(
                     if (onMove != null) FocusRow("↕ Move", { onClose(); onMove() }, Modifier.focusRequester(first), look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "▲ ▼ to move it, OK to put it down")
                     FocusRow(if (favourite) "Remove from favourites" else "Add to favourites", { favourites.toggleAll(favKeys); onClose(); onFavourite() }, if (onMove == null) Modifier.focusRequester(first) else Modifier, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.STAR)
                     // The same channel free: on the TV's aerial (Freely), or in its own app (ITVX, Channel 4).
-                    aerialNumber?.let { n ->
-                        FocusRow("Watch on the aerial", { onClose(); if (!Aerial.openChannel(context, n)) kueToast(context, "Aerial channel $n wouldn't open.") },
-                            look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.AERIAL, below = "Channel $n, free, no internet needed")
+                    // On a TV with an aerial, always there: straight to the channel when its aerial number is known,
+                    // else the TV's own aerial list, to pick it there (Kevin, 26 November 2026: "the pop up link is not there").
+                    if (aerialNumber != null) {
+                        FocusRow("Watch on the aerial", { onClose(); if (!Aerial.openChannel(context, aerialNumber)) kueToast(context, "Aerial channel $aerialNumber wouldn't open.") },
+                            look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.AERIAL, below = "Channel $aerialNumber, free, no internet needed")
+                    } else if (aerialHere) {
+                        FocusRow("Find it on the aerial", { onClose(); if (!Aerial.open(context)) kueToast(context, "The TV's aerial channels wouldn't open.") },
+                            look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.AERIAL, below = "Opens the TV's own aerial channels, free")
                     }
                     ownApp?.let { a ->
                         FocusRow("Watch in " + a.app, { onClose(); LiveInApps.open(context, a) }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.TV, below = "Live in its own app, free")

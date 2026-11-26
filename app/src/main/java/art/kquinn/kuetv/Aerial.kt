@@ -102,12 +102,20 @@ object Aerial {
 
     /** A channel's name as the provider writes it, made comparable: "UK: ITV 2 +1 HD" is "itv2+1". */
     internal fun key(name: String): String =
-        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(Regex("\\p{Mn}+"), "").lowercase()
-            .replace(Regex("^[a-z]{2,3}\\s*[:|]\\s*"), "")
-            .replace(Regex("\\(.*?\\)|\\[.*?]"), " ")
-            .replace(Regex("\\b(hd|fhd|uhd|4k|sd|uk|london|england|raw)\\b"), " ")
-            .replace(Regex("\\bplus\\s*1\\b"), "+1")
-            .replace(Regex("[^a-z0-9+]"), "")
+        java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFD).replace(marks, "").lowercase()
+            .replace(tag, "")
+            .replace(brackets, " ")
+            .replace(versionWords, " ")
+            .replace(plusOne, "+1")
+            .replace(notName, "")
+
+    // Made once: making them afresh for each name froze the screen when every channel was compared (26 November 2026).
+    private val marks = Regex("\\p{Mn}+")
+    private val tag = Regex("^[a-z]{2,3}\\s*[:|]\\s*")
+    private val brackets = Regex("\\(.*?\\)|\\[.*?]")
+    private val versionWords = Regex("\\b(hd|fhd|uhd|4k|sd|uk|london|england|raw)\\b")
+    private val plusOne = Regex("\\bplus\\s*1\\b")
+    private val notName = Regex("[^a-z0-9+]")
 
     /** The aerial channel number for this channel in the list in use, or null when the aerial doesn't carry it. */
     fun numberFor(name: String): Int? = key(name).let { k -> AerialLists.own?.numbers?.get(k) ?: AerialLists.current?.numbers?.get(k) }
