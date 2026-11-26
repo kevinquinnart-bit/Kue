@@ -72,6 +72,7 @@ class MainActivity : ComponentActivity() {
         Views.init(this)
         Lyrics.init(this)
         PlayPrefs.init(this)
+        Smart.init(this)
         SoundMatch.init(this)
         Backup.init(this)
         SpotifyLink.init(this)

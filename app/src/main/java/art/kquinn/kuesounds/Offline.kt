@@ -35,7 +35,7 @@ object Offline {
     private fun fileName(t: Track) = t.id + "." + Library.ending(t.fileName).ifEmpty { "audio" }
 
     /** The saved copy of a song, if it is on the phone. */
-    fun fileFor(t: Track): File? = if (t.id in saved) File(folder, fileName(t)).takeIf { it.exists() } else null
+    fun fileFor(t: Track): File? = if (t.id in saved) File(folder, fileName(t)).takeIf { it.exists() } ?: File(folder, t.id + ".m4a").takeIf { it.exists() } else null
 
     fun isSaved(al: Album): Boolean = al.tracks.all { it.id in saved }
 
@@ -53,7 +53,7 @@ object Offline {
     /** Takes these songs off the phone. They still play from the Drive. */
     fun remove(tracks: List<Track>) {
         synchronized(waiting) { tracks.forEach { waiting -= it.id } }
-        for (t in tracks) File(folder, fileName(t)).delete()
+        for (t in tracks) { File(folder, fileName(t)).delete(); File(folder, t.id + ".m4a").delete() }
         saved = saved - tracks.map { it.id }.toSet()
     }
 
@@ -71,18 +71,34 @@ object Offline {
                 val left = synchronized(waiting) { waiting.size }
                 status = "Saving to phone · " + t.title + if (left > 0) " · $left more" else ""
                 progress(status)
-                val target = File(folder, fileName(t))
+                // The room set aside for saved songs (Settings): full means saving stops, saying so.
+                val limit = PlayPrefs.saveLimitMb * 1_000_000L
+                if (limit > 0 && bytesUsed() + t.size / (if (PlayPrefs.saveSize == 0) 1 else 3) > limit) {
+                    synchronized(waiting) { waiting.clear() }
+                    Scanner.note("saving to phone stopped: the room set aside (" + PlayPrefs.saveLimitMb + " MB) is full")
+                    status = "The room set aside for saved songs is full. Change it in Settings › Privacy and storage."
+                    progress(status)
+                    kotlinx.coroutines.delay(4_000)
+                    break
+                }
+                val small = PlayPrefs.saveSize > 0
+                val target = if (small) File(folder, t.id + ".m4a") else File(folder, fileName(t))
                 val part = File(folder, fileName(t) + ".part")
                 try {
                     val token = Google.token() ?: throw Drive.SignedOut()
                     Drive.downloadWhole(t.id, part, token)
                     if (t.size > 0 && part.length() != t.size) throw java.io.IOException("the download was cut short")
                     target.delete()
-                    if (!part.renameTo(target)) throw java.io.IOException("the saved song couldn't be kept")
+                    if (small) {
+                        // A smaller copy made on the phone; the download goes once it is made.
+                        Shrink.toAac(part, target, if (PlayPrefs.saveSize == 1) 96_000 else 48_000)
+                        part.delete()
+                    } else if (!part.renameTo(target)) throw java.io.IOException("the saved song couldn't be kept")
                     saved = saved + t.id
                     done++
                 } catch (e: Exception) {
                     part.delete()
+                    target.delete()
                     Scanner.note("not saved to phone: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
                     if (e is Drive.SignedOut) synchronized(waiting) { waiting.clear() }
                 }
@@ -108,4 +124,51 @@ object Net {
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
         return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
     }
+}
+
+/**
+ * Makes a smaller copy of a song for the phone (Kevin, 26 November 2026): the sound re-made as AAC at a low rate, on the
+ * phone, with Android's own encoder. A 4-minute song of 9 MB becomes about 3 MB small, or 1.5 MB smallest.
+ */
+object Shrink {
+    /** Turns [from] into an AAC file [to] at [bitrate] bits a second. Waits until done; throws when it can't. */
+    suspend fun toAac(from: File, to: File, bitrate: Int) {
+        val thread = android.os.HandlerThread("shrink").apply { start() }
+        try {
+            val done = kotlinx.coroutines.CompletableDeferred<Unit>()
+            android.os.Handler(thread.looper).post {
+                val transformer = androidx.media3.transformer.Transformer.Builder(appContext())
+                    .setLooper(thread.looper)
+                    .setAudioMimeType(androidx.media3.common.MimeTypes.AUDIO_AAC)
+                    .setEncoderFactory(
+                        androidx.media3.transformer.DefaultEncoderFactory.Builder(appContext())
+                            .setRequestedAudioEncoderSettings(androidx.media3.transformer.AudioEncoderSettings.Builder().setBitrate(bitrate).build())
+                            .build(),
+                    )
+                    .addListener(object : androidx.media3.transformer.Transformer.Listener {
+                        override fun onCompleted(composition: androidx.media3.transformer.Composition, exportResult: androidx.media3.transformer.ExportResult) {
+                            done.complete(Unit)
+                        }
+
+                        override fun onError(
+                            composition: androidx.media3.transformer.Composition,
+                            exportResult: androidx.media3.transformer.ExportResult,
+                            exportException: androidx.media3.transformer.ExportException,
+                        ) {
+                            done.completeExceptionally(exportException)
+                        }
+                    })
+                    .build()
+                val item = androidx.media3.transformer.EditedMediaItem.Builder(androidx.media3.common.MediaItem.fromUri(android.net.Uri.fromFile(from)))
+                    .setRemoveVideo(true).build()
+                runCatching { transformer.start(item, to.path) }.onFailure { done.completeExceptionally(it) }
+            }
+            done.await()
+            if (!to.exists() || to.length() == 0L) throw java.io.IOException("the smaller copy came out empty")
+        } finally {
+            thread.quitSafely()
+        }
+    }
+
+    private fun appContext(): Context = Scanner.appContext
 }

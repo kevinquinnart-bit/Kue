@@ -65,6 +65,8 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
     implementation("androidx.media3:media3-datasource-okhttp:1.11.1")
+    // Smaller copies of songs saved to the phone (Kevin, 26 November 2026: offline with very little storage).
+    implementation("androidx.media3:media3-transformer:1.11.1")
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("com.google.code.gson:gson:2.13.1")
     implementation("io.coil-kt.coil3:coil-compose:3.6.0")

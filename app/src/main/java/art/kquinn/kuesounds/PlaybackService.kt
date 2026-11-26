@@ -37,6 +37,7 @@ class PlaybackService : MediaSessionService() {
         Offline.init(this)
         Podcasts.init(this)
         PlayPrefs.init(this)
+        Smart.init(this)
         val upstream = OkHttpDataSource.Factory(Drive.http)
         // Every request for a song carries the current Drive pass, fetched fresh when the old one has run out.
         // Only requests to Google's Drive: a podcast comes from its own website, which must never see the pass.
@@ -98,7 +99,11 @@ class PlaybackService : MediaSessionService() {
         prefsApply()
         PlayPrefs.onChange = { prefsApply() }
         player.addListener(object : Player.Listener {
-            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) { prefsApply() }
+            override fun onMediaItemTransition(mediaItem: androidx.media3.common.MediaItem?, reason: Int) {
+                prefsApply()
+                // Counted for Most played and the other mixes (Kevin, 26 November 2026).
+                mediaItem?.mediaId?.let { Smart.played(it) }
+            }
         })
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),

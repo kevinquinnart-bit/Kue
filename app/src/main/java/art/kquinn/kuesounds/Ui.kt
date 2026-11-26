@@ -183,20 +183,7 @@ object Ui {
      * the ones in other people's names for things, such as Spotify playlists called by a picture). Signs such as ©
      * and ® stay.
      */
-    fun noEmoji(text: String): String {
-        if (text.isEmpty()) return text
-        val out = StringBuilder(text.length)
-        var i = 0
-        while (i < text.length) {
-            val cp = text.codePointAt(i)
-            val emoji = cp >= 0x1F000 && cp <= 0x1FAFF || cp in 0x2600..0x27BF || cp in 0x2B00..0x2BFF || cp in 0x2300..0x23FF ||
-                cp == 0xFE0F || cp == 0xFE0E || cp == 0x200D || cp == 0x20E3 || cp in 0xE0020..0xE007F || cp in 0x1F1E6..0x1F1FF
-            if (!emoji) out.appendCodePoint(cp)
-            i += Character.charCount(cp)
-        }
-        // A name that was only pictures is called "Untitled".
-        return out.toString().replace(Regex(" {2,}"), " ").trim().ifEmpty { if (text.isBlank()) text else "Untitled" }
-    }
+    fun noEmoji(text: String): String = Plain.noEmoji(text)
 
     /** "Kue" in white and "Sounds" in the Kue blue, as KueTV's name is written. */
     @Composable
@@ -962,9 +949,15 @@ object Ui {
             "match" -> MatchBox(listOf(t), onClose)
             "delete" -> DeleteSong(t, onClose)
             "ring" -> RingtoneBox(t, onClose)
+            "cover" -> Scanner.albumOf(t)?.let { CoverPicker(it, onClose) } ?: onClose()
             else -> HoldBox(t.title, listOf(t.artist, t.album).filter { it.isNotBlank() }.joinToString(" · "), onClose) {
                 Button("Add to a playlist", icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) { doing = "add" }
                 Button("Play it now", main = false, glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(listOf(t), 0); onClose() }
+                // A mix started from this song: it, then songs from your music that go with it (Kevin, 26 November 2026).
+                Button("Play songs like this", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) {
+                    Playing.play(listOf(t) + Smart.suggest(listOf(t), Scanner.data.tracks, Scanner.data, 40).shuffled(), 0)
+                    onClose()
+                }
                 Button("Play next", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.fillMaxWidth()) { Playing.playNext(listOf(t)); onClose() }
                 Button("Add to the queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.fillMaxWidth()) { Playing.addToQueue(listOf(t)); onClose() }
                 val fav = Sync.isFavourite(t.id)
@@ -982,6 +975,7 @@ object Ui {
                 }
                 Button("Song info", main = false, icon = KueSettings.Icons.INFO, modifier = Modifier.fillMaxWidth()) { doing = "info" }
                 Button("Set as ringtone", main = false, icon = KueSettings.Icons.RING, modifier = Modifier.fillMaxWidth()) { doing = "ring" }
+                Button("Choose the cover", main = false, icon = KueSettings.Icons.DISC, modifier = Modifier.fillMaxWidth()) { doing = "cover" }
                 Button("Match by sound", main = false, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth()) { doing = "match" }
                 Button("Edit name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { doing = "edit" }
                 Button("Delete from your Drive", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.fillMaxWidth()) { doing = "delete" }
@@ -1233,12 +1227,15 @@ object Ui {
         var matching by remember { mutableStateOf(false) }
         if (matching) { MatchBox(al.tracks, onClose); return }
         if (adding) { ListUi.AddBox("the album", al.tracks.map { it.id }, onClose = onClose); return }
+        var picking by remember { mutableStateOf(false) }
+        if (picking) { CoverPicker(al, onClose); return }
         HoldBox(al.title, listOf(al.artist, count(al.tracks.size, "song")).joinToString(" · "), onClose) {
             Button("Play", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0); onClose() }
             Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) { Playing.play(al.tracks, 0, shuffled = true); onClose() }
             CommonChoices(al.tracks, { adding = true }, onClose)
             if (Fixer.hasWork(al)) Button("Fix the files", main = false, icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { Fixer.fix(context, listOf(al)); onClose() }
             Button("Edit album name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editing = true }
+            Button("Choose the cover", main = false, icon = KueSettings.Icons.DISC, modifier = Modifier.fillMaxWidth()) { picking = true }
             Button("Match every song by sound", main = false, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth()) { matching = true }
             if (Scanner.view.artists.any { it.name == al.artist }) Button("Go to the artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.fillMaxWidth()) { onClose(); go(Screen.ArtistPage(al.artist)) }
         }
@@ -1424,6 +1421,10 @@ object Ui {
                     Button("Album info", main = false, icon = KueSettings.Icons.INFO, modifier = Modifier.fillMaxWidth()) { info = true }
                     if (info) AlbumInfo(al) { info = false }
                     Spacer(Modifier.height(12.dp))
+                    var picking by remember { mutableStateOf(false) }
+                    Button("Choose the cover", main = false, icon = KueSettings.Icons.DISC, modifier = Modifier.fillMaxWidth()) { picking = true }
+                    if (picking) CoverPicker(al) { picking = false }
+                    Spacer(Modifier.height(12.dp))
                     var adding by remember { mutableStateOf(false) }
                     Button("Add to a playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) { adding = true }
                     if (adding) ListUi.AddBox("the album", al.tracks.map { it.id }) { adding = false }
@@ -1451,6 +1452,142 @@ object Ui {
                     val sub = listOf(t.artist.takeIf { it != al.artist }.orEmpty(), len, onPhone).filter { it.isNotEmpty() }.joinToString(" · ")
                     Row2(t.title, sub, null, highlight = t.id == Playing.currentId, lead = if (t.trackNo > 0) t.trackNo.toString() else (i + 1).toString(), onHold = { held = t }) {
                         Playing.play(al.tracks, i)
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Pick a cover by hand (Kevin, 26 November 2026: for any album not recognised): covers found online by the album's
+     * name and artist (changeable), or a picture from the phone. The one tapped is kept and shown at once.
+     */
+    @Composable
+    private fun CoverPicker(al: Album, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var words by remember { mutableStateOf(listOf(al.artist.takeIf { it != Library.UNKNOWN_ARTIST }.orEmpty(), al.title).filter { it.isNotBlank() }.joinToString(" ")) }
+        var found by remember { mutableStateOf<List<Smart.CoverChoice>?>(null) }
+        var saying by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        val search = {
+            found = null
+            scope.launch { found = withContext(Dispatchers.IO) { Smart.findCovers(words) } }
+            Unit
+        }
+        LaunchedEffect(Unit) { search() }
+        val keep = { bytes: ByteArray? ->
+            if (bytes != null && Scanner.setCover(al, bytes)) { android.widget.Toast.makeText(context, "Cover changed.", android.widget.Toast.LENGTH_SHORT).show(); onClose() }
+            else saying = "That picture couldn't be used. Try another."
+        }
+        val fromPhone = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            scope.launch { keep(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }) }
+        }
+        Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RoundButton(Glyph.BACK, "Back", onClick = onClose)
+                    Spacer(Modifier.width(12.dp))
+                    Words("Choose the cover", 19, bold = true, modifier = Modifier.weight(1f))
+                }
+                Words(al.title + " · " + al.artist, 14, K.Soft, lines = 2)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Box(Modifier.weight(1f)) { EditField(words) { words = it } }
+                    Button("Search", modifier = Modifier.height(52.dp), onClick = search)
+                }
+                Button("A picture from your phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.fillMaxWidth()) {
+                    fromPhone.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                }
+                if (saying.isNotEmpty()) Words(saying, 14, K.Accent, lines = 2)
+                if (busy) Working("Keeping it…")
+                val list = found
+                when {
+                    list == null -> Working("Looking for covers…")
+                    list.isEmpty() -> Words("No covers found for that. Change the words and search again.", 15, K.Soft, lines = 2)
+                    else -> LazyVerticalGrid(GridCells.Adaptive(110.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(list, key = { it.big }) { c ->
+                            Column(
+                                Modifier.clip(RoundedCornerShape(10.dp)).clickable {
+                                    if (busy) return@clickable
+                                    busy = true
+                                    scope.launch { val b = withContext(Dispatchers.IO) { Smart.download(c.big) }; busy = false; keep(b) }
+                                },
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                AsyncImage(model = c.small, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp)).background(K.Panel))
+                                Words(c.title, 12, bold = true, lines = 2)
+                                Words(c.artist, 11, K.Soft)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * The same song held more than once (Kevin, 26 November 2026: a duplicate finder for the whole library): each set of
+     * copies with where each is and its quality; Keep this one sends the others to the Drive's bin (kept 30 days).
+     */
+    @Composable
+    private fun DuplicatesBox(go: (Screen) -> Unit, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        val groups = remember(Scanner.data.tracks) { Smart.duplicates(Scanner.data.tracks) }
+        var held by remember { mutableStateOf<Track?>(null) }
+        held?.let { t -> SongBox(t, go) { held = null } }
+        var sure by remember { mutableStateOf<String?>(null) }
+        var busy by remember { mutableStateOf("") }
+        Dialog(onDismissRequest = { if (busy.isEmpty()) onClose() }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RoundButton(Glyph.BACK, "Back") { if (busy.isEmpty()) onClose() }
+                    Spacer(Modifier.width(12.dp))
+                    Words(if (groups.isEmpty()) "No duplicates" else count(groups.size, "song") + " held more than once", 19, bold = true, lines = 2, modifier = Modifier.weight(1f))
+                }
+                if (busy.isNotEmpty()) Working(busy)
+                if (groups.isEmpty()) Words("Every song is in your music once.", 15, K.Soft)
+                LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    items(groups, key = { g -> g.joinToString { it.id } }) { g ->
+                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Words(g.first().title + " · " + g.first().artist, 16, bold = true, lines = 2)
+                            for (t in g) {
+                                val folder = Scanner.data.folders.firstOrNull { it.id == t.folderId }?.name.orEmpty()
+                                val kbps = if (t.size > 0 && t.durationMs > 0) ((t.size * 8 / (t.durationMs / 1000.0)) / 1000).toInt().toString() + " kbps" else ""
+                                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(K.Raised).clickable { held = t }.padding(10.dp)) {
+                                    Words(t.album.ifBlank { "No album" } + (if (folder.isNotEmpty()) " · folder " + folder else ""), 14, lines = 2)
+                                    Words(listOf(Library.ending(t.fileName).uppercase(), kbps, if (t.durationMs > 0) Library.clock(t.durationMs) else "", if (t.id in Offline.saved) "on phone" else "").filter { it.isNotEmpty() }.joinToString(" · "), 12, K.Soft)
+                                    val key = g.joinToString { it.id } + "|" + t.id
+                                    if (sure == key) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+                                        Button("Yes, delete " + (g.size - 1) + " other" + if (g.size > 2) "s" else "", modifier = Modifier.weight(1f)) {
+                                            sure = null
+                                            val others = g.filter { it.id != t.id }
+                                            val go2 = {
+                                                busy = "Sending " + others.size + " to the Drive's bin…"
+                                                scope.launch {
+                                                    val failed = withContext(Dispatchers.IO) {
+                                                        others.count { o ->
+                                                            runCatching {
+                                                                Drive.trash(o.id, Google.editToken() ?: throw Drive.SignedOut())
+                                                                Offline.remove(listOf(o))
+                                                                Scanner.removeTracks(setOf(o.id))
+                                                                Scanner.note("duplicate deleted (to the Drive's bin): " + o.fileName)
+                                                            }.isFailure
+                                                        }
+                                                    }
+                                                    busy = ""
+                                                    android.widget.Toast.makeText(context, if (failed == 0) "Done. The others are in your Drive's bin for 30 days." else "$failed couldn't be deleted.", android.widget.Toast.LENGTH_SHORT).show()
+                                                }
+                                                Unit
+                                            }
+                                            if (Google.canEdit) go2() else Fixer.askPermission { go2() }
+                                        }
+                                        Button("Cancel", main = false, modifier = Modifier.weight(1f)) { sure = null }
+                                    } else Words("Keep this one", 13, K.Accent, bold = true, modifier = Modifier.padding(top = 4.dp).clickable { sure = key })
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2319,6 +2456,7 @@ object Ui {
         KueSettings.Place("app", "KueSounds", "Match by sound", "AcoustID key"),
         KueSettings.Place("app", "KueSounds", "Match by sound", "Match by sound, like Shazam"),
         KueSettings.Place("app", "KueSounds", "Your music", "Start the library again"),
+        KueSettings.Place("app", "KueSounds", "Your music", "Find duplicate songs"),
         KueSettings.Place("app", "KueSounds", "Playing", "Play over mobile data"),
         KueSettings.Place("app", "KueSounds", "Playing", "Carry on long songs where you left off"),
         KueSettings.Place("app", "KueSounds", "Playing", "Remember shuffle"),
@@ -2343,6 +2481,8 @@ object Ui {
         KueSettings.Place("backup", "Backup and sync", "Backup", "Bring back a backup"),
         KueSettings.Place("backup", "Backup and sync", "Favourites", "Favourites synced with the Drive"),
         KueSettings.Place("privacy", "Privacy and storage", "Space on this phone", "Songs saved to the phone"),
+        KueSettings.Place("privacy", "Privacy and storage", "Space on this phone", "Saved songs kept small"),
+        KueSettings.Place("privacy", "Privacy and storage", "Space on this phone", "Room for saved songs"),
         KueSettings.Place("privacy", "Privacy and storage", "What leaves this phone", "What leaves this phone"),
         KueSettings.Place("privacy", "Privacy and storage", null, "Permissions"),
         KueSettings.Place("kue", "Your Kue apps", null, "KueTV"),
@@ -2413,6 +2553,9 @@ object Ui {
                     if (!Scanner.running && !Fixer.running) Button(if (sureAgain) "Yes, start it again" else "Start the library again", main = false, modifier = Modifier.fillMaxWidth()) {
                         if (!sureAgain) sureAgain = true else { sureAgain = false; Scanner.startAgain() }
                     }
+                    var dupes by remember { mutableStateOf(false) }
+                    Button("Find duplicate songs", main = false, icon = KueSettings.Icons.SEARCH, modifier = Modifier.fillMaxWidth()) { dupes = true }
+                    if (dupes) DuplicatesBox(go) { dupes = false }
                     if (sureAgain) Words("Every song's details, covers and lookups are read again from your Drive, which takes hours. Favourites, playlists and songs on the phone stay.", 13, K.Soft, lines = 4)
                 }
                 KueSettings.Section("Match by sound", sectionOpen("app|Match by sound"), look, { flip("app|Match by sound") }) {
@@ -2515,6 +2658,17 @@ object Ui {
             ) {
                 KueSettings.Section("Space on this phone", sectionOpen("privacy|Space on this phone"), look, { flip("privacy|Space on this phone") }) {
                     Words(count(saved.size, "song") + " saved · " + String.format("%.1f", bytes / 1_000_000_000.0) + " GB", 17)
+                    // Saved songs kept small (Kevin, 26 November 2026: offline with very little storage).
+                    @Suppress("UNUSED_VARIABLE") val seenSave = PlayPrefs.changes
+                    KueSettings.Choices("Saved songs kept", listOf("As they are", "Small", "Smallest"), PlayPrefs.saveSize, look) { PlayPrefs.saveSize = it }
+                    KueSettings.Note(
+                        when (PlayPrefs.saveSize) {
+                            1 -> "Small: about a third of the room. Sounds the same to most ears."
+                            2 -> "Smallest: about a sixth of the room. Fine on headphones on the move."
+                            else -> "Each song's own file, at its full quality."
+                        } + " Changes songs saved from now on.", look,
+                    )
+                    KueSettings.Choices("Room for saved songs", listOf("No limit", "1 GB", "2 GB", "5 GB"), listOf(0, 1000, 2000, 5000).indexOf(PlayPrefs.saveLimitMb).coerceAtLeast(0), look) { PlayPrefs.saveLimitMb = listOf(0, 1000, 2000, 5000)[it] }
                     if (Offline.status.isNotEmpty()) Words(Offline.status, 14, K.Accent, lines = 2)
                 }
                 KueSettings.Section("What leaves this phone", sectionOpen("privacy|What leaves this phone"), look, { flip("privacy|What leaves this phone") }) {

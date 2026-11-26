@@ -63,6 +63,7 @@ object ListUi {
     // ---------------------------------------------------------------------------------------------
     // The Playlists tab
 
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     fun Home(go: (Screen) -> Unit, layout: Views.Layout = Views.Layout.LIST) {
         val context = LocalContext.current
@@ -115,6 +116,46 @@ object ListUi {
                         "Each song is matched to the same song in your music.",
                     14, K.Soft, lines = 4,
                 )
+            }
+            // Made for you: mixes KueSounds makes from your music by itself (Kevin, 26 November 2026: "auto create").
+            item(span = full) {
+                val favs = remember(Sync.entries) { Sync.favouriteIds() }
+                val mixes = remember(Scanner.data.tracks, favs) { Smart.mixes(Scanner.data.tracks, Scanner.data, favs) }
+                if (mixes.isNotEmpty()) Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Ui.Words("Made for you", 19, bold = true)
+                    androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        items(mixes.size, key = { "mix:" + mixes[it].name }) { i ->
+                            val m = mixes[i]
+                            var holding by remember { mutableStateOf(false) }
+                            Column(
+                                Modifier.width(140.dp).combinedClickable(onClick = { Playing.play(m.songs, 0, shuffled = true) }, onLongClick = { holding = true }),
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                            ) {
+                                Box(Modifier.size(140.dp).clip(RoundedCornerShape(14.dp)).background(K.Raised), contentAlignment = Alignment.Center) {
+                                    val pic = remember(m) { m.songs.asSequence().take(20).firstNotNullOfOrNull { Scanner.artForTrack(it) ?: Scanner.singleArtFor(it) } }
+                                    if (pic != null) coil3.compose.AsyncImage(model = pic, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                    else KueSettings.Icon(KueSettings.Icons.SHUFFLE, 40.dp, K.Soft, 2f)
+                                }
+                                Ui.Words(m.name, 15, bold = true)
+                                Ui.Words(m.below, 12, K.Soft, lines = 2)
+                            }
+                            if (holding) Dialog(onDismissRequest = { holding = false }) {
+                                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Ui.Words(m.name, 18, bold = true)
+                                    Ui.Words(m.songs.size.toString() + " songs · " + m.below, 14, K.Soft, lines = 2)
+                                    Ui.Button("Play mixed up", glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) { Playing.play(m.songs, 0, shuffled = true); holding = false }
+                                    Ui.Button("Save as a playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) {
+                                        val made = Playlists.create(m.name, m.songs.map { it.id })
+                                        holding = false
+                                        go(Screen.PlaylistPage(made.id))
+                                    }
+                                    Ui.Button("Cancel", main = false, modifier = Modifier.fillMaxWidth()) { holding = false }
+                                }
+                            }
+                        }
+                    }
+                    Ui.Words("Tap a mix to play it. Hold it to keep it as a playlist.", 13, K.Soft)
+                }
             }
             if (note.isNotEmpty()) item(span = full) { Ui.Words(note, 15, K.Accent, lines = 4) }
             if (lists.isEmpty()) item(span = full) { Ui.Words("No playlists yet. Hold a song to add it to one, or tap + while one is playing.", 16, K.Soft, lines = 3) }
@@ -195,6 +236,7 @@ object ListUi {
         var holding by remember { mutableStateOf(-1) }
         var saved by remember { mutableStateOf("") }
         val missing = leftOut[id].orEmpty()
+        val ideas = remember(songs, Scanner.data) { Smart.suggest(songs, Scanner.data.tracks, Scanner.data, 15) }
         val sendOut = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("audio/x-mpegurl")) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
             scope.launch {
@@ -219,6 +261,11 @@ object ListUi {
                         }
                     }
                     if (saved.isNotEmpty()) Ui.Words(saved, 14, K.Accent)
+                    // The same song in it more than once (Kevin, 26 November 2026: duplicates within playlists too).
+                    val repeats = remember(p, byId) { Smart.withoutRepeats(p.ids, byId) }
+                    if (repeats.second > 0) Ui.Button(
+                        "Take out " + repeats.second + (if (repeats.second == 1) " repeat" else " repeats"), main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(),
+                    ) { Playlists.save(p.copy(ids = repeats.first)); saved = "Each song is in it once now." }
                     if (missing.isNotEmpty()) {
                         Ui.Words(missing.size.toString() + " songs in the file aren't in your music, so were left out:", 15, K.Accent, lines = 2)
                         Ui.Words(missing.take(40).joinToString("\n") + if (missing.size > 40) "\n…and " + (missing.size - 40) + " more" else "", 14, K.Soft, lines = 45)
@@ -236,6 +283,39 @@ object ListUi {
                     Column(Modifier.weight(1f)) {
                         Ui.Words(t.title, 16, if (on) K.Accent else K.Ink, bold = on)
                         Ui.Words(t.artist, 13, K.Soft)
+                    }
+                }
+            }
+            // Songs from your music that go with this playlist (Kevin, 26 November 2026: "suggested other songs"): the
+            // same artists, kinds of music and decades. The plus adds one.
+            run {
+                if (ideas.isNotEmpty()) {
+                    item(key = "ideas") {
+                        Column(Modifier.padding(start = 8.dp, top = 18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Ui.Words("Suggested for this playlist", 19, bold = true)
+                            Ui.Words("From your music: the same artists and kinds of music.", 13, K.Soft)
+                        }
+                    }
+                    items(ideas.size, key = { "idea:" + ideas[it].id }) { n ->
+                        val t = ideas[n]
+                        Row(
+                            Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(RoundedCornerShape(12.dp)).clickable { Playing.play(listOf(t), 0) }.padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(44.dp).clip(RoundedCornerShape(8.dp)).background(K.Raised), contentAlignment = Alignment.Center) {
+                                val pic = Scanner.artForTrack(t) ?: Scanner.singleArtFor(t)
+                                if (pic != null) coil3.compose.AsyncImage(model = pic, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                else Sign(Glyph.NOTE, 20.dp, K.Soft)
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Ui.Words(t.title, 15)
+                                Ui.Words(t.artist, 13, K.Soft)
+                            }
+                            Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).background(K.Panel).clickable(onClickLabel = "Add to this playlist") { Playlists.add(id, listOf(t.id)) }, contentAlignment = Alignment.Center) {
+                                KueSettings.Icon(KueSettings.Icons.PLUS, 20.dp, K.Accent, 2.4f)
+                            }
+                        }
                     }
                 }
             }

@@ -157,6 +157,9 @@ object Scanner {
     private var job: Job? = null
     private lateinit var app: Context
 
+    /** The app itself, for work done away from the screens (making smaller copies). */
+    val appContext: Context get() = app
+
     private fun libraryFile() = File(app.filesDir, "library.json")
     private fun artFolder() = File(app.filesDir, "art").apply { mkdirs() }
 
@@ -590,6 +593,18 @@ object Scanner {
         }
         note("library started again by hand")
         scan()
+    }
+
+    /**
+     * A cover picked by hand for an album (Kevin, 26 November 2026): kept small, shown at once, and written into the
+     * files at the next Fix when the album is matched. Gives back false when the picture couldn't be read.
+     */
+    fun setCover(al: Album, bytes: ByteArray): Boolean = synchronized(this) {
+        val path = keepPicture(bytes, al.key + "\u0002hand" + System.currentTimeMillis()) ?: return false
+        data = data.copy(art = data.art + (al.key to path), catalogueCovers = data.catalogueCovers + al.key)
+        save()
+        note("cover picked by hand: " + al.artist + " / " + al.title)
+        true
     }
 
     /** The photo of an artist or group, once found. */

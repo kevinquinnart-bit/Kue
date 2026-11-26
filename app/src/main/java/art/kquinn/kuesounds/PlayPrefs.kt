@@ -92,6 +92,19 @@ object PlayPrefs {
         get() = number("cacheMb", 500)
         set(v) = set("cacheMb", v)
 
+    /**
+     * How songs saved to the phone are kept (Kevin, 26 November 2026: "ultra minimal storage"): 0 the file as it is,
+     * 1 small (96 kbps, about a third of a usual MP3), 2 smallest (48 kbps, about a sixth; fine on headphones on the move).
+     */
+    var saveSize: Int
+        get() = number("saveSize", 0)
+        set(v) = set("saveSize", v)
+
+    /** The most room saved songs may take, in megabytes; 0 for no limit. */
+    var saveLimitMb: Int
+        get() = number("saveLimitMb", 0)
+        set(v) = set("saveLimitMb", v)
+
     // ---- Look ----
 
     /** A black background in place of the dark blue (saves battery on phones with OLED screens). */
