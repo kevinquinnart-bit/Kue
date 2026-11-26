@@ -77,6 +77,14 @@ object Fixer {
     fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(Library.realName(it)) }.all { it.fixed && it.fixedFully }
 
     /** Why fixing a file failed, in plain words for the list in Settings (Kevin, 25 November 2026). */
+    /** A failure of the connection, not of the file. */
+    fun offline(e: Throwable): Boolean {
+        val said = (e.javaClass.simpleName + " " + e.message).lowercase()
+        return e is java.net.SocketException || e is java.net.SocketTimeoutException || e is java.net.UnknownHostException ||
+            e is javax.net.ssl.SSLException || "connection abort" in said || "connection reset" in said || "timeout" in said ||
+            "unexpected end of stream" in said || "google drive answered 5" in said
+    }
+
     private fun plain(e: Exception): String {
         val said = (e.javaClass.simpleName + " " + e.message).lowercase()
         return when {
@@ -97,7 +105,12 @@ object Fixer {
      */
     // Kevin, 26 November 2026: "not sure constantly redoing is the answer if nothing has changed in the file". A stuck
     // song is tried again by itself once its file has changed (its change time differs from when it failed).
-    fun stuck(t: Track, d: LibraryData = Scanner.data): Boolean = t.id in d.fixProblems && d.fixFailedAt[t.id] == t.modified
+    // Also tried again once KueSounds itself has changed (26 November 2026: songs failed by an older version were never
+    // tried with the fixes made for them).
+    fun stuck(t: Track, d: LibraryData = Scanner.data): Boolean = t.id in d.fixProblems && d.fixFailedAt[t.id] == failedKey(t.modified)
+
+    /** What a failure is kept against: the file's change time and the KueSounds that tried it. */
+    fun failedKey(modified: String) = modified + "|" + BuildConfig.VERSION_CODE
 
     /** The album's songs still to fix, the stuck ones apart. */
     fun toDo(al: Album, d: LibraryData = Scanner.data): List<Track> =
@@ -417,7 +430,9 @@ object Fixer {
             throw e
         } catch (e: Exception) {
             Scanner.note("not fixed: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
-            Scanner.fixTried(t.id, plain(e))
+            // A dropped connection says nothing about the file: not recorded, tried again at the next look
+            // (26 November 2026: three songs were listed as "Software caused connection abort").
+            if (!offline(e)) Scanner.fixTried(t.id, plain(e))
             false
         } finally {
             file.delete()

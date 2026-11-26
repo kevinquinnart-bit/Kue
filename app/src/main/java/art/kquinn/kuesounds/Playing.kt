@@ -365,6 +365,11 @@ object Playing {
         if (from in 0 until c.mediaItemCount && to in 0 until c.mediaItemCount && from != to) c.moveMediaItem(from, to)
     }
 
+    /** Stops and clears everything: the mini player goes (Kevin, 26 November 2026: swipe it away to close). */
+    fun stopAll() {
+        controller?.let { it.stop(); it.clearMediaItems() }
+    }
+
     /** Clears the line-up, keeping only the song playing now. */
     fun clearQueue() {
         val c = controller ?: return

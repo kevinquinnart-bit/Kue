@@ -94,6 +94,8 @@ object K {
     val Page: Color get() = if (PlayPrefs.changes >= 0 && PlayPrefs.black) Color.Black else Color(0xFF0E1626)
     val Panel = Color(0xFF16213A)
     val Raised = Color(0xFF263A63)
+    /** The thin edge on fields, drop-downs and second-choice buttons, the same in every Kue app. */
+    val Edge: Color get() = Soft.copy(alpha = 0.45f)
     val Accent = Color(0xFFFFD23F)
     val Ink = Color.White
     /** Soft grey text; nearly white with Stronger contrast on (Settings › Look and feel). */
@@ -222,6 +224,7 @@ object Ui {
     internal fun Button(label: String, main: Boolean = true, glyph: Glyph? = null, modifier: Modifier = Modifier, icon: String? = null, onClick: () -> Unit) {
         Row(
             modifier.heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Raised)
+                .then(if (main) Modifier else Modifier.border(1.dp, K.Edge, RoundedCornerShape(14.dp)))
                 .clickable(onClick = onClick).padding(horizontal = 18.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
@@ -233,14 +236,16 @@ object Ui {
                 KueSettings.Icon(icon, 20.dp, if (main) K.Page else K.Ink, 2f, filled = icon == KueSettings.Icons.PLAY)
                 Spacer(Modifier.width(8.dp))
             }
-            Words(label, 16, if (main) K.Page else K.Ink, bold = main, centre = true, modifier = Modifier.weight(1f, fill = false).padding(vertical = 8.dp))
+            Words(label, 16, if (main) K.Page else K.Ink, bold = main, centre = true, modifier = Modifier.padding(vertical = 8.dp))
         }
     }
 
     @Composable
     internal fun RoundButton(glyph: Glyph, label: String, size: Dp = 44.dp, onClick: () -> Unit) {
         Box(
-            Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClickLabel = label, onClick = onClick),
+            // Every close and back button in the Kue apps: this raised shade with the thin edge (design.md).
+            Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(K.Raised).border(1.dp, K.Edge, RoundedCornerShape(12.dp))
+                .clickable(onClickLabel = label, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) { Sign(glyph, size * 0.5f, K.Ink) }
     }
@@ -332,7 +337,7 @@ object Ui {
                     Screen.NameSong -> NameUi.Page(back)
                     is Screen.ShowPage -> PodUi.ShowPage(s.feed, back, go)
                     is Screen.EpisodePage -> PodUi.EpisodePage(s.id, back, go)
-                    is Screen.PlaylistPage -> ListUi.Page(s.id, back)
+                    is Screen.PlaylistPage -> ListUi.Page(s.id, back, go)
                     is Screen.YouTubePlayer -> OnlineUi.YouTubePlayer(s.url, back, s.tries, s.name)
                 }
                 }
@@ -454,7 +459,7 @@ object Ui {
     @Composable
     private fun SearchBox(query: String, onChange: (String) -> Unit) {
         Row(
-            Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(horizontal = 16.dp),
+            Modifier.fillMaxWidth().height(52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(horizontal = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Sign(Glyph.SEARCH, 20.dp, K.Soft)
@@ -724,10 +729,10 @@ object Ui {
             Words(count(songs.size, "song") + " picked", 14, K.Accent, bold = true)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 item { Button("Play", glyph = Glyph.PLAY, modifier = Modifier.height(44.dp)) { Playing.play(songs, 0); onDone() } }
-                item { Button("Play next", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.height(44.dp)) { Playing.playNext(songs); onDone() } }
-                item { Button("Queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.height(44.dp)) { Playing.addToQueue(songs); onDone() } }
+                item { Button("Play after this song", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.height(44.dp)) { Playing.playNext(songs); onDone() } }
+                item { Button("Add to Up next", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.height(44.dp)) { Playing.addToQueue(songs); onDone() } }
                 item { Button("Playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.height(44.dp)) { adding = true } }
-                item { Button("Save to phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.height(44.dp)) { Offline.save(context, songs); onDone() } }
+                item { Button("Keep on phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.height(44.dp)) { Offline.save(context, songs); onDone() } }
                 item { Button("Favourites", main = false, icon = KueSettings.Icons.STAR, modifier = Modifier.height(44.dp)) { songs.forEach { Sync.put("fav:" + it.id, "1") }; onDone() } }
             }
         }
@@ -859,8 +864,8 @@ object Ui {
                 Words(name, 24, bold = true, lines = 2)
                 Words(count(list.size, "album") + " · " + count(songs.size, "song"), 15, K.Soft)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0) }
-                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true) }
+                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0); go(Screen.NowPlaying) }
+                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true); go(Screen.NowPlaying) }
                 }
                 Spacer(Modifier.height(4.dp))
             }
@@ -897,8 +902,8 @@ object Ui {
                     Words(name, 20, bold = true, lines = 2, modifier = Modifier.weight(1f))
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0) }
-                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true) }
+                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0); go(Screen.NowPlaying) }
+                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true); go(Screen.NowPlaying) }
                 }
             }
             Box(Modifier.weight(1f)) { SongList(songs, go) }
@@ -933,6 +938,7 @@ object Ui {
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(K.Page).verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                PullBar(onClose)
                 Words(title, 18, bold = true, lines = 2)
                 if (below.isNotEmpty()) Words(below, 14, K.Soft)
                 choices()
@@ -945,8 +951,8 @@ object Ui {
     @Composable
     private fun CommonChoices(songs: List<Track>, onAdd: () -> Unit, onClose: () -> Unit) {
         val context = LocalContext.current
-        Button("Play next", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.fillMaxWidth()) { Playing.playNext(songs); onClose() }
-        Button("Add to the queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.fillMaxWidth()) { Playing.addToQueue(songs); onClose() }
+        Button("Play after this song", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.fillMaxWidth()) { Playing.playNext(songs); upNextSaid(context, "Plays after this song. See it in Up next on the player."); onClose() }
+        Button("Add to end of Up next", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.fillMaxWidth()) { Playing.addToQueue(songs); upNextSaid(context, "Added to the end of Up next, on the player."); onClose() }
         Button("Add to a playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth(), onClick = onAdd)
         if (songs.isNotEmpty() && songs.all { it.id in Offline.saved }) {
             Button("Take off the phone", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.fillMaxWidth()) { Offline.remove(songs); onClose() }
@@ -976,15 +982,21 @@ object Ui {
                 Button("Song info and edit", icon = KueSettings.Icons.INFO, modifier = Modifier.fillMaxWidth()) { doing = "info" }
                 Button("Add to a playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.fillMaxWidth()) { doing = "add" }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button("Play next", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.weight(1f)) { Playing.playNext(listOf(t)); onClose() }
-                    Button("Queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.weight(1f)) { Playing.addToQueue(listOf(t)); onClose() }
+                    // Both go into Up next, the list on the player (Kevin, 26 November 2026: "are they the same thing?").
+                    val ctxQ = LocalContext.current
+                    Button("Play after this song", main = false, icon = KueSettings.Icons.PLAY_NEXT, modifier = Modifier.weight(1f)) {
+                        Playing.playNext(listOf(t)); upNextSaid(ctxQ, "Plays after this song. See it in Up next on the player."); onClose()
+                    }
+                    Button("Add to end of Up next", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.weight(1f)) {
+                        Playing.addToQueue(listOf(t)); upNextSaid(ctxQ, "Added to the end of Up next, on the player."); onClose()
+                    }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     val fav = Sync.isFavourite(t.id)
                     Button("Favourite", main = false, glyph = if (fav) Glyph.HEART_FULL else Glyph.HEART, modifier = Modifier.weight(1f)) { Sync.flipFavourite(t.id); onClose() }
                     val context = LocalContext.current
-                    if (t.id in Offline.saved) Button("Off phone", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.weight(1f)) { Offline.remove(listOf(t)); onClose() }
-                    else Button("To phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.weight(1f)) { Offline.save(context, listOf(t)); onClose() }
+                    if (t.id in Offline.saved) Button("Take off phone", main = false, icon = KueSettings.Icons.BIN, modifier = Modifier.weight(1f)) { Offline.remove(listOf(t)); onClose() }
+                    else Button("Keep on phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.weight(1f)) { Offline.save(context, listOf(t)); onClose() }
                 }
                 if (go != null) {
                     val album = Scanner.view.albums.firstOrNull { al -> al.tracks.any { it.id == t.id } }
@@ -995,7 +1007,8 @@ object Ui {
                         if (hasArtist) Button("Artist", main = false, glyph = Glyph.PERSON, modifier = Modifier.weight(1f)) { onClose(); go(Screen.ArtistPage(artist)) }
                     }
                 }
-                Button("Play songs like this", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) {
+                // This song, then songs from your music that go with it.
+                Button("Mix: this song, then ones like it", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.fillMaxWidth()) {
                     Playing.play(listOf(t) + Smart.suggest(listOf(t), Scanner.data.tracks, Scanner.data, 40).shuffled(), 0)
                     onClose()
                 }
@@ -1061,6 +1074,7 @@ object Ui {
                 Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(18.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                PullBar { if (busy.isEmpty()) onClose() }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RoundButton(Glyph.BACK, "Back") { if (busy.isEmpty()) onClose() }
                     Spacer(Modifier.width(12.dp))
@@ -1162,6 +1176,25 @@ object Ui {
             }
         }
     }
+
+    /**
+     * The bar at the top of a panel: pull it down to close the panel (Kevin, 26 November 2026: swipes and pull-downs to
+     * close, no build-up of screens). Tapping outside a panel or Back closes it too.
+     */
+    @Composable
+    internal fun PullBar(onClose: () -> Unit) {
+        var pulled by remember { mutableFloatStateOf(0f) }
+        Box(
+            Modifier.fillMaxWidth().height(28.dp).pointerInput(Unit) {
+                detectVerticalDragGestures(onDragStart = { pulled = 0f }, onDragEnd = { if (pulled > 60f) onClose() }) { change, dy -> change.consume(); pulled += dy }
+            }.clickable(onClickLabel = "Close", onClick = onClose),
+            contentAlignment = Alignment.Center,
+        ) { Box(Modifier.size(width = 44.dp, height = 5.dp).clip(RoundedCornerShape(3.dp)).background(K.Soft.copy(alpha = 0.6f))) }
+    }
+
+    /** Says where songs put in Up next went. */
+    private fun upNextSaid(context: android.content.Context, text: String) =
+        android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_SHORT).show()
 
     /** A plain two-column table: label on the left, value on the right. */
     @Composable
@@ -1448,7 +1481,7 @@ object Ui {
 
     @Composable
     private fun EditField(value: String, onChange: (String) -> Unit) {
-        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
             BasicTextField(
                 value = value, onValueChange = onChange,
                 textStyle = TextStyle(color = K.Ink, fontSize = 16.sp, fontFamily = K.Poppins),
@@ -1519,8 +1552,8 @@ object Ui {
                     Words(bits.joinToString(" · "), 15, K.Soft, lines = 2, centre = true, modifier = Modifier.clickable { go(Screen.ArtistPage(al.artist)) })
                     Spacer(Modifier.height(16.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Button("Play", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(al.tracks, 0) }
-                        Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(al.tracks, 0, shuffled = true) }
+                        Button("Play", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(al.tracks, 0); go(Screen.NowPlaying) }
+                        Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(al.tracks, 0, shuffled = true); go(Screen.NowPlaying) }
                     }
                     Spacer(Modifier.height(12.dp))
                     var info by remember { mutableStateOf(false) }
@@ -1912,8 +1945,8 @@ object Ui {
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(all, 0) }
-                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(all, 0, shuffled = true) }
+                    Button("Play all", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(all, 0); go(Screen.NowPlaying) }
+                    Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(all, 0, shuffled = true); go(Screen.NowPlaying) }
                 }
                 Spacer(Modifier.height(4.dp))
             }
@@ -1937,8 +1970,27 @@ object Ui {
 
     @Composable
     private fun MiniPlayer(open: () -> Unit) {
+        // Swipe it left or right to stop and close it; swipe up to open the player (Kevin, 26 November 2026).
+        val scope = rememberCoroutineScope()
+        val slide = remember { androidx.compose.animation.core.Animatable(0f) }
+        var rise by remember { mutableFloatStateOf(0f) }
         Row(
-            Modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Raised)
+            Modifier.padding(horizontal = 12.dp, vertical = 10.dp).fillMaxWidth()
+                .graphicsLayer { translationX = slide.value; alpha = 1f - (kotlin.math.abs(slide.value) / (size.width * 1.2f)).coerceIn(0f, 0.8f) }
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            if (kotlin.math.abs(slide.value) > size.width * 0.35f) {
+                                scope.launch { slide.animateTo(if (slide.value > 0) size.width.toFloat() else -size.width.toFloat()); Playing.stopAll(); slide.snapTo(0f) }
+                            } else scope.launch { slide.animateTo(0f) }
+                        },
+                        onDragCancel = { scope.launch { slide.animateTo(0f) } },
+                    ) { change, dx -> change.consume(); scope.launch { slide.snapTo(slide.value + dx) } }
+                }
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures(onDragStart = { rise = 0f }, onDragEnd = { if (rise < -60f) open() }) { change, dy -> change.consume(); rise += dy }
+                }
+                .clip(RoundedCornerShape(14.dp)).background(K.Raised)
                 .clickable(onClick = open).padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -1981,7 +2033,17 @@ object Ui {
         val say = { text: String -> said = text; saidCount++ }
         LaunchedEffect(saidCount) { if (said.isNotEmpty()) { delay(2_000); said = "" } }
         val scope = rememberCoroutineScope()
-        Box(Modifier.fillMaxSize()) {
+        // Pull down anywhere to close the player back to the mini player (Kevin, 26 November 2026).
+        var pull by remember { mutableFloatStateOf(0f) }
+        Box(
+            Modifier.fillMaxSize().graphicsLayer { translationY = pull.coerceAtLeast(0f) }.pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { pull = 0f },
+                    onDragEnd = { if (pull > size.height * 0.18f) close() else pull = 0f },
+                    onDragCancel = { pull = 0f },
+                ) { change, dy -> change.consume(); pull = (pull + dy).coerceAtLeast(0f) }
+            },
+        ) {
         Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RoundButton(Glyph.DOWN, "Close", onClick = close)
@@ -2034,12 +2096,14 @@ object Ui {
                     }
                 }
             }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Words(Playing.title, 24, bold = true, lines = 2)
-                    Words(Playing.artist, 17, K.Soft)
-                    if (Playing.problem.isNotEmpty()) Words(Playing.problem, 15, K.Accent, lines = 2)
-                }
+            // The song's name across the full width, its buttons on their own line under it (Kevin, 26 November 2026:
+            // a long name was squeezed into a narrow column beside the buttons).
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Words(Playing.title, 24, bold = true)
+                Words(Playing.artist, 17, K.Soft)
+                if (Playing.problem.isNotEmpty()) Words(Playing.problem, 15, K.Accent, lines = 2)
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
                 val fav = Sync.isFavourite(Playing.currentId)
                 var adding by remember { mutableStateOf(false) }
                 val songNow = !Playing.isPodcast && !Playing.isRadio
@@ -2549,6 +2613,36 @@ object Ui {
         val running = Scanner.running
         val n = { x: Int -> String.format("%,d", x) }
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // First, in one box: working or finished, and what (if anything) is left for you to do (Kevin, 26 November
+            // 2026: "not knowing if the process is complete or what to do next").
+            val noCovers = remember(data) { Scanner.noCover(data).size }
+            val notFixedNow = remember(data, view, running) { Scanner.notFixed(view, data) }
+            val retrying = notFixedNow.count { (t, _) -> t.id in data.fixProblems && !Fixer.stuck(t, data) }
+            val stuckNow = notFixedNow.size - retrying
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (running || Fixer.running) K.Raised else K.Page)
+                    .border(1.dp, if (running || Fixer.running) K.Accent else K.Raised, RoundedCornerShape(14.dp)).padding(14.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                when {
+                    running || Fixer.running -> {
+                        Words("Working. Leave it to finish; it carries on with the screen off. Its bar is on the step below.", 15, K.Accent, bold = true)
+                    }
+                    Scanner.waitingForWifi -> Words("Paused: carries on when the phone is on Wi-Fi.", 15, K.Accent, bold = true)
+                    else -> {
+                        val at = Scanner.finishedAt
+                        Words(
+                            "Finished" + (if (at > 0) " at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(at)) else "") +
+                                ". Nothing more happens until new music is added.",
+                            15, bold = true,
+                        )
+                        if (retrying > 0) Words(count(retrying, "song") + " to try again: press Look for new music below.", 14, K.Accent)
+                        if (noCovers > 0) Words(count(noCovers, "album") + " with no cover anywhere: tap one in the list below to choose its cover.", 14, K.Accent)
+                        if (stuckNow > 0) Words(count(stuckNow, "song") + " couldn't be fixed: the reason is under each one below.", 14, K.Accent)
+                        if (retrying == 0 && noCovers == 0 && stuckNow == 0) Words("Every song has its right name and cover.", 14)
+                    }
+                }
+            }
             if (running && stage in 1..2) Doing(Scanner.status.ifBlank { "Reading your Drive" }, Scanner.progress)
             else Words(n(songs) + " songs in your Drive" + (if (read < songs) " · " + n(read) + " read" else ""), 14, K.Soft)
 
@@ -2713,6 +2807,8 @@ object Ui {
         KueSettings.Place("backup", "Backup and sync", "Backup", "Back up now"),
         KueSettings.Place("backup", "Backup and sync", "Backup", "Bring back a backup"),
         KueSettings.Place("backup", "Backup and sync", "Favourites", "Favourites synced with the Drive"),
+        KueSettings.Place("backup", "Backup and sync", "Keep on this phone", "Keep all my music on this phone"),
+        KueSettings.Place("backup", "Backup and sync", "Keep on this phone", "Keep favourites and playlists on this phone"),
         KueSettings.Place("privacy", "Privacy and storage", "Space on this phone", "Songs saved to the phone"),
         KueSettings.Place("privacy", "Privacy and storage", "Space on this phone", "Saved songs kept small"),
         KueSettings.Place("privacy", "Privacy and storage", "Space on this phone", "Room for saved songs"),
@@ -2896,6 +2992,18 @@ object Ui {
                 KueSettings.Section("Favourites", sectionOpen("backup|Favourites"), look, { flip("backup|Favourites") }) {
                     val when_ = Sync.syncedAt
                     KueSettings.Note(if (when_ == 0L) "Not synced with the Drive yet." else "Synced with the Drive at " + stamp(when_), look)
+                }
+                // What is kept on this phone to play with no internet (Kevin, 26 November 2026).
+                KueSettings.Section("Keep on this phone", sectionOpen("backup|Keep on this phone"), look, { flip("backup|Keep on this phone") }) {
+                    val ctx = LocalContext.current
+                    KueSettings.Toggle("All my music", count(Scanner.data.tracks.size, "song") + ". Needs room on the phone; songs can be kept smaller in Privacy and storage.", Offline.keepAll, look) { Offline.setKeepAll(ctx, it) }
+                    KueSettings.Toggle("Favourites", "Every song you mark as a favourite, as you mark it.", Offline.keepFavourites, look) { Offline.setKeepFavourites(ctx, it) }
+                    val lists = Playlists.all()
+                    if (lists.isNotEmpty()) Words("Playlists", 14, K.Soft)
+                    for (pl in lists) {
+                        KueSettings.Toggle(pl.name, count(pl.ids.size, "song"), pl.id in Offline.keepLists, look) { Offline.setKeepList(ctx, pl.id, it) }
+                    }
+                    KueSettings.Note("Saved songs play with no internet. New songs that fall under a choice are saved the next time KueSounds looks for music.", look)
                 }
             }
 

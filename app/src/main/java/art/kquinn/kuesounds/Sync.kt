@@ -89,6 +89,8 @@ object Sync {
         if (!::app.isInitialized) return
         if ((entries[key]?.value ?: "") == value) return
         set(key, value)
+        // A new favourite, or a song added to a playlist kept on the phone, is saved to the phone too.
+        if (key.startsWith("fav:") || key.startsWith("pl:")) runCatching { Offline.changed(key) }
     }
 
     // Favourites ------------------------------------------------------------------------------

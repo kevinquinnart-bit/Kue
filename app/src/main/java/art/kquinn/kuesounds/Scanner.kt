@@ -282,6 +282,12 @@ object Scanner {
             save()
             note("every song to be listened to again; " + swept.size + " songs made singles by step 3 to be found again; covers looked for on Deezer and Apple")
         }
+        // 26 November 2026 (evening): albums sold under a shorter name (a single's first side, a name with the artist in
+        // front) are looked for once more on Deezer and Apple.
+        if (data.version < 11) {
+            data = data.copy(coverTried = data.coverTried.filter { it in data.catalogueCovers }.toSet(), version = 11)
+            save()
+        }
         read = data.tracks.count { it.tagged }
     }
 
@@ -370,7 +376,10 @@ object Scanner {
                         lookUpArtistPictures()
                         readComposers()
                         status = ""
+                        finishedAt = System.currentTimeMillis()
                         note("scan finished")
+                        // Songs new to a playlist or to the music that are chosen to be kept on the phone.
+                        runCatching { Offline.keepUp(app) }
                         break
                     } catch (e: Drive.SignedOut) {
                         note("signed out by Google")
@@ -616,7 +625,7 @@ object Scanner {
         synchronized(this) {
             runCatching { artFolder().deleteRecursively() }
             // At the newest layout, so none of the one-off updates for older libraries runs on the new one.
-            data = LibraryData(version = 10)
+            data = LibraryData(version = 11)
             save()
         }
         note("library started again by hand")
@@ -971,6 +980,9 @@ object Scanner {
         }
     }
 
+    /** When the last look through the music finished, start to end (0: not since KueSounds opened). */
+    var finishedAt by mutableStateOf(0L)
+
     /** True when the last scan stopped looking for singles because the phone wasn't on Wi-Fi. */
     var waitingForWifi by mutableStateOf(false)
         private set
@@ -1108,7 +1120,7 @@ object Scanner {
         val modified = data.tracks.firstOrNull { it.id == id }?.modified.orEmpty()
         data = data.copy(
             fixProblems = if (problem == null) data.fixProblems - id else data.fixProblems + (id to problem),
-            fixFailedAt = if (problem == null) data.fixFailedAt - id else data.fixFailedAt + (id to modified),
+            fixFailedAt = if (problem == null) data.fixFailedAt - id else data.fixFailedAt + (id to Fixer.failedKey(modified)),
         )
         save()
     }
@@ -1149,6 +1161,7 @@ object Scanner {
         return d.tracks.mapNotNull { t ->
             if (t.fixed && t.fixedFully) return@mapNotNull null
             val why = when {
+                t.id in d.fixProblems && !Fixer.stuck(t, d) -> "Tried again at the next look, with the fixes made since."
                 t.id in d.fixProblems -> d.fixProblems.getValue(t.id)
                 !Tagger.canFix(Library.realName(t)) -> "KueSounds can't write into this kind of file (" + Library.ending(Library.realName(t)).uppercase() + ")."
                 running -> null

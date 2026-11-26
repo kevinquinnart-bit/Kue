@@ -110,6 +110,25 @@ object ListUi {
                     Ui.Button(if (busy) "Reading…" else "Bring one in", main = false, modifier = Modifier.weight(1f)) { bringIn.launch(arrayOf("*/*")) }
                 }
             }
+            // All my music, as one list to play or to keep on the phone whole (Kevin, 26 November 2026).
+            item(span = full) {
+                val all = Scanner.data.tracks
+                val onPhone = all.count { it.id in Offline.saved }
+                Column(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Ui.Words("All my music", 18, bold = true)
+                    Ui.Words(String.format("%,d", all.size) + " songs · " + String.format("%,d", onPhone) + " on this phone", 13, K.Soft)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Ui.Button("Shuffle", glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(all, 0, shuffled = true) }
+                        val ctx = LocalContext.current
+                        Ui.Button(if (Offline.keepAll) "Kept on phone" else "Keep on phone", main = false, icon = if (Offline.keepAll) KueSettings.Icons.TICK else KueSettings.Icons.PHONE, modifier = Modifier.weight(1f)) {
+                            Offline.setKeepAll(ctx, !Offline.keepAll)
+                        }
+                    }
+                }
+            }
             item(span = full) {
                 Ui.Words(
                     "Bring one in from another player's playlist file (M3U, PLS, XSPF, WPL, or CSV, as Spotify's exports are). " +
@@ -218,7 +237,7 @@ object ListUi {
 
     @OptIn(ExperimentalFoundationApi::class)
     @Composable
-    fun Page(id: String, back: () -> Unit) {
+    fun Page(id: String, back: () -> Unit, go: ((Screen) -> Unit)? = null) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         val p = remember(Sync.entries, id) { Playlists.get(id) }
@@ -251,8 +270,17 @@ object ListUi {
                     Ui.Words(p.name, 24, bold = true, lines = 2, modifier = Modifier.clickable { renaming = p.name })
                     Ui.Words(songs.size.toString() + (if (songs.size == 1) " song" else " songs") + " · tap the name to rename · hold a song to move or remove it", 13, K.Soft, lines = 2)
                     if (songs.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Ui.Button("Play", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0) }
-                        Ui.Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true) }
+                        Ui.Button("Play", glyph = Glyph.PLAY, modifier = Modifier.weight(1f)) { Playing.play(songs, 0); go?.invoke(Screen.NowPlaying) }
+                        Ui.Button("Shuffle", main = false, glyph = Glyph.SHUFFLE, modifier = Modifier.weight(1f)) { Playing.play(songs, 0, shuffled = true); go?.invoke(Screen.NowPlaying) }
+                    }
+                    // Keep this playlist on the phone; songs added later are saved too (Kevin, 26 November 2026).
+                    if (songs.isNotEmpty()) {
+                        val kept = id in Offline.keepLists
+                        val onPhone = songs.count { it.id in Offline.saved }
+                        Ui.Button(
+                            if (kept) "Kept on this phone · $onPhone of ${songs.size}" else "Keep on this phone",
+                            main = false, icon = if (kept) KueSettings.Icons.TICK else KueSettings.Icons.PHONE, modifier = Modifier.fillMaxWidth(),
+                        ) { Offline.setKeepList(context, id, !kept) }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         Ui.Button("Save as a file", main = false, modifier = Modifier.weight(1f)) { sendOut.launch(p.name + ".m3u8") }

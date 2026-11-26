@@ -26,10 +26,14 @@ object Offline {
     var status by mutableStateOf("")
         private set
 
+    private lateinit var ctx: Context
+
     fun init(context: Context) {
+        ctx = context.applicationContext
         folder = File(context.filesDir, "offline").apply { mkdirs() }
         folder.listFiles()?.filter { it.name.endsWith(".part") }?.forEach { it.delete() }
         saved = folder.listFiles()?.map { it.nameWithoutExtension }?.toSet().orEmpty()
+        loadRules()
     }
 
     private fun fileName(t: Track) = t.id + "." + Library.ending(Library.realName(t)).ifEmpty { "audio" }
@@ -48,6 +52,60 @@ object Offline {
     fun save(context: Context, tracks: List<Track>) {
         synchronized(waiting) { tracks.filter { it.id !in saved }.forEach { waiting += it.id } }
         WorkService.start(context)
+    }
+
+    /**
+     * What to keep on the phone by itself (Kevin, 26 November 2026: choose what to keep offline, with one list holding
+     * all the music): every song, the favourites, and playlists chosen one by one. New songs that fall under a choice
+     * are saved the next time KueSounds looks; nothing is taken off by this.
+     */
+    private fun rules() = ctx.getSharedPreferences("offline", Context.MODE_PRIVATE)
+    var keepAll by mutableStateOf(false)
+        private set
+    var keepFavourites by mutableStateOf(false)
+        private set
+    var keepLists by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    fun loadRules() {
+        val r = rules()
+        keepAll = r.getBoolean("all", false)
+        keepFavourites = r.getBoolean("favourites", false)
+        keepLists = r.getStringSet("lists", emptySet()).orEmpty().toSet()
+    }
+
+    fun setKeepAll(context: Context, on: Boolean) { keepAll = on; rules().edit().putBoolean("all", on).apply(); keepUp(context) }
+    fun setKeepFavourites(context: Context, on: Boolean) { keepFavourites = on; rules().edit().putBoolean("favourites", on).apply(); keepUp(context) }
+    fun setKeepList(context: Context, id: String, on: Boolean) {
+        keepLists = if (on) keepLists + id else keepLists - id
+        rules().edit().putStringSet("lists", keepLists).apply()
+        keepUp(context)
+    }
+
+    /** The songs the choices above want on the phone. */
+    fun wanted(): List<Track> {
+        val all = Scanner.data.tracks
+        if (keepAll) return all
+        val ids = HashSet<String>()
+        if (keepFavourites) ids += Sync.favouriteIds()
+        for (id in keepLists) Playlists.get(id)?.ids?.let { ids += it }
+        return all.filter { it.id in ids }
+    }
+
+    /** A favourite or a playlist changed: keep the phone up to date if that one is kept. */
+    fun changed(key: String) {
+        if (!::ctx.isInitialized) return
+        val counts = keepAll || (key.startsWith("fav:") && keepFavourites) || (key.startsWith("pl:") && key.removePrefix("pl:") in keepLists)
+        if (counts) keepUp(ctx)
+    }
+
+    /** Saves whatever the choices want that isn't on the phone yet. */
+    fun keepUp(context: Context) {
+        val missing = wanted().filter { it.id !in saved }
+        if (missing.isNotEmpty()) {
+            Scanner.note("keeping on the phone: " + missing.size + " songs to save")
+            save(context, missing)
+        }
     }
 
     /** Takes these songs off the phone. They still play from the Drive. */

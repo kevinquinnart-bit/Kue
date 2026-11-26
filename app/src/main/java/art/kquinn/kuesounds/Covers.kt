@@ -42,12 +42,31 @@ object Covers {
 
     /** An album's cover: Deezer first, then Apple. Null when neither has that album by that artist. Off the main thread. */
     fun album(artist: String, album: String): Hit? {
-        if (album.isBlank()) return null
-        val words = (if (artist == Library.UNKNOWN_ARTIST) "" else "$artist ") + Library.withoutBrackets(album)
-        val deezer = get("https://api.deezer.com/search/album".toHttpUrl().newBuilder().addQueryParameter("q", words).addQueryParameter("limit", "10").build())
-        parseDeezerAlbums(deezer).firstOrNull { same(it.album, album) && sameArtist(it.artist, artist) }?.let { return it }
-        val apple = get("https://itunes.apple.com/search".toHttpUrl().newBuilder().addQueryParameter("term", words).addQueryParameter("entity", "album").addQueryParameter("limit", "10").addQueryParameter("country", "gb").build())
-        return parseItunes(apple).firstOrNull { same(it.album, album) && sameArtist(it.artist, artist) }
+        for (name in names(artist, album)) {
+            val words = (if (artist == Library.UNKNOWN_ARTIST) "" else "$artist ") + Library.withoutBrackets(name)
+            val deezer = get("https://api.deezer.com/search/album".toHttpUrl().newBuilder().addQueryParameter("q", words).addQueryParameter("limit", "10").build())
+            parseDeezerAlbums(deezer).firstOrNull { same(it.album, name) && sameArtist(it.artist, artist) }?.let { return it }
+            val apple = get("https://itunes.apple.com/search".toHttpUrl().newBuilder().addQueryParameter("term", words).addQueryParameter("entity", "album").addQueryParameter("limit", "10").addQueryParameter("country", "gb").build())
+            parseItunes(apple).firstOrNull { same(it.album, name) && sameArtist(it.artist, artist) }?.let { return it }
+        }
+        return null
+    }
+
+    /**
+     * The names an album may be sold under: as it is; a single's first side ("Am I Losing You / Waitin' For A Train" is
+     * sold as "Am I Losing You"); the name without its artist in front ("Best collection - Survivor").
+     */
+    fun names(artist: String, album: String): List<String> {
+        if (album.isBlank()) return emptyList()
+        val out = LinkedHashSet<String>()
+        out += album
+        if (" / " in album) out += album.substringBefore(" / ").trim()
+        if (" - " in album) {
+            val (a, b) = album.substringBefore(" - ").trim() to album.substringAfter(" - ").trim()
+            if (same(a, artist)) out += b
+            if (same(b, artist)) out += a
+        }
+        return out.filter { it.isNotBlank() }
     }
 
     /**
