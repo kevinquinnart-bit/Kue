@@ -34,8 +34,18 @@ class AerialNumbersTest {
     }
 
     @Test fun notOnTheAerial() {
-        assertEquals(null, Aerial.numberFor("Channel 5"))
         assertEquals(null, Aerial.numberFor("Sky Sports Main Event"))
+    }
+
+    /** Freely's own numbers (freely.co.uk, 26 November 2026): 1, 4 and 5 opened the right channel on Kevin's TV. */
+    @Test fun freelysOwnNumbers() {
+        assertEquals(5, Aerial.numberFor("Channel 5"))
+        assertEquals(5, Aerial.numberFor("UK: 5 HD"))
+        assertEquals(19, Aerial.numberFor("Dave"))
+        assertEquals(19, Aerial.numberFor("U&Dave HD"))
+        assertEquals(20, Aerial.numberFor("Drama"))
+        assertEquals(10, Aerial.numberFor("BBC Three"))
+        assertEquals(351, Aerial.numberFor("CBBC"))
     }
 
     @Test fun eachCountryItsOwnNumbers() {

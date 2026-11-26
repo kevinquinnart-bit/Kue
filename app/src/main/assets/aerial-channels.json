@@ -1,6 +1,6 @@
 {
  "about": "KueTV's aerial channel numbers, by TV platform. KueTV downloads this file once a day, so a change here reaches every TV without a new app. Each list gives the number to tune and the names a channel goes by. Countries with no national numbering (USA, Canada, Germany, Spain…) use the numbers each viewer sets in KueTV.",
- "updated": "2026-11-23",
+ "updated": "2026-11-26",
  "lists": [
   {
    "id": "GB-freely",
@@ -12,7 +12,7 @@
     "GG"
    ],
    "whenInstalled": "com.vewd.core.opapp",
-   "source": "Freely's aerial channels (233 up) as listed on a Freely TV, 22 November 2026; timeshift, news and children's numbers match https://rxtvinfo.com/freely-channel-list-uk-epg/ (15 June 2026)",
+   "source": "Freely's aerial channels (233 up) as listed on a Freely TV, 22 November 2026; timeshift, news and children's numbers match https://rxtvinfo.com/freely-channel-list-uk-epg/ (15 June 2026) Then Freely's own channel numbers for everything (https://freely.co.uk/help/faqs/channel-list, 26 November 2026); 1 BBC One, 4 Channel 4 and 5 opened on Kevin's TV that day. The 233-up numbers come first, so where both have a channel those are used.",
    "channels": [
     {
      "n": 1,
@@ -307,6 +307,738 @@
      "n": 360,
      "names": [
       "Shaked!"
+     ]
+    },
+    {
+     "n": 1,
+     "names": [
+      "BBC One London",
+      "BBC One",
+      "BBC 1",
+      "BBC One HD"
+     ]
+    },
+    {
+     "n": 2,
+     "names": [
+      "BBC Two",
+      "BBC 2",
+      "BBC Two HD"
+     ]
+    },
+    {
+     "n": 3,
+     "names": [
+      "ITV1",
+      "ITV",
+      "ITV 1",
+      "ITV1 HD",
+      "UTV",
+      "STV"
+     ]
+    },
+    {
+     "n": 4,
+     "names": [
+      "Channel 4",
+      "C4",
+      "Channel 4 HD"
+     ]
+    },
+    {
+     "n": 5,
+     "names": [
+      "5",
+      "Channel 5",
+      "5 HD",
+      "Channel 5 HD"
+     ]
+    },
+    {
+     "n": 6,
+     "names": [
+      "ITV2"
+     ]
+    },
+    {
+     "n": 7,
+     "names": [
+      "ITV3"
+     ]
+    },
+    {
+     "n": 8,
+     "names": [
+      "London TV"
+     ]
+    },
+    {
+     "n": 10,
+     "names": [
+      "BBC Three",
+      "BBC 3"
+     ]
+    },
+    {
+     "n": 11,
+     "names": [
+      "BBC Four",
+      "BBC 4"
+     ]
+    },
+    {
+     "n": 13,
+     "names": [
+      "E4"
+     ]
+    },
+    {
+     "n": 14,
+     "names": [
+      "Film4"
+     ]
+    },
+    {
+     "n": 15,
+     "names": [
+      "More4"
+     ]
+    },
+    {
+     "n": 16,
+     "names": [
+      "4seven"
+     ]
+    },
+    {
+     "n": 17,
+     "names": [
+      "TLC"
+     ]
+    },
+    {
+     "n": 18,
+     "names": [
+      "Quest"
+     ]
+    },
+    {
+     "n": 19,
+     "names": [
+      "U&Dave",
+      "Dave",
+      "UKTV Dave"
+     ]
+    },
+    {
+     "n": 20,
+     "names": [
+      "U&Drama",
+      "Drama",
+      "UKTV Drama"
+     ]
+    },
+    {
+     "n": 21,
+     "names": [
+      "ITV4"
+     ]
+    },
+    {
+     "n": 22,
+     "names": [
+      "ITV Quiz"
+     ]
+    },
+    {
+     "n": 23,
+     "names": [
+      "Sky Mix"
+     ]
+    },
+    {
+     "n": 24,
+     "names": [
+      "Sky Arts"
+     ]
+    },
+    {
+     "n": 25,
+     "names": [
+      "5STAR",
+      "5 Star",
+      "5Star"
+     ]
+    },
+    {
+     "n": 26,
+     "names": [
+      "5DRAMA",
+      "5 Drama"
+     ]
+    },
+    {
+     "n": 27,
+     "names": [
+      "U&Yesterday",
+      "Yesterday"
+     ]
+    },
+    {
+     "n": 28,
+     "names": [
+      "U&W",
+      "W",
+      "Watch"
+     ]
+    },
+    {
+     "n": 29,
+     "names": [
+      "5USA",
+      "5 USA"
+     ]
+    },
+    {
+     "n": 30,
+     "names": [
+      "5ACTION",
+      "5 Action",
+      "5Action"
+     ]
+    },
+    {
+     "n": 32,
+     "names": [
+      "Great! TV",
+      "Great TV"
+     ]
+    },
+    {
+     "n": 33,
+     "names": [
+      "Great! Action",
+      "Great Action"
+     ]
+    },
+    {
+     "n": 34,
+     "names": [
+      "Quest Red"
+     ]
+    },
+    {
+     "n": 35,
+     "names": [
+      "DMAX"
+     ]
+    },
+    {
+     "n": 36,
+     "names": [
+      "TalkingPictures TV",
+      "Talking Pictures",
+      "Talking Pictures TV"
+     ]
+    },
+    {
+     "n": 37,
+     "names": [
+      "TRUE CRIME",
+      "True Crime"
+     ]
+    },
+    {
+     "n": 38,
+     "names": [
+      "LEGEND",
+      "Legend"
+     ]
+    },
+    {
+     "n": 39,
+     "names": [
+      "Food Network"
+     ]
+    },
+    {
+     "n": 40,
+     "names": [
+      "Really"
+     ]
+    },
+    {
+     "n": 41,
+     "names": [
+      "Blaze"
+     ]
+    },
+    {
+     "n": 42,
+     "names": [
+      "That's TV (UK)",
+      "That's TV"
+     ]
+    },
+    {
+     "n": 43,
+     "names": [
+      "Challenge"
+     ]
+    },
+    {
+     "n": 44,
+     "names": [
+      "E4 Extra"
+     ]
+    },
+    {
+     "n": 45,
+     "names": [
+      "That's TV 2"
+     ]
+    },
+    {
+     "n": 46,
+     "names": [
+      "your TV"
+     ]
+    },
+    {
+     "n": 47,
+     "names": [
+      "Great! Christmas",
+      "Great Christmas"
+     ]
+    },
+    {
+     "n": 48,
+     "names": [
+      "Great! Mystery",
+      "Great Mystery"
+     ]
+    },
+    {
+     "n": 49,
+     "names": [
+      "PBS America"
+     ]
+    },
+    {
+     "n": 50,
+     "names": [
+      "TRUE CRIME XTRA"
+     ]
+    },
+    {
+     "n": 51,
+     "names": [
+      "LEGEND XTRA"
+     ]
+    },
+    {
+     "n": 52,
+     "names": [
+      "Together TV"
+     ]
+    },
+    {
+     "n": 53,
+     "names": [
+      "BBC Scotland"
+     ]
+    },
+    {
+     "n": 57,
+     "names": [
+      "Lucky Cat TV"
+     ]
+    },
+    {
+     "n": 58,
+     "names": [
+      "BBC ALBA",
+      "BBC Alba"
+     ]
+    },
+    {
+     "n": 63,
+     "names": [
+      "S4C"
+     ]
+    },
+    {
+     "n": 65,
+     "names": [
+      "The Chase"
+     ]
+    },
+    {
+     "n": 66,
+     "names": [
+      "Saturday Night Every Night"
+     ]
+    },
+    {
+     "n": 67,
+     "names": [
+      "4Reality"
+     ]
+    },
+    {
+     "n": 68,
+     "names": [
+      "4Homes"
+     ]
+    },
+    {
+     "n": 69,
+     "names": [
+      "5 Cops"
+     ]
+    },
+    {
+     "n": 70,
+     "names": [
+      "5 Police Interceptors"
+     ]
+    },
+    {
+     "n": 71,
+     "names": [
+      "U&Eden",
+      "Eden"
+     ]
+    },
+    {
+     "n": 73,
+     "names": [
+      "LOVE AFTER LOCKUP"
+     ]
+    },
+    {
+     "n": 74,
+     "names": [
+      "TRUE CRIME UK"
+     ]
+    },
+    {
+     "n": 77,
+     "names": [
+      "5 Movies"
+     ]
+    },
+    {
+     "n": 82,
+     "names": [
+      "4Life"
+     ]
+    },
+    {
+     "n": 84,
+     "names": [
+      "5 A&E"
+     ]
+    },
+    {
+     "n": 85,
+     "names": [
+      "5 Crime"
+     ]
+    },
+    {
+     "n": 88,
+     "names": [
+      "EVIDENCE OF EVIL"
+     ]
+    },
+    {
+     "n": 89,
+     "names": [
+      "BLOODLINE DETECTIVES"
+     ]
+    },
+    {
+     "n": 107,
+     "names": [
+      "5 Medical"
+     ]
+    },
+    {
+     "n": 108,
+     "names": [
+      "5 Yorkshire Vet"
+     ]
+    },
+    {
+     "n": 111,
+     "names": [
+      "AMC REALITY"
+     ]
+    },
+    {
+     "n": 118,
+     "names": [
+      "5 Bargain Loving Brits"
+     ]
+    },
+    {
+     "n": 119,
+     "names": [
+      "5 Trucking Hell"
+     ]
+    },
+    {
+     "n": 128,
+     "names": [
+      "5 History"
+     ]
+    },
+    {
+     "n": 141,
+     "names": [
+      "Rewind TV"
+     ]
+    },
+    {
+     "n": 143,
+     "names": [
+      "wedotv Movies"
+     ]
+    },
+    {
+     "n": 251,
+     "names": [
+      "ITV1+1"
+     ]
+    },
+    {
+     "n": 252,
+     "names": [
+      "Channel 4+1"
+     ]
+    },
+    {
+     "n": 253,
+     "names": [
+      "5 +1",
+      "Channel 5 +1",
+      "5+1"
+     ]
+    },
+    {
+     "n": 254,
+     "names": [
+      "ITV2+1"
+     ]
+    },
+    {
+     "n": 255,
+     "names": [
+      "ITV3+1"
+     ]
+    },
+    {
+     "n": 256,
+     "names": [
+      "E4+1"
+     ]
+    },
+    {
+     "n": 257,
+     "names": [
+      "Film4+1"
+     ]
+    },
+    {
+     "n": 258,
+     "names": [
+      "QUEST+1",
+      "Quest +1"
+     ]
+    },
+    {
+     "n": 259,
+     "names": [
+      "U&DaveJaVu",
+      "Dave ja vu",
+      "Dave +1"
+     ]
+    },
+    {
+     "n": 260,
+     "names": [
+      "U&Drama+1",
+      "Drama +1"
+     ]
+    },
+    {
+     "n": 261,
+     "names": [
+      "ITV4+1"
+     ]
+    },
+    {
+     "n": 262,
+     "names": [
+      "TLC+1"
+     ]
+    },
+    {
+     "n": 263,
+     "names": [
+      "Great! TV +1"
+     ]
+    },
+    {
+     "n": 264,
+     "names": [
+      "Blaze+1"
+     ]
+    },
+    {
+     "n": 265,
+     "names": [
+      "Great! Player"
+     ]
+    },
+    {
+     "n": 266,
+     "names": [
+      "Together TV+1"
+     ]
+    },
+    {
+     "n": 301,
+     "names": [
+      "BBC News"
+     ]
+    },
+    {
+     "n": 302,
+     "names": [
+      "BBC Parliament"
+     ]
+    },
+    {
+     "n": 303,
+     "names": [
+      "Sky News"
+     ]
+    },
+    {
+     "n": 304,
+     "names": [
+      "GB News"
+     ]
+    },
+    {
+     "n": 305,
+     "names": [
+      "CNN Headlines International",
+      "CNN",
+      "CNN International"
+     ]
+    },
+    {
+     "n": 306,
+     "names": [
+      "France 24"
+     ]
+    },
+    {
+     "n": 351,
+     "names": [
+      "CBBC"
+     ]
+    },
+    {
+     "n": 352,
+     "names": [
+      "CBeebies"
+     ]
+    },
+    {
+     "n": 353,
+     "names": [
+      "POP"
+     ]
+    },
+    {
+     "n": 354,
+     "names": [
+      "Tiny Pop",
+      "Pop Max"
+     ]
+    },
+    {
+     "n": 355,
+     "names": [
+      "POP UP",
+      "Pop Up"
+     ]
+    },
+    {
+     "n": 356,
+     "names": [
+      "Ketchup TV"
+     ]
+    },
+    {
+     "n": 357,
+     "names": [
+      "Ketchup Too"
+     ]
+    },
+    {
+     "n": 360,
+     "names": [
+      "Milkshake!",
+      "Milkshake"
+     ]
+    },
+    {
+     "n": 451,
+     "names": [
+      "QVC"
+     ]
+    },
+    {
+     "n": 452,
+     "names": [
+      "TJC"
+     ]
+    },
+    {
+     "n": 453,
+     "names": [
+      "QVC2"
+     ]
+    },
+    {
+     "n": 551,
+     "names": [
+      "BBC Red Button"
+     ]
+    },
+    {
+     "n": 557,
+     "names": [
+      "Al Jazeera English"
+     ]
+    },
+    {
+     "n": 559,
+     "names": [
+      "EuroNews",
+      "Euronews"
+     ]
+    },
+    {
+     "n": 575,
+     "names": [
+      "NHK WORLD",
+      "NHK World"
      ]
     }
    ]

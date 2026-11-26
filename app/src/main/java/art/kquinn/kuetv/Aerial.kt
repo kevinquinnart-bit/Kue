@@ -141,6 +141,9 @@ object Aerial {
         return false
     }
 
+    /** "On Freely" on a Freely TV (its channels come over the aerial and the internet both), else "On aerial". */
+    fun onLabel(): String = if (AerialLists.current?.id == "GB-freely" && AerialLists.own == null) "On Freely" else "On aerial"
+
     /** Whether to offer the aerial when the home internet goes down. On unless switched off. */
     fun offerWhenOffline(context: Context): Boolean = prefs(context).getBoolean("offer", true)
     fun offerWhenOffline(context: Context, on: Boolean) {

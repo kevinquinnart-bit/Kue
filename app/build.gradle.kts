@@ -36,7 +36,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Unused library code taken out, so the TV prepares the app faster after an update (26 November 2026).
+            isMinifyEnabled = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("fixed")
         }
         debug {
