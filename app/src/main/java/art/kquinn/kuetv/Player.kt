@@ -1213,8 +1213,22 @@ fun PlayerScreen(
             add(Control("Options", Icon.OPTIONS, act = openOptions))
             if (items.size > 1 || onChannels != null) add(Control("Channels", Icon.LIST, act = toChannels))
             // This channel in its own app's live player (ITVX for ITV1, Channel 4's app for Channel 4…), as Freely does.
-            items.getOrNull(index)?.let { LiveInApps.forChannel(it.name) }?.let { ch ->
-                add(Control("In " + ch.app, Icon.PLAY) { LiveInApps.open(context, ch) })
+            // Apps that take no link to a live channel (BBC iPlayer, 5, U, TG4…) open on their own page, where the
+            // channel is picked (Kevin, 26 November 2026: every channel linked to its own player).
+            items.getOrNull(index)?.name?.let { name ->
+                val liveApp = LiveInApps.forChannel(name)
+                if (liveApp != null) {
+                    add(Control("In " + liveApp.app, Icon.PLAY) { player.pause(); LiveInApps.open(context, liveApp) })
+                } else if (!phone) {
+                    CatchUpApps.appFor(name)?.let { app ->
+                        val appName = app.title.substringBefore(" (")
+                        add(Control("In $appName", Icon.PLAY) {
+                            player.pause()
+                            say("Opening $appName. Pick " + name + " under Live there.")
+                            Thread { CatchUpApps.openApp(context, app) }.start()
+                        })
+                    }
+                }
             }
             // The same channel from the TV's aerial, through Freely: free, and no internet needed.
             if (live && !phone) items.getOrNull(index)?.let { Aerial.numberFor(it.name) }?.takeIf { aerialHere }?.let { n ->

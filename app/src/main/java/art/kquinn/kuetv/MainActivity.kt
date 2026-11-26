@@ -7969,6 +7969,8 @@ private fun ChannelMenu(
     val ownApp = remember(channel.name) {
         if (phone) null else LiveInApps.forChannel(channel.name)?.takeIf { c -> runCatching { context.packageManager.getPackageInfo(c.pkg, 0) }.isSuccess }
     }
+    // The channel's player app when it has no live link (BBC iPlayer for BBC One, 5 for Channel 5).
+    val playerApp = remember(channel.name) { if (phone || ownApp != null) null else CatchUpApps.appFor(channel.name) }
     // Typing a name: for a new category (true), or for the channel (false); null while not typing.
     var naming by remember { mutableStateOf<Boolean?>(null) }
     var typed by remember { mutableStateOf("") }
@@ -8027,8 +8029,16 @@ private fun ChannelMenu(
                         FocusRow("Find it on the aerial", { onClose(); if (!Aerial.open(context)) kueToast(context, "The TV's aerial channels wouldn't open.") },
                             look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.AERIAL, below = "Opens the TV's own aerial channels, free")
                     }
-                    ownApp?.let { a ->
-                        FocusRow("Watch in " + a.app, { onClose(); LiveInApps.open(context, a) }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.TV, below = "Live in its own app, free")
+                    if (ownApp != null) {
+                        FocusRow("Watch in " + ownApp.app, { onClose(); LiveInApps.open(context, ownApp) }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.TV, below = "Live in its own app, free")
+                    } else if (playerApp != null) {
+                        // An app that takes no link to a live channel: it opens on its own page, the channel picked there.
+                        val appName = playerApp.title.substringBefore(" (")
+                        FocusRow("Watch in $appName", {
+                            onClose()
+                            kueToast(context, "Opening $appName. Pick " + channel.name + " under Live there.")
+                            Thread { CatchUpApps.openApp(context, playerApp) }.start()
+                        }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.TV, below = "Opens $appName, free. Pick the channel there")
                     }
                     for (m in mine) {
                         val inIt = channel.id in m.channels
