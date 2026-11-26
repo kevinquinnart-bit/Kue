@@ -82,6 +82,7 @@ object Tagger {
 
     private fun write(file: File, d: Details, knownSeconds: Int) {
         val length = runCatching { AudioFileIO.read(file).audioHeader?.trackLength ?: 0 }.getOrDefault(0)
+        val soundBefore = if (Library.ending(file.name) == "mp3") runCatching { mp3Sound(file) }.getOrNull() else null
         // Everything written inside the file goes: every kind of details block it holds, and its pictures.
         AudioFileIO.delete(AudioFileIO.read(file))
         val clean = AudioFileIO.read(file)
@@ -107,7 +108,49 @@ object Tagger {
         check(after.pictures == (if (d.cover != null) 1 else 0)) { "the file holds " + after.pictures + " pictures after the change" }
         // As long as before, or as long as the phone measured it when the music was read: the tag library's own reading of
         // an MP3's length can be thrown off by what was inside it before (Kevin's "Walk Like An Egyptian", 24-25 Nov 2026).
-        check(kotlin.math.abs(after.lengthSeconds - length) <= 1 || (knownSeconds > 0 && kotlin.math.abs(after.lengthSeconds - knownSeconds) <= 2)) { "the song's length changed" }
+        // An MP3 whose sound is byte for byte as it was is right, whatever length the tag library reads (26 November 2026:
+        // "Haunted" and "Sunday Game Theme Tune" were left unfixed on a misread length, with nothing wrong with them).
+        val soundSame = soundBefore != null && runCatching { mp3Sound(file) }.getOrNull()?.contentEquals(soundBefore) == true
+        check(soundSame || kotlin.math.abs(after.lengthSeconds - length) <= 1 || (knownSeconds > 0 && kotlin.math.abs(after.lengthSeconds - knownSeconds) <= 2)) { "the song's length changed" }
+    }
+
+    /**
+     * A fingerprint of an MP3's sound alone: every byte from its first sound frame to its end, with the details blocks
+     * around it (ID3v2 at the front; ID3v1, APE and Lyrics3 at the back) left out. Two files with the same answer
+     * hold exactly the same sound.
+     */
+    fun mp3Sound(file: File): ByteArray {
+        val b = file.readBytes()
+        var start = 0
+        while (start + 10 <= b.size && b[start] == 'I'.code.toByte() && b[start + 1] == 'D'.code.toByte() && b[start + 2] == '3'.code.toByte()) {
+            val size = ((b[start + 6].toInt() and 0x7F) shl 21) or ((b[start + 7].toInt() and 0x7F) shl 14) or
+                ((b[start + 8].toInt() and 0x7F) shl 7) or (b[start + 9].toInt() and 0x7F)
+            val footer = if (b[start + 5].toInt() and 0x10 != 0) 10 else 0
+            start += 10 + size + footer
+        }
+        while (start + 1 < b.size && !(b[start] == 0xFF.toByte() && (b[start + 1].toInt() and 0xE0) == 0xE0)) start++
+        var end = b.size
+        fun at(i: Int, text: String) = i >= 0 && i + text.length <= b.size && text.indices.all { b[i + it] == text[it].code.toByte() }
+        var changed = true
+        while (changed) {
+            changed = false
+            if (end >= 128 && at(end - 128, "TAG")) { end -= 128; changed = true }
+            if (end >= 32 && at(end - 32, "APETAGEX")) {
+                val p = end - 32
+                val size = (b[p + 12].toInt() and 0xFF) or ((b[p + 13].toInt() and 0xFF) shl 8) or ((b[p + 14].toInt() and 0xFF) shl 16) or ((b[p + 15].toInt() and 0xFF) shl 24)
+                val header = (b[p + 23].toInt() and 0x80) != 0
+                end -= size + (if (header) 32 else 0)
+                changed = true
+            }
+            if (end >= 15 && at(end - 9, "LYRICS200")) {
+                val size = runCatching { String(b, end - 15, 6).toInt() }.getOrNull()
+                if (size != null) { end -= size + 15; changed = true }
+            }
+        }
+        if (end <= start) return ByteArray(0)
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        md.update(b, start, end - start)
+        return md.digest()
     }
 
     /**

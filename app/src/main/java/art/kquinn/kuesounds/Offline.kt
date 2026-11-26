@@ -32,7 +32,7 @@ object Offline {
         saved = folder.listFiles()?.map { it.nameWithoutExtension }?.toSet().orEmpty()
     }
 
-    private fun fileName(t: Track) = t.id + "." + Library.ending(t.fileName).ifEmpty { "audio" }
+    private fun fileName(t: Track) = t.id + "." + Library.ending(Library.realName(t)).ifEmpty { "audio" }
 
     /** The saved copy of a song, if it is on the phone. */
     fun fileFor(t: Track): File? = if (t.id in saved) File(folder, fileName(t)).takeIf { it.exists() } ?: File(folder, t.id + ".m4a").takeIf { it.exists() } else null

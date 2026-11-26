@@ -123,6 +123,8 @@ data class LibraryData(
     val fixFailedAt: Map<String, String> = emptyMap(),
     /** Songs given their closest artist and made a single of their own (step 3), so each is done once. */
     val artistSwept: Set<String> = emptySet(),
+    /** Albums (and songs, by id) already looked for on Deezer and Apple for a cover, so each is asked once. */
+    val coverTried: Set<String> = emptySet(),
 )
 
 object Library {
@@ -175,6 +177,30 @@ object Library {
     val musicEndings = setOf("mp3", "m4a", "aac", "flac", "ogg", "oga", "opus", "wav", "aif", "aiff", "mka", "3ga", "amr", "m4b", "mp4a", "alac", "wma")
 
     fun ending(name: String): String = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+
+    private val soundEndings = setOf("mp3", "m4a", "m4b", "mp4", "aac", "flac", "ogg", "oga", "opus", "wma", "aif", "aiff", "wav", "dsf", "ape", "wv")
+
+    /**
+     * A song's file name with a true ending (Kevin, 26 November 2026: "Home to Donegal" was saved as "Create ringtone
+     * easily https://play.google.com/...ringtone.maker.trimmer", so it read as a ".trimmer" file and was never fixed).
+     * When the name's ending isn't a sound file's, the kind the Drive says it is gives the ending.
+     */
+    fun realName(t: Track): String {
+        if (ending(t.fileName) in soundEndings) return t.fileName
+        val kind = when (t.mime.lowercase(Locale.ROOT)) {
+            "audio/mpeg", "audio/mp3", "audio/mpeg3", "audio/x-mpeg-3" -> "mp3"
+            "audio/mp4", "audio/x-m4a", "audio/m4a", "audio/aac", "audio/aacp" -> "m4a"
+            "video/mp4" -> "mp4"
+            "audio/flac", "audio/x-flac", "application/x-flac" -> "flac"
+            "audio/ogg", "application/ogg", "audio/vorbis" -> "ogg"
+            "audio/opus" -> "opus"
+            "audio/wav", "audio/x-wav", "audio/wave" -> "wav"
+            "audio/x-ms-wma" -> "wma"
+            "audio/aiff", "audio/x-aiff" -> "aiff"
+            else -> return t.fileName
+        }
+        return t.fileName + "." + kind
+    }
 
     /** Whether a Drive file is music, from its kind and its name. */
     fun isMusic(name: String, mime: String): Boolean {
@@ -470,7 +496,7 @@ object Library {
             singleTitles = d.singleTitles ?: emptyMap(), singleArt = d.singleArt ?: emptyMap(), collections = d.collections ?: emptySet(),
             ownSingles = d.ownSingles ?: emptySet(), fixFailures = d.fixFailures ?: emptyMap(), fixProblems = d.fixProblems ?: emptyMap(),
             soundChecked = d.soundChecked ?: emptySet(), facts = d.facts ?: emptyMap(), soundMatched = d.soundMatched ?: emptySet(),
-            artistPictures = d.artistPictures ?: emptyMap(), fixFailedAt = d.fixFailedAt ?: emptyMap(), artistSwept = d.artistSwept ?: emptySet(),
+            artistPictures = d.artistPictures ?: emptyMap(), fixFailedAt = d.fixFailedAt ?: emptyMap(), artistSwept = d.artistSwept ?: emptySet(), coverTried = d.coverTried ?: emptySet(),
         )
     }
 

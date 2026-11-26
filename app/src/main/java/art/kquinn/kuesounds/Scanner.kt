@@ -268,6 +268,20 @@ object Scanner {
             save()
             note(again.size.toString() + " songs on albums with no match are looked up again, for a match or a cover")
         }
+        // 26 November 2026 (Kevin: "Match by sound: 0 songs named", "piles of empty album covers"). Every song had been
+        // marked as listened to by the AcoustID matching of 25 November, or by a failed try, so Shazam never listened to
+        // any. Every song is listened to again; the 77 made singles of their own by step 3 go back to be found by their
+        // sound or on Deezer and Apple first; every album with no catalogue cover is looked for on Deezer and Apple.
+        if (data.version < 10) {
+            val swept = data.tracks.filter { it.id in data.artistSwept }.map { keyOf(it) }.toSet()
+            data = data.copy(
+                soundChecked = emptySet(), artistSwept = emptySet(), coverTried = emptySet(),
+                ownSingles = data.ownSingles - swept,
+                version = 10,
+            )
+            save()
+            note("every song to be listened to again; " + swept.size + " songs made singles by step 3 to be found again; covers looked for on Deezer and Apple")
+        }
         read = data.tracks.count { it.tagged }
     }
 
@@ -336,8 +350,10 @@ object Scanner {
                         // 1 by name in the music catalogue, 2 by sound, 3 the closest artist, then the files are written.
                         stage = 3
                         matchAlbums()
+                        // Covers (and albums) MusicBrainz hasn't got, from Deezer and Apple (26 November 2026).
+                        findCovers()
                         stage = 4
-                        if (matchBySound()) matchAlbums()
+                        if (matchBySound()) { matchAlbums(); findCovers() }
                         stage = 5
                         sweepArtists()
                         // 4: what was found is written to the files straight away (Kevin, 26 November 2026: "if found,
@@ -600,7 +616,7 @@ object Scanner {
         synchronized(this) {
             runCatching { artFolder().deleteRecursively() }
             // At the newest layout, so none of the one-off updates for older libraries runs on the new one.
-            data = LibraryData(version = 9)
+            data = LibraryData(version = 10)
             save()
         }
         note("library started again by hand")
@@ -702,13 +718,22 @@ object Scanner {
         for ((i, t) in todo.withIndex()) {
             say("Matching by sound", i + 1, todo.size)
             val got = runCatching { SoundMatch.identify(t) }
+            // Only a real answer counts as listened to (26 November 2026): a failed try is tried again next time,
+            // unless the file itself couldn't be read.
+            var answered = got.isSuccess
             got.onFailure { e ->
-                note("not matched by sound: " + t.fileName + ": " + (e.message ?: e.javaClass.simpleName))
-                if ("key" in (e.message ?: "")) return false
+                note("not matched by sound: " + t.fileName + ": " + e.javaClass.simpleName + " " + (e.message ?: ""))
+                val net = e is java.net.UnknownHostException || e is java.net.SocketTimeoutException || e is java.net.ConnectException ||
+                    "Shazam" in (e.message ?: "") || e is Drive.SignedOut
+                if (!net) answered = true
                 failsInRow++
             }.onSuccess { failsInRow = 0 }
-            got.getOrNull()?.firstOrNull()?.takeIf { it.score >= 0.75 }?.let { best[t.id] = it }
-            data = data.copy(soundChecked = data.soundChecked + t.id)
+            got.getOrNull()?.firstOrNull()?.takeIf { it.score >= 0.75 }?.let { f ->
+                best[t.id] = f
+                note("named by sound (" + f.from + "): " + t.fileName + " → " + f.artist + " / " + f.title + " / " + f.albums.firstOrNull().orEmpty())
+            }
+            if (got.isSuccess && got.getOrNull().isNullOrEmpty()) note("not known by its sound: " + t.fileName)
+            if (answered) data = data.copy(soundChecked = data.soundChecked + t.id)
             if (i % 10 == 9) save()
             if (failsInRow >= 8) { note("matching by sound stopped: 8 failures in a row"); break }
         }
@@ -733,9 +758,75 @@ object Scanner {
                 checked = move == null && t.checked, ownLook = false, fixed = false,
             )
         })
+        // The cover Shazam gives, for an album that has none yet.
+        for ((id, f) in best) {
+            val url = f.cover ?: continue
+            val t = data.tracks.firstOrNull { it.id == id } ?: continue
+            val key = keyOf(t)
+            if (key in data.catalogueCovers) continue
+            val path = Covers.download(url)?.let { keepPicture(it, key + "\u0002shazam") } ?: continue
+            data = data.copy(art = data.art + (key to path), catalogueCovers = data.catalogueCovers + key)
+        }
         save()
         note("matched by sound: " + best.size + " of " + todo.size + " songs, " + moves.size + " put on their album")
         return true
+    }
+
+    /**
+     * Covers MusicBrainz hasn't got (Kevin, 26 November 2026: "piles of empty album covers"), from Deezer and Apple's
+     * music shop. First each album with no catalogue cover, by its own name and artist. Then each song left on an album
+     * nobody knows, or a single of its own, by its name and artist: it goes to the album Deezer or Apple has it on, with
+     * that cover ("Home To Donegal" to Nathan Carter's "Live At The Marquee Cork"). A find is only taken when the
+     * names match. Each album and song is asked once.
+     */
+    private fun findCovers() {
+        val albums = Library.albums(data.tracks).filter { al ->
+            al.key !in data.catalogueCovers && al.key !in data.coverTried && !onItsOwn(al) && al.tracks.all { it.checked }
+        }
+        if (albums.isEmpty()) return
+        note("covers: " + albums.size + " albums with no cover, asked of Deezer and Apple")
+        var byAlbum = 0
+        var bySong = 0
+        albums.forEachIndexed { i, al ->
+            say("Finding covers", i + 1, albums.size)
+            val own = al.key in data.ownSingles
+            if (!own) {
+                val (clean, _) = Library.cleanAlbum(al.title, al.artist)
+                val hit = runCatching { Covers.album(al.artist, clean) }.getOrNull()
+                Thread.sleep(250)
+                if (hit != null) {
+                    val path = Covers.download(hit.cover)?.let { keepPicture(it, al.key + "\u0002" + hit.from) }
+                    if (path != null) {
+                        data = data.copy(art = data.art + (al.key to path), catalogueCovers = data.catalogueCovers + al.key, coverTried = data.coverTried + al.key)
+                        note("cover from " + hit.from + ": " + al.artist + " / " + al.title)
+                        byAlbum++
+                        if (i % 10 == 9) save()
+                        return@forEachIndexed
+                    }
+                }
+            }
+            // Not known by its album's name: each song by its own name, when the album isn't one MusicBrainz knows.
+            if (al.key !in data.releases) {
+                for (t in al.tracks) {
+                    val hit = runCatching { Covers.song(t.artist, t.title) }.getOrNull()
+                    Thread.sleep(250)
+                    if (hit == null) continue
+                    val moved = t.copy(album = hit.album, albumArtist = hit.artist, checked = true, ownLook = true, fixed = false)
+                    val key = keyOf(moved)
+                    if (key !in data.catalogueCovers) {
+                        val path = Covers.download(hit.cover)?.let { keepPicture(it, key + "\u0002" + hit.from) } ?: continue
+                        data = data.copy(art = data.art + (key to path), catalogueCovers = data.catalogueCovers + key)
+                    }
+                    data = data.copy(tracks = data.tracks.map { if (it.id == t.id) moved else it })
+                    note("album and cover from " + hit.from + ": " + t.artist + " / " + t.title + " → " + hit.artist + " / " + hit.album)
+                    bySong++
+                }
+            }
+            data = data.copy(coverTried = data.coverTried + al.key)
+            if (i % 10 == 9) save()
+        }
+        save()
+        note("covers: " + byAlbum + " albums given a cover by name, " + bySong + " songs put on their album with its cover")
     }
 
     /**
@@ -1043,7 +1134,7 @@ object Scanner {
      */
     fun notFound(view: LibraryView = this.view, d: LibraryData = data): List<Album> =
         view.albums.filter { al ->
-            al.key !in d.releases && al.key !in d.ownSingles && al.key !in d.collections && !onItsOwn(al) && al.tracks.all { it.checked } &&
+            al.key !in d.releases && al.key !in d.ownSingles && al.key !in d.collections && al.key !in d.catalogueCovers && !onItsOwn(al) && al.tracks.all { it.checked } &&
                 // Matched by their sound: their names are right, so they drop off the list (Kevin, 26 November 2026).
                 !al.tracks.all { it.id in d.soundMatched }
         }
@@ -1059,7 +1150,7 @@ object Scanner {
             if (t.fixed && t.fixedFully) return@mapNotNull null
             val why = when {
                 t.id in d.fixProblems -> d.fixProblems.getValue(t.id)
-                !Tagger.canFix(t.fileName) -> "KueSounds can't write into this kind of file (" + Library.ending(t.fileName).uppercase() + ")."
+                !Tagger.canFix(Library.realName(t)) -> "KueSounds can't write into this kind of file (" + Library.ending(Library.realName(t)).uppercase() + ")."
                 running -> null
                 t.id in missed && (t.artist.isBlank() || Library.sortName(t.artist) == unknown) && t.id in d.soundChecked ->
                     "No artist, and its sound wasn't recognised. Tap it to put its name in."
@@ -1069,6 +1160,12 @@ object Scanner {
             t to why
         }
     }
+
+    /** Albums whose songs are written but have no cover from anywhere yet, for the list in Settings. */
+    fun noCover(d: LibraryData = data): List<Album> =
+        Library.albums(d.tracks).filter { al ->
+            al.key !in d.catalogueCovers && al.key !in d.ownSingles && al.tracks.any { it.fixed && !it.fixedFully }
+        }
 
     /** Songs put right by Match by sound (Use these): their album leaves the not-found list. */
     fun markSoundMatched(ids: Set<String>) = synchronized(this) {

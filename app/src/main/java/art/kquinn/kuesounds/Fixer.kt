@@ -69,10 +69,12 @@ object Fixer {
      * its own (written with no cover, so the compilation's picture comes out of the file).
      */
     fun canFix(al: Album, d: LibraryData = Scanner.data): Boolean =
-        ((al.key in d.releases && al.key in d.catalogueCovers) || al.key in d.ownSingles) && al.tracks.any { Tagger.canFix(it.fileName) }
+        // Known to MusicBrainz, or given a cover from Deezer, Apple, Shazam or by hand, or a single of its own
+        // (26 November 2026: an album MusicBrainz had no cover for was never written at all).
+        (al.key in d.releases || al.key in d.catalogueCovers || al.key in d.ownSingles) && al.tracks.any { Tagger.canFix(Library.realName(it)) }
 
     /** Fixed the full way (song name and artist put right, the rest taken out, album and cover written). */
-    fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(it.fileName) }.all { it.fixed && it.fixedFully }
+    fun isFixed(al: Album): Boolean = al.tracks.filter { Tagger.canFix(Library.realName(it)) }.all { it.fixed && it.fixedFully }
 
     /** Why fixing a file failed, in plain words for the list in Settings (Kevin, 25 November 2026). */
     private fun plain(e: Exception): String {
@@ -99,7 +101,14 @@ object Fixer {
 
     /** The album's songs still to fix, the stuck ones apart. */
     fun toDo(al: Album, d: LibraryData = Scanner.data): List<Track> =
-        al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) && !stuck(it, d) }
+        al.tracks.filter { Tagger.canFix(Library.realName(it)) && needsWrite(it, al, d) && !stuck(it, d) }
+
+    /**
+     * Whether a song's file still needs writing: never written, or written before its album had a cover and it has
+     * one now. A song written with no cover anywhere is not written again until one turns up (no redoing).
+     */
+    fun needsWrite(t: Track, al: Album, d: LibraryData = Scanner.data): Boolean =
+        !t.fixed || (!t.fixedFully && al.key in d.catalogueCovers)
 
     /** Whether Fix has anything to do on this album: matched, and a song left that isn't stuck. */
     fun hasWork(al: Album, d: LibraryData = Scanner.data): Boolean = canFix(al, d) && toDo(al, d).isNotEmpty()
@@ -133,7 +142,7 @@ object Fixer {
      * can't have in a file name are left out.
      */
     fun fileNameFor(t: Track, title: String = t.title, artist: String = t.artist): String {
-        val ending = t.fileName.substringAfterLast('.', "")
+        val ending = Library.ending(Library.realName(t))
         val who = artist.takeIf { it.isNotBlank() && it != Library.UNKNOWN_ARTIST }
         val stem = listOfNotNull(who, title.ifBlank { null }).joinToString(" - ")
             .replace(Regex("[\\\\/:*?\"<>|]"), " ").replace(Regex("\\s+"), " ").trim().take(150)
@@ -143,7 +152,7 @@ object Fixer {
 
     /** Fixed songs whose file name doesn't match the song yet. */
     fun namesToTidy(d: LibraryData = Scanner.data): List<Track> =
-        d.tracks.filter { it.fixed && Tagger.canFix(it.fileName) && it.fileName != fileNameFor(it) }
+        d.tracks.filter { it.fixed && Tagger.canFix(Library.realName(it)) && it.fileName != fileNameFor(it) }
 
     @Volatile private var renameWanted = false
 
@@ -200,7 +209,7 @@ object Fixer {
                 val al = Library.albums(Scanner.data.tracks).firstOrNull { it.key == key } ?: continue  // fresh, not the screens' copy
                 // A single of its own has no catalogue record: no list of songs, and no cover (the compilation's comes out).
                 val own = key in Scanner.data.ownSingles && key !in Scanner.data.releases
-                val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) && (retrying || !stuck(it)) }
+                val songs = al.tracks.filter { Tagger.canFix(Library.realName(it)) && needsWrite(it, al) && (retrying || !stuck(it)) }
                 var cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers }
                 if (!own && cover == null) {
                     // The album's cover has gone from the phone: fetched again from the catalogue here and now (it used to
@@ -209,17 +218,14 @@ object Fixer {
                     progress(status)
                     if (Scanner.coverAgain(key)) cover = Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() }
                 }
-                if (!own && cover == null) {
-                    // Not stuck: nothing is wrong with the files. The album waits for the next Fix.
-                    Scanner.note("cover couldn't be fetched for " + al.artist + " / " + al.title + ": left for the next Fix")
-                    notLookedUp++
-                    continue
-                }
+                // Still no cover anywhere: the names are written without one, and the song is listed as having no cover.
+                if (!own && cover == null) Scanner.note("no cover found anywhere for " + al.artist + " / " + al.title + ": names written without one")
                 // 1 and 2: the album's own list of songs, with each one's proper name and artist.
                 status = "Fixing files · " + al.title + " · finding its songs' proper names"
                 progress(status)
                 val releaseId = Scanner.data.releases[key]?.substringBefore('|').orEmpty()
-                val listed = if (own) emptyList() else if (releaseId.isEmpty()) null else runCatching { Catalogue.releaseSongs(releaseId) }
+                // Known only by its cover (Deezer, Apple, Shazam, by hand): the files' own song names are kept.
+                val listed = if (own || releaseId.isEmpty()) emptyList() else runCatching { Catalogue.releaseSongs(releaseId) }
                     .onFailure { Scanner.note("couldn't list the songs of " + al.artist + " / " + al.title + ": " + it.javaClass.simpleName + " " + it.message) }
                     .getOrNull()
                 if (listed == null) { notLookedUp++; continue }  // left to fix, for the next Fix
@@ -245,40 +251,80 @@ object Fixer {
         }
     }
 
+    /** A song's details as edited by hand in Song info (Kevin, 26 November 2026: one table that writes to the file). */
+    data class Edit(val title: String, val artist: String, val album: String, val albumArtist: String, val year: Int, val trackNo: Int, val discNo: Int)
+
+    /** A song's name and artist put right by hand; the rest as it is. */
+    suspend fun rename(context: Context, t: Track, title: String, artist: String): String =
+        saveDetails(context, t, Edit(title, artist, t.album, Library.albumArtistOf(t), t.year, t.trackNo, t.discNo))
+
     /**
-     * A song's name and artist put right by hand, and written into its file in the Drive with the rest of what
-     * is inside taken out: only its name, artist, album, year, place and cover stay. The cover is the album's from
-     * the music catalogue, or its single's; any other picture inside is taken out. The answer is what to say.
+     * A song's details put right by hand and written into its file in the Drive, with everything else inside taken
+     * out; the file is named after the song. The cover is its album's (the new album's when the album changed) or
+     * its single's. The answer is what to say.
      */
-    suspend fun rename(context: Context, t: Track, title: String, artist: String): String {
-        if (!Tagger.canFix(t.fileName)) return "KueSounds can't change this kind of file (" + Library.ending(t.fileName) + ")."
-        val key = Library.albumKey(Library.albumArtistOf(t), t.album)
-        val cover = Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers }
-            ?: Scanner.singleArtFor(t)
+    suspend fun saveDetails(context: Context, t: Track, e: Edit): String {
+        if (!Tagger.canFix(Library.realName(t))) return "KueSounds can't write into this kind of file (" + Library.ending(Library.realName(t)) + ")."
+        val newKey = Library.albumKey(e.albumArtist.ifBlank { e.artist }, e.album)
+        val cover = Scanner.data.art[newKey]?.let { File(it) }?.takeIf { it.exists() && newKey in Scanner.data.catalogueCovers }
+            ?: Scanner.singleArtFor(t).takeIf { e.album == t.album }
         val work = File(context.cacheDir, "fix").apply { mkdirs() }
-        val file = File(work, t.id + "." + Library.ending(t.fileName))
+        val file = File(work, t.id + "." + Library.ending(Library.realName(t)))
+        val albumChanged = e.album != t.album || e.albumArtist != Library.albumArtistOf(t)
         return try {
             val token = Google.editToken() ?: throw Drive.SignedOut()
             Drive.downloadWhole(t.id, file, token)
             if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
-            val albumArtist = Library.albumArtistOf(t)
-            Tagger.fix(file, Tagger.Details(title, artist, t.album, albumArtist, t.year, t.trackNo, t.discNo, cover), (t.durationMs / 1000).toInt()) { from, to -> rebuildMp4(from, to) }
-            val newName = fileNameFor(t, title, artist)
+            writeDetails(file, t, Tagger.Details(e.title, e.artist, e.album, e.albumArtist, e.year, e.trackNo, e.discNo, cover), token)
+            val named = t.copy(title = e.title, artist = e.artist)
+            val newName = fileNameFor(named, e.title, e.artist)
             val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
             Scanner.changeTracks(setOf(t.id)) {
-                it.copy(size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = artist, albumArtist = albumArtist, named = true, fileName = newName)
+                it.copy(
+                    size = size, modified = modified.ifEmpty { it.modified }, title = e.title, artist = e.artist, album = e.album,
+                    albumArtist = e.albumArtist, year = e.year, trackNo = e.trackNo, discNo = e.discNo, named = true, fileName = newName,
+                    // Kept on the album given by hand; looked up again for its cover when the album changed and has none.
+                    ownLook = true, checked = if (albumChanged && cover == null) false else it.checked,
+                    fixed = true, fixedFully = cover != null,
+                )
             }
-            Scanner.note("renamed by hand: " + t.fileName + " to " + artist + " / " + title)
-            "Saved in your Drive."
-        } catch (e: Drive.SignedOut) {
-            "Not saved: Google needs the edit permission. Press Fix on an album once, then try again."
-        } catch (e: Exception) {
-            Scanner.note("not renamed: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
-            "Not saved: " + (e.message ?: e.javaClass.simpleName)
+            Scanner.fixTried(t.id, null)
+            Scanner.note("saved by hand: " + t.fileName + " → " + e.artist + " / " + e.title + " / " + e.album)
+            "Saved into the file in your Drive."
+        } catch (x: Drive.SignedOut) {
+            "Not saved: Google needs the edit permission. Press Write to the files once, then try again."
+        } catch (x: Exception) {
+            Scanner.note("not saved by hand: " + t.fileName + ": " + x.javaClass.simpleName + " " + x.message)
+            "Not saved: " + (x.message ?: x.javaClass.simpleName)
         } finally {
             file.delete()
-            File(work, t.id + ".rebuilt." + Library.ending(t.fileName)).delete()
-            File(work, t.id + ".original." + Library.ending(t.fileName)).delete()
+            File(work, t.id + ".rebuilt." + Library.ending(Library.realName(t))).delete()
+            File(work, t.id + ".original." + Library.ending(Library.realName(t))).delete()
+        }
+    }
+
+    /**
+     * Writes [d] into [file]. An M4A that can't be written even after its sound is copied into a fresh file (Gordon
+     * Lightfoot's "Live in Concert", 25-26 November 2026) has its sound made again as AAC at the same quality, once,
+     * and is then written: the one way left to get its details in.
+     */
+    private suspend fun writeDetails(file: File, t: Track, d: Tagger.Details, token: String) {
+        val seconds = (t.durationMs / 1000).toInt()
+        try {
+            Tagger.fix(file, d, seconds) { from, to -> rebuildMp4(from, to) }
+        } catch (first: Exception) {
+            if (Library.ending(file.name) !in setOf("m4a", "m4b", "mp4")) throw first
+            Drive.downloadWhole(t.id, file, token)
+            val again = File(file.parentFile, t.id + ".again.m4a")
+            try {
+                val bps = if (t.durationMs > 0 && t.size > 0) (t.size * 8 / (t.durationMs / 1000.0)).toInt() else 192_000
+                Shrink.toAac(file, again, bps.coerceIn(128_000, 320_000))
+                again.copyTo(file, overwrite = true)
+            } finally {
+                again.delete()
+            }
+            Tagger.fix(file, d, 0)
+            Scanner.note("made again as AAC so its details could be written: " + t.fileName)
         }
     }
 
@@ -344,7 +390,7 @@ object Fixer {
     /** One try at one song. Throws [Drive.SignedOut] when Google refuses the pass; any other failure is noted. */
     private suspend fun fixOnce(context: Context, t: Track, al: Album, cover: File?, song: Catalogue.Song?): Boolean {
         val work = File(context.cacheDir, "fix").apply { mkdirs() }
-        val file = File(work, t.id + "." + Library.ending(t.fileName))
+        val file = File(work, t.id + "." + Library.ending(Library.realName(t)))
         return try {
             val token = Google.editToken() ?: throw Drive.SignedOut()
             Drive.downloadWhole(t.id, file, token)
@@ -356,13 +402,13 @@ object Fixer {
             val singer = if (t.named) t.artist else song?.artist?.ifBlank { null } ?: t.artist
             val trackNo = song?.position?.takeIf { it > 0 } ?: t.trackNo
             val discNo = song?.disc?.takeIf { it > 0 } ?: t.discNo
-            Tagger.fix(file, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover), (t.durationMs / 1000).toInt()) { from, to -> rebuildMp4(from, to) }
+            writeDetails(file, t, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover), token)
             val newName = fileNameFor(t, title, singer)
             val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
             Scanner.changeTracks(setOf(t.id)) {
                 it.copy(
                     size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = singer, trackNo = trackNo, discNo = discNo,
-                    albumArtist = artist, fixed = true, fixedFully = true, fileName = newName,
+                    albumArtist = artist, fixed = true, fixedFully = cover != null || al.key in Scanner.data.ownSingles, fileName = newName,
                 )
             }
             Scanner.fixTried(t.id, null)
@@ -375,8 +421,8 @@ object Fixer {
             false
         } finally {
             file.delete()
-            File(work, t.id + ".rebuilt." + Library.ending(t.fileName)).delete()
-            File(work, t.id + ".original." + Library.ending(t.fileName)).delete()
+            File(work, t.id + ".rebuilt." + Library.ending(Library.realName(t))).delete()
+            File(work, t.id + ".original." + Library.ending(Library.realName(t))).delete()
         }
     }
 }

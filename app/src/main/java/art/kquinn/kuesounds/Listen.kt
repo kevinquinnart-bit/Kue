@@ -137,6 +137,11 @@ object Listen {
                     asking = true
                     val got = runCatching { Shazam.name(sound, have) }
                     asking = false
+                    // Each try in the report, so a miss can be put right from facts (26 November 2026).
+                    Scanner.note(
+                        "name that song (" + (if (f == From.PHONE) "this phone" else "around me") + ", " + (have / ShazamSig.RATE) + " s, loudest " + loudest + "): " +
+                            (got.exceptionOrNull()?.let { "failed " + it.javaClass.simpleName + " " + it.message } ?: got.getOrNull()?.let { it.artist + " / " + it.title } ?: "not known"),
+                    )
                     got.exceptionOrNull()?.let { e ->
                         message = if (e is java.net.UnknownHostException || e is java.net.SocketTimeoutException) "No internet. Try again when the phone is online." else e.message ?: "Shazam didn't answer."
                         return

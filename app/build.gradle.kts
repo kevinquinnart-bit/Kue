@@ -70,6 +70,9 @@ dependencies {
     implementation("com.squareup.okhttp3:okhttp:5.5.0")
     implementation("com.google.code.gson:gson:2.13.1")
     implementation("io.coil-kt.coil3:coil-compose:3.6.0")
+    // Pictures from the internet (Deezer, Apple, Shazam covers in Choose the cover and Name that song). Coil 3 loads only
+    // files on the phone without this, which is why those covers showed as empty boxes (26 November 2026).
+    implementation("io.coil-kt.coil3:coil-network-okhttp:3.6.0")
     implementation("androidx.core:core:1.19.0")
     // Writing the right cover and album details into the music files themselves.
     implementation("net.jthink:jaudiotagger:3.0.1")

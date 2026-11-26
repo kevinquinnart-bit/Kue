@@ -153,7 +153,7 @@ object SingAlong : BaseAudioProcessor() {
 object Ringtone {
     /** Does it. Gives back what happened, in words for the screen. Call off the main thread. */
     suspend fun set(context: Context, t: Track): String {
-        val ending = Library.ending(t.fileName).ifEmpty { "mp3" }
+        val ending = Library.ending(Library.realName(t)).ifEmpty { "mp3" }
         val local = Offline.fileFor(t) ?: File(context.cacheDir, "ringtone." + ending).also { Drive.download(t.id, it) }
         val resolver = context.contentResolver
         val values = android.content.ContentValues().apply {
