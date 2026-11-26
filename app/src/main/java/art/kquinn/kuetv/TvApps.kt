@@ -11,7 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
 /**
- * The free UK and Irish TV apps. Their programmes only play inside their own apps, so KueTV opens
+ * The channel player apps: the UK's and Ireland's free ones, and the main ones of other countries. Their programmes only play inside their own apps, so KueTV opens
  * the app when it is on this TV, and otherwise opens the TV's app store on a search for it.
  */
 object TvAppList {
@@ -30,20 +30,122 @@ object TvAppList {
 
     const val UK = "UK"
     const val IRELAND = "Ireland"
+    const val USA = "USA"
+    const val CANADA = "Canada"
+    const val AUSTRALIA = "Australia"
+    const val NEW_ZEALAND = "New Zealand"
+    const val GERMANY = "Germany"
+    const val FRANCE = "France"
+    const val ITALY = "Italy"
+    const val SPAIN = "Spain"
+    const val NETHERLANDS = "Netherlands"
+    const val NORDICS = "Nordic countries"
 
-    /** The countries, in the order Settings shows them. */
-    val countries = listOf(UK, IRELAND)
+    /** The countries, in the order Settings shows them. UK and Ireland open; the others folded away. */
+    val countries = listOf(UK, IRELAND, USA, CANADA, AUSTRALIA, NEW_ZEALAND, GERMANY, FRANCE, ITALY, SPAIN, NETHERLANDS, NORDICS)
 
+    /** The country of KueTV's players for a two-letter country code, or null when it has none for it. */
+    fun countryOf(code: String): String? = when (code.uppercase()) {
+        "GB", "IM", "JE", "GG" -> UK
+        "IE" -> IRELAND
+        "US" -> USA
+        "CA" -> CANADA
+        "AU" -> AUSTRALIA
+        "NZ" -> NEW_ZEALAND
+        "DE", "AT" -> GERMANY
+        "FR", "MC", "BE" -> FRANCE
+        "IT", "SM" -> ITALY
+        "ES" -> SPAIN
+        "NL" -> NETHERLANDS
+        "SE", "NO", "DK", "FI" -> NORDICS
+        else -> null
+    }
+
+    /**
+     * The free and main channel players of each country (Kevin, 26 November 2026: every player there is, the UK's
+     * and the main ones elsewhere, seen by KueTV whether or not they are on this TV). Recognised by their name as the
+     * TV shows it, or their package. Names are compared in lower case.
+     */
     val all = listOf(
         TvApp("BBC iPlayer", listOf("iplayer"), emptyList(), listOf("iplayer")),
         TvApp("ITVX", listOf("itvx", "itv hub"), emptyList(), listOf("com.itv.", "air.itv")),
         TvApp("Channel 4", listOf("channel 4", "all 4"), emptyList(), listOf("channel4")),
         TvApp("5 (Channel 5)", listOf("my5", "channel 5"), listOf("5"), listOf("channel5", "my5", "demand5"), storeSearch = "Channel 5"),
         TvApp("RTÉ Player", listOf("rté player", "rte player"), emptyList(), listOf("ie.rte", "tvbridge.rte"), country = IRELAND),
-        TvApp("Virgin Media Play", listOf("virgin media"), emptyList(), listOf("virginmedia"), country = IRELAND),
+        TvApp("Virgin Media Play", listOf("virgin media play", "virgin media player"), emptyList(), listOf("virginmedia"), country = IRELAND),
         TvApp("STV Player", listOf("stv player"), listOf("stv"), listOf("stvplayer")),
         TvApp("U (UKTV)", listOf("uktv"), listOf("u"), listOf("uktv"), storeSearch = "UKTV Play"),
         TvApp("TG4 Player", listOf("tg4"), emptyList(), listOf("tg4"), country = IRELAND),
+        TvApp("S4C Clic", listOf("s4c clic"), listOf("s4c", "clic"), listOf("s4c")),
+        TvApp("Freely", listOf("freely"), emptyList(), listOf("uk.co.freely")),
+        TvApp("Pluto TV", listOf("pluto tv"), emptyList(), listOf("tv.pluto")),
+        TvApp("Sky News", listOf("sky news"), emptyList(), listOf("com.bskyb.skynews")),
+        TvApp("GB News", listOf("gb news"), emptyList(), listOf("gbnews")),
+        TvApp("Great! Player", listOf("great! player", "great player"), emptyList(), listOf("greatplayer")),
+        // USA
+        TvApp("Peacock", listOf("peacock"), emptyList(), listOf("peacock"), country = USA),
+        TvApp("Paramount+", listOf("paramount+", "paramount plus"), emptyList(), listOf("com.cbs.ott", "com.cbs.app"), country = USA),
+        TvApp("NBC", listOf("nbc app"), listOf("nbc"), listOf("com.nbcuni.nbc"), country = USA),
+        TvApp("ABC (USA)", listOf("abc app"), listOf("abc"), listOf("com.disney.datg.videoplatforms"), storeSearch = "ABC", country = USA),
+        TvApp("FOX", listOf("fox now", "fox one"), listOf("fox"), listOf("com.fox.now"), country = USA),
+        TvApp("PBS", listOf("pbs video", "pbs app"), listOf("pbs"), listOf("org.pbs"), country = USA),
+        TvApp("The CW", listOf("the cw"), emptyList(), listOf("com.cw.fullepisodes"), country = USA),
+        TvApp("Hulu", listOf("hulu"), emptyList(), listOf("com.hulu"), country = USA),
+        TvApp("YouTube TV", listOf("youtube tv"), emptyList(), listOf("tvunplugged"), country = USA),
+        TvApp("Sling TV", listOf("sling tv"), listOf("sling"), listOf("com.sling"), country = USA),
+        TvApp("Fubo", listOf("fubo"), emptyList(), listOf("fubo"), country = USA),
+        TvApp("Philo", listOf("philo tv"), listOf("philo"), listOf("com.philo"), country = USA),
+        TvApp("Tubi", listOf("tubi"), emptyList(), listOf("com.tubitv"), country = USA),
+        TvApp("The Roku Channel", listOf("roku channel"), emptyList(), listOf("com.roku.trc"), country = USA),
+        TvApp("Plex", emptyList(), listOf("plex"), listOf("com.plexapp"), country = USA),
+        TvApp("Xumo Play", listOf("xumo"), emptyList(), listOf("xumo"), country = USA),
+        TvApp("CBS News", listOf("cbs news"), emptyList(), listOf("cbsnews"), country = USA),
+        TvApp("NBC News NOW", listOf("nbc news"), emptyList(), listOf("nbcnews"), country = USA),
+        TvApp("ESPN", listOf("espn"), emptyList(), listOf("com.espn"), country = USA),
+        // Canada
+        TvApp("CBC Gem", listOf("cbc gem"), emptyList(), listOf("ca.cbc"), country = CANADA),
+        TvApp("CTV", listOf("ctv app"), listOf("ctv"), listOf("ca.ctv", "ctvdigital"), country = CANADA),
+        TvApp("Global TV", listOf("global tv", "stacktv"), emptyList(), listOf("com.globaltv", "corusent"), country = CANADA),
+        TvApp("Crave", listOf("crave"), emptyList(), listOf("ca.bellmedia.crave"), country = CANADA),
+        TvApp("ICI Tou.tv", listOf("tou.tv"), emptyList(), listOf("toutv"), country = CANADA),
+        // Australia
+        TvApp("ABC iview", listOf("iview"), emptyList(), listOf("au.net.abc"), country = AUSTRALIA),
+        TvApp("SBS On Demand", listOf("sbs on demand"), emptyList(), listOf("com.sbs.ondemand"), country = AUSTRALIA),
+        TvApp("7plus", listOf("7plus"), emptyList(), listOf("au.com.seven"), country = AUSTRALIA),
+        TvApp("9Now", listOf("9now"), emptyList(), listOf("au.com.ninemsn", "au.com.nine"), country = AUSTRALIA),
+        TvApp("10 Play", listOf("10 play", "10play"), listOf("10"), listOf("au.com.networkten"), country = AUSTRALIA),
+        // New Zealand
+        TvApp("TVNZ+", listOf("tvnz"), emptyList(), listOf("nz.co.tvnz"), country = NEW_ZEALAND),
+        TvApp("ThreeNow", listOf("threenow"), emptyList(), listOf("threenow"), country = NEW_ZEALAND),
+        TvApp("Whakaata Māori", listOf("whakaata", "maori television"), emptyList(), listOf("maoritelevision"), country = NEW_ZEALAND),
+        // Germany
+        TvApp("ARD Mediathek", listOf("ard mediathek", "ardmediathek"), emptyList(), listOf("ardmediathek"), country = GERMANY),
+        TvApp("ZDF", listOf("zdfmediathek", "zdf mediathek"), listOf("zdf"), listOf("com.zdf"), country = GERMANY),
+        TvApp("Joyn", listOf("joyn"), emptyList(), listOf("joyn"), country = GERMANY),
+        TvApp("RTL+", listOf("rtl+"), emptyList(), listOf("rtlnow", "rtlplus"), country = GERMANY),
+        TvApp("Zattoo", listOf("zattoo"), emptyList(), listOf("zattoo"), country = GERMANY),
+        // France
+        TvApp("france.tv", listOf("france.tv", "france tv"), emptyList(), listOf("fr.francetv"), country = FRANCE),
+        TvApp("TF1+", listOf("tf1+", "tf1 +"), listOf("tf1"), listOf("fr.tf1"), country = FRANCE),
+        TvApp("M6+", listOf("m6+", "6play"), emptyList(), listOf("fr.m6"), country = FRANCE),
+        TvApp("Arte", listOf("arte tv"), listOf("arte"), listOf("tv.arte"), country = FRANCE),
+        TvApp("Molotov", listOf("molotov"), emptyList(), listOf("molotov"), country = FRANCE),
+        // Italy
+        TvApp("RaiPlay", listOf("raiplay", "rai play"), emptyList(), listOf("it.rai"), country = ITALY),
+        TvApp("Mediaset Infinity", listOf("mediaset infinity", "mediaset play"), emptyList(), listOf("it.mediaset"), country = ITALY),
+        TvApp("La7", listOf("la7"), emptyList(), listOf("it.la7"), country = ITALY),
+        // Spain
+        TvApp("RTVE Play", listOf("rtve"), emptyList(), listOf("rtve"), country = SPAIN),
+        TvApp("Atresplayer", listOf("atresplayer"), emptyList(), listOf("atresmedia", "atresplayer"), country = SPAIN),
+        TvApp("Mitele", listOf("mitele"), emptyList(), listOf("mitele"), country = SPAIN),
+        // Netherlands
+        TvApp("NPO Start", listOf("npo start", "npo plus"), emptyList(), listOf("nl.uitzendinggemist", "nl.npo"), country = NETHERLANDS),
+        TvApp("Videoland", listOf("videoland"), emptyList(), listOf("videoland"), country = NETHERLANDS),
+        // Nordic countries
+        TvApp("SVT Play", listOf("svt play"), emptyList(), listOf("se.svt"), country = NORDICS),
+        TvApp("NRK TV", listOf("nrk tv"), emptyList(), listOf("no.nrk"), country = NORDICS),
+        TvApp("DRTV", listOf("drtv", "dr tv"), emptyList(), listOf("dk.dr."), country = NORDICS),
+        TvApp("Yle Areena", listOf("yle areena", "areena"), emptyList(), listOf("fi.yle"), country = NORDICS),
     )
 
     /**

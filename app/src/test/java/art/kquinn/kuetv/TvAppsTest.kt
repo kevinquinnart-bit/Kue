@@ -23,7 +23,7 @@ class TvAppsTest {
                 "uk.co.bbc.iplayer", "air.ITVMobilePlayer", "com.channel4.ondemand", "com.something.five", "ie.rte.player", "com.virginmedia.play",
                 "com.stv.android", "uk.co.uktv.dave", "ie.tg4.player",
             ),
-            TvAppList.match(onTv),
+            TvAppList.match(onTv).take(9),
         )
     }
 
@@ -36,7 +36,7 @@ class TvAppsTest {
             "com.example.stvp" to "STV News Extra",
             "uk.co.bbc.iplayer" to "BBC iPlayer",
         )
-        assertEquals(listOf("uk.co.bbc.iplayer", null, null, null, null, null, null, null, null), TvAppList.match(onTv))
+        assertEquals(listOf("uk.co.bbc.iplayer") + List(TvAppList.all.size - 1) { null }, TvAppList.match(onTv))
     }
 
     @Test fun nothingOnTheTvGivesAllMissing() {
@@ -49,7 +49,20 @@ class TvAppsTest {
     }
 
     @Test fun eachCountryHasItsPlayers() {
-        assertEquals(listOf("BBC iPlayer", "ITVX", "Channel 4", "5 (Channel 5)", "STV Player", "U (UKTV)"), TvAppList.all.filter { it.country == TvAppList.UK }.map { it.title })
+        assertEquals(
+            listOf("BBC iPlayer", "ITVX", "Channel 4", "5 (Channel 5)", "STV Player", "U (UKTV)", "S4C Clic", "Freely", "Pluto TV", "Sky News", "GB News", "Great! Player"),
+            TvAppList.all.filter { it.country == TvAppList.UK }.map { it.title },
+        )
         assertEquals(listOf("RTÉ Player", "Virgin Media Play", "TG4 Player"), TvAppList.all.filter { it.country == TvAppList.IRELAND }.map { it.title })
+        // Every country listed has players, and every player's country is listed.
+        TvAppList.countries.forEach { c -> assert(TvAppList.all.any { it.country == c }) { "no players for $c" } }
+        TvAppList.all.forEach { a -> assert(a.country in TvAppList.countries) { a.title } }
+    }
+
+    /** Players from other countries are seen too, by name or package (Kevin, 26 November 2026). */
+    @Test fun otherCountriesPlayersAreSeen() {
+        val onTv = linkedMapOf("com.peacocktv.peacockandroid" to "Peacock TV", "au.net.abc.iview" to "ABC iview", "com.example.style" to "Style Magazine")
+        val found = TvAppList.all.zip(TvAppList.match(onTv)).filter { it.second != null }.map { it.first.title }
+        assertEquals(listOf("Peacock", "ABC iview"), found)
     }
 }

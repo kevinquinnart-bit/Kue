@@ -1212,6 +1212,13 @@ fun PlayerScreen(
             add(subsButton)
             add(Control("Options", Icon.OPTIONS, act = openOptions))
             if (items.size > 1 || onChannels != null) add(Control("Channels", Icon.LIST, act = toChannels))
+            // The same channel from the TV's aerial, through Freely: free, and no internet needed.
+            if (live && !phone) items.getOrNull(index)?.let { Aerial.numberFor(it.name) }?.takeIf { aerialHere }?.let { n ->
+                add(Control(Aerial.onLabel(), Icon.LIVE) {
+                    player.pause()
+                    if (!Aerial.openChannel(context, n)) say("The aerial wouldn't open.")
+                })
+            }
             // This channel in its own app's live player (ITVX for ITV1, Channel 4's app for Channel 4…), as Freely does.
             // Apps that take no link to a live channel (BBC iPlayer, 5, U, TG4…) open on their own page, where the
             // channel is picked (Kevin, 26 November 2026: every channel linked to its own player).
@@ -1229,13 +1236,6 @@ fun PlayerScreen(
                         })
                     }
                 }
-            }
-            // The same channel from the TV's aerial, through Freely: free, and no internet needed.
-            if (live && !phone) items.getOrNull(index)?.let { Aerial.numberFor(it.name) }?.takeIf { aerialHere }?.let { n ->
-                add(Control("On aerial", Icon.LIVE) {
-                    player.pause()
-                    if (!Aerial.openChannel(context, n)) say("The aerial wouldn't open.")
-                })
             }
             if (previous in items.indices) add(Control("Last channel", Icon.PREVIOUS) { go(previous) })
             if (items.size > 1 && onMultiview != null) add(Control("Multiview", Icon.MULTI) { onMultiview(items.toList(), index) })

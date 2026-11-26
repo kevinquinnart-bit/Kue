@@ -3244,7 +3244,10 @@ private fun MainScreen(
                                         FocusRow("Stop adding · " + PlayerApps.queue.size + " still to go", { PlayerApps.queue = emptyList() },
                                             look = Look.MAIN, below = "Next: " + PlayerApps.queue.first().title)
                                     }
+                                    // The UK, Ireland and this TV's own country open; every other country folded away (Kevin, 26 November 2026).
+                                    val tvCountry = remember { TvAppList.countryOf(runCatching { context.resources.configuration.locales[0].country }.getOrDefault("")) }
                                     TvAppList.countries.forEach { country ->
+                                        val body: @Composable () -> Unit = {
                                         val apps = TvAppList.all.withIndex().filter { it.value.country == country }
                                         val missing = apps.filter { here.getOrNull(it.index) == null }.map { it.value }
                                         FocusRow(
@@ -3265,6 +3268,8 @@ private fun MainScreen(
                                                 below = if (found != null) "On this TV · OK to remove it" else "Not on this TV · OK to add it",
                                             )
                                         }
+                                    }
+                                        if (country == TvAppList.UK || country == TvAppList.IRELAND || country == tvCountry) body() else fold("$country channel players", body)
                                     }
                                 }
                             }
@@ -4310,6 +4315,47 @@ private fun Pane.EpisodePage(
  * Search: one box, and under it what matches in channels, films and series, in that order. OK on a
  * channel or film plays it; OK on a series opens its episodes.
  */
+/**
+ * KueTV's own keyboard for Search on a TV: the letters and numbers in a block, then Space, Delete and Clear. Each key
+ * types the moment OK is pressed on it; what has been typed shows above, in the box.
+ */
+@Composable
+private fun TvKeyboard(text: String, onText: (String) -> Unit, modifier: Modifier) {
+    val rows = remember { listOf("abcdef", "ghijkl", "mnopqr", "stuvwx", "yz1234", "567890") }
+    val keyCap: @Composable RowScope.(String, Float, () -> Unit) -> Unit = { label, weight, act ->
+        var focused by remember { mutableStateOf(false) }
+        Box(
+            Modifier.weight(weight).height(52.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(if (focused) Accent else Panel)
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(onClick = act),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(label, color = if (focused) Color.Black else Ink, fontSize = if (label.length == 1) 22.sp else 17.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+    }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier.fillMaxWidth().height(60.dp).clip(RoundedCornerShape(12.dp)).background(Panel).padding(horizontal = 16.dp),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            if (text.isEmpty()) Text("Search channels, movies and series", color = Soft, fontSize = 16.sp, maxLines = 2)
+            else Text(text, color = Ink, fontSize = 22.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Column(Modifier.focusGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (r in rows) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (c in r) keyCap(c.uppercase(), 1f) { onText(text + c) }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                keyCap("Space", 2f) { if (text.isNotEmpty() && !text.endsWith(" ")) onText("$text ") }
+                keyCap("Delete", 2f) { onText(text.dropLast(1)) }
+                keyCap("Clear", 2f) { onText("") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun Pane.SearchPane(
     library: Library,
@@ -4367,8 +4413,13 @@ private fun Pane.SearchPane(
     val context = LocalContext.current
     val clockFmt = remember { java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK) }
     val dayFmt = remember { java.text.SimpleDateFormat("EEE", java.util.Locale.UK) }
-    Column(fill()) {
-        OutlinedTextField(
+    // TV: KueTV's own keyboard beside the results, so a letter goes in the moment OK is pressed. The TV's keyboard was
+    // slow to come up and took the OK that opened it as an "a" (Kevin, 26 November 2026). The phone keeps its own.
+    val phonePane = LocalPhone.current
+    Row(fill()) {
+        if (!phonePane) TvKeyboard(state.query, { state.query = it }, Modifier.width(372.dp).fillMaxHeight().padding(end = 20.dp))
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+        if (phonePane) OutlinedTextField(
             value = state.query,
             onValueChange = { state.query = it },
             label = { Text("Search channels, movies and series", fontSize = 16.sp) },
@@ -4377,7 +4428,7 @@ private fun Pane.SearchPane(
             modifier = Modifier.fillMaxWidth().padding(bottom = 14.dp),
         )
         when {
-            state.query.trim().length < 2 -> Note("Press OK on the box and type at least two letters.")
+            state.query.trim().length < 2 -> Note(if (phonePane) "Press OK on the box and type at least two letters." else "Type at least two letters on the keyboard.")
             found.isEmpty && onTv.isEmpty() && more == null -> Note("Nothing in your provider's lists matches. Looking in the catalogues…")
             found.isEmpty && onTv.isEmpty() && moreFilms.isEmpty() && moreShows.isEmpty() -> Note("Nothing matches \"" + state.query.trim() + "\".")
             else -> LazyColumn(Modifier.fillMaxSize(), state = state.searchList) {
@@ -4488,6 +4539,7 @@ private fun Pane.SearchPane(
             }
         }
     }
+    }
 }
 
 /**
@@ -4534,12 +4586,25 @@ private fun Pane.TvAppsPane() {
             Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(color = AccentInk) }
             return@Column
         }
+        // The players on this TV first, then the UK's, Ireland's and this TV's own country's, then every other country's.
+        val tvCountry = remember { TvAppList.countryOf(runCatching { context.resources.configuration.locales[0].country }.getOrDefault("")) }
+        val order = remember(apps) {
+            TvAppList.all.indices.sortedBy { i ->
+                val c = TvAppList.all[i].country
+                when {
+                    apps.getOrNull(i) != null -> 0
+                    c == TvAppList.UK || c == TvAppList.IRELAND || c == tvCountry -> 1
+                    else -> 2 + TvAppList.countries.indexOf(c)
+                }
+            }
+        }
         LazyColumn(Modifier.fillMaxSize().focusRestorer()) {
-            itemsIndexed(TvAppList.all, key = { _, a -> a.title }) { i, app ->
+            items(order, key = { TvAppList.all[it].title }) { i ->
+                val app = TvAppList.all[i]
                 val here = apps.getOrNull(i)
                 TvAppRow(
                     title = app.title,
-                    line = if (here != null) "Installed. OK opens it." else "Not installed. OK finds it in the app store.",
+                    line = if (here != null) "Installed. OK opens it." else "Not installed (" + app.country + "). OK finds it in the app store.",
                     icon = here?.icon,
                     onClick = {
                         val opened = if (here != null) TvAppsOnDevice.open(context, here.packageName) else TvAppsOnDevice.openStore(context, app.storeSearch)
@@ -8023,7 +8088,7 @@ private fun ChannelMenu(
                     // On a TV with an aerial, always there: straight to the channel when its aerial number is known,
                     // else the TV's own aerial list, to pick it there (Kevin, 26 November 2026: "the pop up link is not there").
                     if (aerialNumber != null) {
-                        FocusRow("Watch on the aerial", { onClose(); if (!Aerial.openChannel(context, aerialNumber)) kueToast(context, "Aerial channel $aerialNumber wouldn't open.") },
+                        FocusRow(if (Aerial.onLabel() == "On Freely") "Watch on Freely" else "Watch on the aerial", { onClose(); if (!Aerial.openChannel(context, aerialNumber)) kueToast(context, "Aerial channel $aerialNumber wouldn't open.") },
                             look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.AERIAL, below = "Channel $aerialNumber, free, no internet needed")
                     } else if (aerialHere) {
                         FocusRow("Find it on the aerial", { onClose(); if (!Aerial.open(context)) kueToast(context, "The TV's aerial channels wouldn't open.") },
