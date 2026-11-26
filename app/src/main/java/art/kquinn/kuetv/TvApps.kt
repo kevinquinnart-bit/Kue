@@ -72,7 +72,7 @@ object TvAppList {
         TvApp("Channel 4", listOf("channel 4", "all 4"), emptyList(), listOf("channel4")),
         TvApp("5 (Channel 5)", listOf("my5", "channel 5"), listOf("5"), listOf("channel5", "my5", "demand5"), storeSearch = "Channel 5"),
         TvApp("RTÉ Player", listOf("rté player", "rte player"), emptyList(), listOf("ie.rte", "tvbridge.rte"), country = IRELAND),
-        TvApp("Virgin Media Play", listOf("virgin media play", "virgin media player"), emptyList(), listOf("virginmedia"), country = IRELAND),
+        TvApp("Virgin Media Play", listOf("virgin media play", "virgin media player"), emptyList(), listOf("virginmedia", "com.axonista.threeplayer"), country = IRELAND),
         TvApp("STV Player", listOf("stv player"), listOf("stv"), listOf("stvplayer")),
         TvApp("U (UKTV)", listOf("uktv"), listOf("u"), listOf("uktv"), storeSearch = "UKTV Play"),
         TvApp("TG4 Player", listOf("tg4"), emptyList(), listOf("tg4"), country = IRELAND),
