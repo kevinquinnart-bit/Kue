@@ -299,13 +299,32 @@ object OnlineUi {
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             settings.mediaPlaybackRequiresUserGesture = false
-                            webChromeClient = android.webkit.WebChromeClient()
+                            // What the page and YouTube's player do goes in the report for Claude (26 November 2026).
+                            webChromeClient = object : android.webkit.WebChromeClient() {
+                                override fun onConsoleMessage(m: android.webkit.ConsoleMessage): Boolean {
+                                    if (m.messageLevel() == android.webkit.ConsoleMessage.MessageLevel.ERROR) Scanner.note("YouTube page: " + m.message().take(200))
+                                    return true
+                                }
+                            }
+                            webViewClient = object : android.webkit.WebViewClient() {
+                                override fun onReceivedError(v: android.webkit.WebView, r: android.webkit.WebResourceRequest, e: android.webkit.WebResourceError) {
+                                    Scanner.note("YouTube page: couldn't load " + r.url.host + r.url.path.orEmpty().take(40) + ": " + e.errorCode + " " + e.description)
+                                }
+                                override fun onReceivedHttpError(v: android.webkit.WebView, r: android.webkit.WebResourceRequest, e: android.webkit.WebResourceResponse) {
+                                    Scanner.note("YouTube page: " + r.url.host + r.url.path.orEmpty().take(40) + " answered " + e.statusCode)
+                                }
+                                override fun onRenderProcessGone(v: android.webkit.WebView, d: android.webkit.RenderProcessGoneDetail): Boolean {
+                                    Scanner.note("YouTube page: the web view stopped")
+                                    return true
+                                }
+                            }
                             setBackgroundColor(android.graphics.Color.BLACK)
                             // A song's found videos: the next is tried when one won't play inside another app, and the
                             // YouTube app opens it when none will.
                             val main = android.os.Handler(android.os.Looper.getMainLooper())
                             addJavascriptInterface(object {
                                 @android.webkit.JavascriptInterface fun trying(id: String) { Scanner.note("YouTube: video wouldn't play here, trying $id") }
+                                @android.webkit.JavascriptInterface fun state(what: String) { Scanner.note("YouTube player: " + what.take(120)) }
                                 @android.webkit.JavascriptInterface fun failed(id: String) {
                                     main.post {
                                         Scanner.note("YouTube: none of the found videos would play here; opened in the YouTube app")
@@ -323,6 +342,13 @@ object OnlineUi {
                     },
                 )
                 Ui.Words("Playing in YouTube's own player. It stops when you leave this screen.", 14, K.Soft, lines = 3)
+                // Always there, so a video that won't play here is one tap from the YouTube app (Kevin, 26 November 2026).
+                val id = tries.firstOrNull() ?: link.video
+                if (id.isNotEmpty()) Ui.Button("Open in the YouTube app", main = false, icon = KueSettings.Icons.VIDEO, modifier = Modifier.fillMaxWidth()) {
+                    val app = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("vnd.youtube:$id")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    val web = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.youtube.com/watch?v=$id")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    runCatching { context.startActivity(app) }.onFailure { runCatching { context.startActivity(web) } }
+                }
             }
         }
     }

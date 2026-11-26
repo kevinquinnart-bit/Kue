@@ -144,14 +144,16 @@ object Drive {
      * place in the person's Drive). Google keeps the old version for 30 days. Gives back the file's new
      * size and change time. Call off the main thread.
      */
-    fun uploadNewVersion(id: String, file: File, mime: String, token: String): Pair<Long, String> {
+    fun uploadNewVersion(id: String, file: File, mime: String, token: String, name: String? = null): Pair<Long, String> {
         val type = mime.ifBlank { "application/octet-stream" }
+        // A new file name goes with the new version when given (Kevin, 26 November 2026: file name to match the song).
+        val meta = com.google.gson.JsonObject().apply { if (!name.isNullOrBlank()) addProperty("name", name) }.toString()
         val start = Request.Builder()
             .url("https://www.googleapis.com/upload/drive/v3/files/$id?uploadType=resumable&fields=size,modifiedTime")
             .header("Authorization", "Bearer $token")
             .header("X-Upload-Content-Type", type)
             .header("X-Upload-Content-Length", file.length().toString())
-            .patch("{}".toRequestBody("application/json; charset=UTF-8".toMediaType()))
+            .patch(meta.toRequestBody("application/json; charset=UTF-8".toMediaType()))
             .build()
         val session = http.newCall(start).execute().use { r ->
             if (r.code == 401) { Google.forget(); throw SignedOut() }
@@ -180,6 +182,21 @@ object Drive {
         http.newCall(request).execute().use { r ->
             if (r.code == 401) { Google.forget(); throw SignedOut() }
             if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code)
+        }
+    }
+
+    /** Gives a file a new name, nothing else changed. The answer is its new change time. Call off the main thread. */
+    fun setName(id: String, name: String, token: String): String {
+        val body = com.google.gson.JsonObject().apply { addProperty("name", name) }.toString()
+        val request = Request.Builder()
+            .url("$API/$id?fields=name,modifiedTime")
+            .header("Authorization", "Bearer $token")
+            .patch(body.toRequestBody("application/json; charset=UTF-8".toMediaType()))
+            .build()
+        http.newCall(request).execute().use { r ->
+            if (r.code == 401) { Google.forget(); throw SignedOut() }
+            if (!r.isSuccessful) throw IOException("Google Drive answered " + r.code + " to the new name")
+            return JsonParser.parseString(r.body.string()).asJsonObject.get("modifiedTime")?.asString.orEmpty()
         }
     }
 

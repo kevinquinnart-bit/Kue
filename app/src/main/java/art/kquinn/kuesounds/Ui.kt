@@ -699,6 +699,14 @@ object Ui {
         var chosen by remember { mutableStateOf<Set<String>?>(null) }
         Column(Modifier.fillMaxSize()) {
             ListTools(tab, Views.songSorts, count(songs.size, "song"), chosen != null, { chosen = if (chosen == null) emptySet() else null }) { Playing.play(sorted, 0, shuffled = true) }
+            // While picking: all of them, none, or the other way round (Kevin, 26 November 2026: "need select all").
+            chosen?.let { now ->
+                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, bottom = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    KueSettings.SubChip("Pick all " + String.format("%,d", sorted.size), now.size == sorted.size && sorted.isNotEmpty(), look) { chosen = sorted.map { it.id }.toSet() }
+                    KueSettings.SubChip("None", false, look) { chosen = emptySet() }
+                    KueSettings.SubChip("Swap", false, look) { chosen = sorted.map { it.id }.filter { it !in now }.toSet() }
+                }
+            }
             Box(Modifier.weight(1f)) { SongList(sorted, go, Views.layout(tab), chosen) { id -> chosen = chosen?.let { if (id in it) it - id else it + id } } }
             chosen?.takeIf { it.isNotEmpty() }?.let { ids -> Chosen(sorted.filter { it.id in ids }) { chosen = null } }
         }
@@ -718,6 +726,7 @@ object Ui {
                 item { Button("Queue", main = false, icon = KueSettings.Icons.QUEUE, modifier = Modifier.height(44.dp)) { Playing.addToQueue(songs); onDone() } }
                 item { Button("Playlist", main = false, icon = KueSettings.Icons.PLAYLIST, modifier = Modifier.height(44.dp)) { adding = true } }
                 item { Button("Save to phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.height(44.dp)) { Offline.save(context, songs); onDone() } }
+                item { Button("Favourites", main = false, icon = KueSettings.Icons.STAR, modifier = Modifier.height(44.dp)) { songs.forEach { Sync.put("fav:" + it.id, "1") }; onDone() } }
             }
         }
     }
@@ -1716,7 +1725,7 @@ object Ui {
     private fun Working(text: String) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
-            Words(text, 14, K.Accent, lines = 2, modifier = Modifier.weight(1f))
+            Words(text, 14, K.Accent, lines = 4, modifier = Modifier.weight(1f))
         }
     }
 
@@ -1741,6 +1750,13 @@ object Ui {
             else -> Words(count(view.leftToFix, "album") + " to fix", 17, bold = true)
         }
         if (Fixer.lastResult.isNotEmpty() && !Fixer.running) Words(Fixer.lastResult, 14, K.Soft, lines = 3)
+        // File names to match the songs (Kevin, 26 November 2026).
+        val names = remember(data) { Fixer.namesToTidy(data).size }
+        if (names > 0 && !Fixer.running) {
+            val ctx = LocalContext.current
+            Words(if (names == 1) "1 file name doesn't match its song yet." else String.format("%,d", names) + " file names don't match their songs yet.", 15, lines = 2)
+            Button("Name the files after their songs", main = view.leftToFix == 0, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { Fixer.tidyNames(ctx) }
+        }
         if (!Fixer.running && view.leftToFix > 0) FixFiles(view.matched, "Fix them", main = true)
         if (notFixed.isNotEmpty() && !Fixer.running) {
             Words("Stuck, skipped: " + count(notFixed.size, "song"), 15, bold = true)
@@ -2421,14 +2437,15 @@ object Ui {
                 if (state == DONE) KueSettings.Icon(KueSettings.Icons.TICK, 16.dp, K.Page, 2.6f) else Words(number.toString(), 14, if (state == WAITING) K.Soft else K.Page, bold = true)
             }
             Column(Modifier.weight(1f)) {
-                Words(name + when (state) { DONE -> " · done"; NOW -> " · now"; else -> "" }, 16, if (state == NOW) K.Accent else K.Ink, bold = true)
+                // Whole names and lines, never cut short (Kevin, 26 November 2026: "squashed text").
+                Words(name + when (state) { DONE -> " · done"; NOW -> " · now"; else -> "" }, 16, if (state == NOW) K.Accent else K.Ink, bold = true, lines = 3)
                 if (what.isNotEmpty()) Words(what, 14, K.Soft, lines = 8)
                 if (progress.isNotEmpty()) Words(progress, 14, if (state == NOW) K.Accent else K.Ink, lines = 10)
                 if (state == NOW && Scanner.running) {
                     // Turning while it works, and how far through the part it is on.
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
-                        Words(Scanner.status.ifBlank { "Working…" }, 14, K.Accent, lines = 2, modifier = Modifier.weight(1f))
+                        Words(Scanner.status.ifBlank { "Working…" }, 14, K.Accent, lines = 4, modifier = Modifier.weight(1f))
                         val p = Scanner.progress
                         if (p >= 0f) Words((p * 100).toInt().toString() + "%", 16, K.Accent, bold = true)
                     }
@@ -2439,7 +2456,7 @@ object Ui {
                     Words(
                         if (KueApp.mayRunLocked(androidx.compose.ui.platform.LocalContext.current)) "Carries on with the phone locked or KueSounds in the background."
                         else "Carries on in the background once the phone lets it: see Notifications in Settings.",
-                        13, K.Soft, lines = 2,
+                        13, K.Soft, lines = 4,
                     )
                 }
             }

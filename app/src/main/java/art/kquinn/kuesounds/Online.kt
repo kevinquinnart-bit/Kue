@@ -241,9 +241,13 @@ object YouTube {
             "<script>var ids=[" + list + "];var i=0;var player;" +
             "function onYouTubeIframeAPIReady(){player=new YT.Player('p',{width:'100%',height:'100%',videoId:ids[0]," +
             "playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1}," +
-            "events:{onReady:function(e){e.target.playVideo();}," +
-            "onError:function(e){i++;if(i<ids.length){player.loadVideoById(ids[i]);Kue.trying(ids[i]);}else{Kue.failed(ids[0]);}}}});}" +
-            "</script><script src=\"https://www.youtube.com/iframe_api\"></script></body></html>"
+            "events:{onReady:function(e){Kue.state('ready '+ids[i]);e.target.playVideo();}," +
+            "onStateChange:function(e){Kue.state(''+e.data);}," +
+            "onError:function(e){Kue.state('error '+e.data+' '+ids[i]);i++;if(i<ids.length){player.loadVideoById(ids[i]);Kue.trying(ids[i]);}else{Kue.failed(ids[0]);}}}});}" +
+            // What happens on the page goes in the report for Claude, so a black player can be put right from facts.
+            "window.onerror=function(m){Kue.state('page error '+m);};" +
+            "setTimeout(function(){if(typeof YT==='undefined'||!player)Kue.state('player not made after 15 s');},15000);" +
+            "</script><script src=\"https://www.youtube.com/iframe_api\" onerror=\"Kue.state('YouTube player code not loaded')\"></script></body></html>"
     }
 
     /** The links played lately, newest first, kept in the Drive's file. */

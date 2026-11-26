@@ -117,7 +117,57 @@ object Fixer {
         if (Google.canEdit) start(app, albums, retry = true) else askPermission { start(app, albums, retry = true) }
     }
 
-    val hasWork: Boolean get() = synchronized(waiting) { waiting.isNotEmpty() }
+    val hasWork: Boolean get() = synchronized(waiting) { waiting.isNotEmpty() } || renameWanted
+
+    /**
+     * File names to match the songs (Kevin, 26 November 2026: "Steve Winwood - Higher Love (Official Music Video).m4a"
+     * should be the song's name). A fixed file is named "Artist - Song name", with its own ending. Signs a computer
+     * can't have in a file name are left out.
+     */
+    fun fileNameFor(t: Track, title: String = t.title, artist: String = t.artist): String {
+        val ending = t.fileName.substringAfterLast('.', "")
+        val who = artist.takeIf { it.isNotBlank() && it != Library.UNKNOWN_ARTIST }
+        val stem = listOfNotNull(who, title.ifBlank { null }).joinToString(" - ")
+            .replace(Regex("[\\\\/:*?\"<>|]"), " ").replace(Regex("\\s+"), " ").trim().take(150)
+        if (stem.isEmpty()) return t.fileName
+        return if (ending.isEmpty()) stem else "$stem.$ending"
+    }
+
+    /** Fixed songs whose file name doesn't match the song yet. */
+    fun namesToTidy(d: LibraryData = Scanner.data): List<Track> =
+        d.tracks.filter { it.fixed && Tagger.canFix(it.fileName) && it.fileName != fileNameFor(it) }
+
+    @Volatile private var renameWanted = false
+
+    /** Gives the fixed songs' files their songs' names. Carries on with the screens closed. */
+    fun tidyNames(context: Context) {
+        val app = context.applicationContext
+        val go = { renameWanted = true; WorkService.start(app) }
+        if (Google.canEdit) go() else askPermission { go() }
+    }
+
+    /** Renames each file still named otherwise; only the name changes, so it is quick. */
+    private suspend fun renameFiles(progress: (String) -> Unit): Int {
+        val todo = namesToTidy()
+        var done = 0
+        for ((i, t) in todo.withIndex()) {
+            status = "Naming files · " + (i + 1) + " of " + todo.size
+            progress(status)
+            val name = fileNameFor(t)
+            try {
+                val token = Google.editToken() ?: throw Drive.SignedOut()
+                val modified = Drive.setName(t.id, name, token)
+                Scanner.changeTracks(setOf(t.id)) { it.copy(fileName = name, modified = modified.ifEmpty { it.modified }) }
+                done++
+            } catch (e: Drive.SignedOut) {
+                break
+            } catch (e: Exception) {
+                Scanner.note("not renamed: " + t.fileName + ": " + e.javaClass.simpleName + " " + e.message)
+            }
+        }
+        if (todo.isNotEmpty()) Scanner.note("file names matched to songs: $done of " + todo.size)
+        return done
+    }
 
     private fun next(): String? = synchronized(waiting) { waiting.firstOrNull()?.also { waiting.remove(it) } }
 
@@ -127,6 +177,7 @@ object Fixer {
         var fixedCount = 0
         var failed = 0
         var notLookedUp = 0
+        var renamed = 0
         try {
             // A search of the Drive going on is let finish first, so the two don't change the library at once.
             while (Scanner.running) delay(2000)
@@ -158,11 +209,15 @@ object Fixer {
                     if (ok) fixedCount++ else failed++
                 }
             }
+            // Then every fixed song's file gets its song's name.
+            renameWanted = false
+            renamed = renameFiles(progress)
         } finally {
             status = ""
             running = false
             retrying = false
-            lastResult = "Last time: " + count(fixedCount, "song") + " fixed" + (if (failed > 0) ", " + failed + " stuck and skipped" else "") +
+            renameWanted = false
+            lastResult = "Last time: " + count(fixedCount, "song") + " fixed" + (if (renamed > 0) ", " + count(renamed, "file") + " renamed" else "") + (if (failed > 0) ", " + failed + " stuck and skipped" else "") +
                 (if (notLookedUp > 0) ". The music catalogue was busy for " + count(notLookedUp, "album") + ": press Fix again later." else ".")
             Scanner.note("fixing finished: $fixedCount fixed, $failed not fixed, $notLookedUp albums not looked up")
         }
@@ -186,9 +241,10 @@ object Fixer {
             if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
             val albumArtist = Library.albumArtistOf(t)
             Tagger.fix(file, Tagger.Details(title, artist, t.album, albumArtist, t.year, t.trackNo, t.discNo, cover), (t.durationMs / 1000).toInt()) { from, to -> rebuildMp4(from, to) }
-            val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token)
+            val newName = fileNameFor(t, title, artist)
+            val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
             Scanner.changeTracks(setOf(t.id)) {
-                it.copy(size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = artist, albumArtist = albumArtist, named = true)
+                it.copy(size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = artist, albumArtist = albumArtist, named = true, fileName = newName)
             }
             Scanner.note("renamed by hand: " + t.fileName + " to " + artist + " / " + title)
             "Saved in your Drive."
@@ -279,11 +335,12 @@ object Fixer {
             val trackNo = song?.position?.takeIf { it > 0 } ?: t.trackNo
             val discNo = song?.disc?.takeIf { it > 0 } ?: t.discNo
             Tagger.fix(file, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover), (t.durationMs / 1000).toInt()) { from, to -> rebuildMp4(from, to) }
-            val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token)
+            val newName = fileNameFor(t, title, singer)
+            val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
             Scanner.changeTracks(setOf(t.id)) {
                 it.copy(
                     size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = singer, trackNo = trackNo, discNo = discNo,
-                    albumArtist = artist, fixed = true, fixedFully = true,
+                    albumArtist = artist, fixed = true, fixedFully = true, fileName = newName,
                 )
             }
             Scanner.fixTried(t.id, null)
