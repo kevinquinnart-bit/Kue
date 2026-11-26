@@ -1471,21 +1471,24 @@ private const val ALL = "\u0000all"
 private const val FAVOURITES = "\u0000favourites"
 /** Live TV's "Recently watched": the channels watched lately, newest first. */
 private const val RECENT = "\u0000recent"
+/** Live TV's "Aerial TV": the TV's own aerial channels (Freely, Freeview, Saorview), each opening on the aerial (Kevin, 26 November 2026). */
+private const val AERIAL = "\u0000aerial"
 
 // "All" and "Favourites" are known inside the app by marks that can't be written to the device's
 // storage as they are, so they are kept under these plain words instead.
-private fun keptAs(category: String) = when (category) { ALL -> "*all"; FAVOURITES -> "*favourites"; else -> category }
+private fun keptAs(category: String) = when (category) { ALL -> "*all"; FAVOURITES -> "*favourites"; AERIAL -> "*aerial"; else -> category }
 
 /** The drawn picture in front of a category: All, Favourites, Recently watched, the user's own and Live TV's topics. Null for the provider's own. */
 private fun categoryGlyph(id: String): Glyph? = when {
     id == ALL -> Glyph.ALL
     id == FAVOURITES -> Glyph.STAR
     id == RECENT -> Glyph.CLOCK
+    id == AERIAL -> Glyph.AERIAL
     id.startsWith(MyCategories.PREFIX) -> Glyph.FOLDER
     id.startsWith(Topics.PREFIX) -> topicGlyph(id.removePrefix(Topics.PREFIX))
     else -> null
 }
-private fun fromKept(kept: String?) = when (kept) { null, "*all" -> ALL; "*favourites" -> FAVOURITES; else -> kept }
+private fun fromKept(kept: String?) = when (kept) { null, "*all" -> ALL; "*favourites" -> FAVOURITES; "*aerial" -> AERIAL; else -> kept }
 @Composable
 private fun holdHint() = if (LocalPhone.current) " · press and hold for favourite" else " · hold OK for favourite"
 
@@ -1898,7 +1901,7 @@ private fun MainScreen(
         // (A topic such as Sport, and all the free channels, aren't the provider's categories either: they stay, or
         // coming back from a channel in Sport, or the lists changing, put Live TV back on All.)
         if (state.liveCategory != ALL && state.liveCategory != FAVOURITES && state.liveCategory != RECENT && !state.liveCategory.startsWith(MyCategories.PREFIX) &&
-            !state.liveCategory.startsWith(Topics.PREFIX) && state.liveCategory != Library.FREE_ALL &&
+            !state.liveCategory.startsWith(Topics.PREFIX) && state.liveCategory != Library.FREE_ALL && state.liveCategory != AERIAL &&
             library.liveCategories.none { it.id == state.liveCategory }
         ) state.liveCategory = ALL
         // A catalogue isn't one of the provider's categories, and is left alone.
@@ -2142,8 +2145,10 @@ private fun MainScreen(
                         }
                     }
                 }
+                // TV with an aerial: the aerial's channels are a category of their own, after Recently watched.
+                val aerialHere by produceState(false) { value = withContext(Dispatchers.Default) { runCatching { Aerial.available(context) }.getOrDefault(false) } }
                 Categories(
-                    listOf(Category(RECENT, "Recently watched")) + mine.map { Category(it.id, it.name) } + columnCats, liveCategory, state.liveCategoryList,
+                    listOf(Category(RECENT, "Recently watched")) + (if (aerialHere && !phone) listOf(Category(AERIAL, "Aerial TV · free to air")) else emptyList()) + mine.map { Category(it.id, it.name) } + columnCats, liveCategory, state.liveCategoryList,
                     // OK on a topic opens or closes its sections, and shows the whole topic.
                     onPress = { id ->
                         if (grouped && id.startsWith(Topics.PREFIX)) {
@@ -2201,7 +2206,7 @@ private fun MainScreen(
                     withFrameNanos { }
                     runCatching { resume.requestFocus() }
                 }
-                val list: @Composable (Modifier) -> Unit = { m ->
+                val channelsList: @Composable (Modifier) -> Unit = { m ->
                     // Favourites can be put in the user's own order: pick one up, move it, put it down.
                     val sortable = liveCategory == FAVOURITES && shown.size > 1
                     val sorting = sortable && state.sorting
@@ -2352,6 +2357,11 @@ private fun MainScreen(
                         }
                         }
                     }
+                }
+                // Aerial TV: the aerial's own channels in place of the provider's.
+                val list: @Composable (Modifier) -> Unit = { m ->
+                    if (liveCategory == AERIAL) AerialChannels(m, library, resume, resumeKey, onFocus = { state.liveOn = it }, onPlayed = { state.resumeKey = it })
+                    else channelsList(m)
                 }
                 if (phone) {
                     list(fill())
@@ -7884,6 +7894,57 @@ private fun AskBox(question: String, below: String, yes: String, no: String, onY
     }
 }
 
+/**
+ * Live TV › Aerial TV: the channels from the aerial plugged into the TV, in the TV's own numbers (Freely, Freeview,
+ * Saorview), from the list in Settings › This TV › Aerial TV. OK opens the channel on the aerial: free, no internet
+ * needed. The channel's logo and what is on come from the provider's channel of the same name, when there is one.
+ */
+@Composable
+private fun AerialChannels(
+    m: Modifier, library: Library, resume: FocusRequester, resumeKey: String?,
+    onFocus: (ChannelGroup?) -> Unit, onPlayed: (String) -> Unit,
+) {
+    val context = LocalContext.current
+    val tick = Aerial.changes
+    val plan = remember(tick) { AerialLists.current }
+    // One row for each number: the user's own numbers first, then the list's. Its first name is the one shown.
+    val rows = remember(tick) {
+        (AerialLists.own?.channels.orEmpty() + plan?.channels.orEmpty()).distinctBy { it.number }.sortedBy { it.number }
+    }
+    val names = remember(tick) {
+        (AerialLists.own?.channels.orEmpty() + plan?.channels.orEmpty()).groupBy({ it.number }, { Aerial.key(it.name) })
+    }
+    val byKey = remember(library) { HashMap<String, ChannelGroup>().also { all -> library.groups.forEach { g -> all.putIfAbsent(Aerial.key(g.name), g) } } }
+    val matchOf: (Int) -> ChannelGroup? = { n -> names[n].orEmpty().firstNotNullOfOrNull { byKey[it] } }
+    Column(m) {
+        Heading((if (rows.size == 1) "1 aerial channel" else "${rows.size} aerial channels") + " · free, no internet needed" + (plan?.let { " · " + it.label } ?: ""))
+        if (rows.isEmpty()) {
+            Note("There is no aerial channel list for this TV yet. Settings › This TV › Aerial TV picks one, or takes your own numbers.")
+        }
+        LazyColumn(Modifier.fillMaxSize().focusRestorer()) {
+            item(key = "guide") {
+                FocusRow("The TV's own aerial channels and guide", { if (!Aerial.open(context)) kueToast(context, "The TV's aerial channels wouldn't open.") },
+                    look = Look.OTHER, icon = Glyph.AERIAL, below = "Freely's own list, every channel the aerial picks up", onFocus = { onFocus(null) })
+            }
+            items(rows, key = { it.number }) { c ->
+                val key = "aerial:" + c.number
+                val group = remember(byKey, c.number) { matchOf(c.number) }
+                FocusRow(
+                    c.number.toString() + "   " + c.name,
+                    {
+                        onPlayed(key)
+                        if (!Aerial.openChannel(context, c.number)) kueToast(context, "Aerial channel " + c.number + " wouldn't open.")
+                    },
+                    if (key == resumeKey) Modifier.focusRequester(resume) else Modifier,
+                    onFocus = { onFocus(group) },
+                    leading = { Logo(group?.logo.orEmpty()) },
+                    below = group?.let { g -> nowLine(library.account, g.versions[g.start].channel.id, g.name) } ?: "On the aerial",
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun ChannelMenu(
     channel: ChannelGroup, login: Boolean, favourites: Favourites, mine: List<MyCategories.Mine>, onClose: () -> Unit, onPickToHide: () -> Unit = {},
@@ -7895,6 +7956,12 @@ private fun ChannelMenu(
     val context = LocalContext.current
     val favKeys = channel.versions.map { Favourites.key(it.channel, login) }
     val favourite = favKeys.any { it in favourites.keys }
+    // TV: where else this channel plays free. Only what is really on this TV is offered.
+    val phone = LocalPhone.current
+    val aerialNumber = remember(channel.name) { if (phone) null else Aerial.numberFor(channel.name)?.takeIf { runCatching { Aerial.available(context) }.getOrDefault(false) } }
+    val ownApp = remember(channel.name) {
+        if (phone) null else LiveInApps.forChannel(channel.name)?.takeIf { c -> runCatching { context.packageManager.getPackageInfo(c.pkg, 0) }.isSuccess }
+    }
     // Typing a name: for a new category (true), or for the channel (false); null while not typing.
     var naming by remember { mutableStateOf<Boolean?>(null) }
     var typed by remember { mutableStateOf("") }
@@ -7943,6 +8010,14 @@ private fun ChannelMenu(
                     // Moving comes first in Favourites, where it is what holding is mostly for (Kevin, 22 November 2026).
                     if (onMove != null) FocusRow("↕ Move", { onClose(); onMove() }, Modifier.focusRequester(first), look = Look.OTHER, textSize = 17.sp, padV = 8.dp, below = "▲ ▼ to move it, OK to put it down")
                     FocusRow(if (favourite) "Remove from favourites" else "Add to favourites", { favourites.toggleAll(favKeys); onClose(); onFavourite() }, if (onMove == null) Modifier.focusRequester(first) else Modifier, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.STAR)
+                    // The same channel free: on the TV's aerial (Freely), or in its own app (ITVX, Channel 4).
+                    aerialNumber?.let { n ->
+                        FocusRow("Watch on the aerial", { onClose(); if (!Aerial.openChannel(context, n)) kueToast(context, "Aerial channel $n wouldn't open.") },
+                            look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.AERIAL, below = "Channel $n, free, no internet needed")
+                    }
+                    ownApp?.let { a ->
+                        FocusRow("Watch in " + a.app, { onClose(); LiveInApps.open(context, a) }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.TV, below = "Live in its own app, free")
+                    }
                     for (m in mine) {
                         val inIt = channel.id in m.channels
                         FocusRow((if (inIt) "Take out of " else "Add to ") + m.name, { MyCategories.toggle(context, m.id, channel.id); onClose() }, look = Look.OTHER, textSize = 17.sp, padV = 8.dp, icon = Glyph.FOLDER)
