@@ -57,6 +57,8 @@ object K {
     val Page = Color(0xFF0E1626)
     val Panel = Color(0xFF16213A)
     val Raised = Color(0xFF263A63)
+    /** The thin edge on fields, drop-downs and second-choice buttons, the same in every Kue app. */
+    val Edge: Color get() = Soft.copy(alpha = 0.45f)
     val Accent = Color(0xFFFFD23F)
     val Ink = Color.White
     /** Soft grey text; nearly white with Stronger contrast on (Settings › Look and feel). */
@@ -127,7 +129,8 @@ internal fun Words(text: String, size: Int = 15, colour: Color = K.Ink, bold: Bo
 @Composable
 internal fun Button(text: String, main: Boolean = false, modifier: Modifier = Modifier, icon: String? = null, onClick: () -> Unit) {
     Row(
-        modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Raised).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
+        modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(if (main) K.Accent else K.Raised)
+            .then(if (main) Modifier else Modifier.border(1.dp, K.Edge, RoundedCornerShape(14.dp))).clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
     ) {
@@ -148,7 +151,7 @@ internal fun Meter(fraction: Float, colour: Color, height: Int = 6) {
 internal fun Title(text: String, onBack: (() -> Unit)? = null) {
     Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         if (onBack != null) {
-            Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClick = onBack), contentAlignment = Alignment.Center) { KueSettings.Icon(KueSettings.Icons.BACK, 22.dp, K.Ink, 2.2f) }
+            Box(Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Raised).border(1.dp, K.Edge, RoundedCornerShape(12.dp)).clickable(onClick = onBack), contentAlignment = Alignment.Center) { KueSettings.Icon(KueSettings.Icons.BACK, 22.dp, K.Ink, 2.2f) }
             Spacer(Modifier.width(12.dp))
         }
         Words(text, 24, bold = true, lines = 1)
@@ -653,7 +656,7 @@ object Ui {
     @Composable
     internal fun Field(label: String, value: String, example: String, secret: Boolean = false, onChange: (String) -> Unit) {
         if (label.isNotEmpty()) Words(label, 13, K.Soft, lines = 1)
-        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(horizontal = 16.dp, vertical = 14.dp), contentAlignment = Alignment.CenterStart) {
+        Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(horizontal = 16.dp, vertical = 14.dp), contentAlignment = Alignment.CenterStart) {
             if (value.isEmpty() && example.isNotEmpty()) Words(example, 15, K.Soft.copy(alpha = 0.5f), lines = 1)
             androidx.compose.foundation.text.BasicTextField(
                 value = value, onValueChange = onChange, singleLine = true,
