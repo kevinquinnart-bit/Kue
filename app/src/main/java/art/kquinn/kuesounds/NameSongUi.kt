@@ -173,18 +173,8 @@ object NameUi {
             }
             if (yours != null) Ui.Button("Play it from your music", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(listOf(yours), 0) }
             else Ui.Words("Not in your music.", 14, K.Soft)
-            var finding by remember { mutableStateOf(false) }
-            Ui.Button(if (finding) "Finding the video…" else "Watch it on YouTube", main = yours == null, icon = KueSettings.Icons.VIDEO, modifier = Modifier.fillMaxWidth()) {
-                if (finding) return@Button
-                finding = true
-                scope.launch {
-                    val found = withContext(Dispatchers.IO) { runCatching { YouTube.find(song.artist, song.title) }.getOrDefault(emptyList()) }
-                    finding = false
-                    if (found.isEmpty()) open("https://www.youtube.com/results?search_query=" + java.net.URLEncoder.encode(words, "UTF-8"))
-                    else Ui.watch = Screen.YouTubePlayer("https://www.youtube.com/watch?v=" + found.first().id, found.take(5).map { it.id }, song.title + " · " + song.artist)
-                }
-            }
-            Ui.Button("Find it in Spotify", main = false, icon = KueSettings.Icons.MUSIC, modifier = Modifier.fillMaxWidth()) { SpotifyLink.openSearch(context, words) }
+            // Open song in YouTube, YouTube Music, Spotify or Apple Music, as Shazam does (Kevin, 26 November 2026).
+            OpenSong.Choices(song.artist, song.title)
             Ui.Button("Look it up on the web", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) {
                 open("https://www.google.com/search?q=" + java.net.URLEncoder.encode(words, "UTF-8"))
             }

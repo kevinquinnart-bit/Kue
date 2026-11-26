@@ -124,8 +124,17 @@ class PlaybackService : MediaLibraryService() {
     private fun listenForSound(player: ExoPlayer) {
         Sound.init(this)
         val apply = {
-            val kind = Sound.kindOf(player.currentMediaItem?.mediaId.orEmpty())
-            val p = Sound.profile(kind)
+            val id = player.currentMediaItem?.mediaId.orEmpty()
+            val kind = Sound.kindOf(id)
+            var p = Sound.profile(kind)
+            // Following the kind of music: the song's own kind picks its setting as it comes on (26 November 2026).
+            Sound.following = ""
+            if (kind == Sound.Kind.MUSIC && p.followKind) {
+                val genre = Scanner.data.tracks.firstOrNull { it.id == id }?.let { Library.genreOf(it, Scanner.data) }.orEmpty()
+                val chosen = Sound.forKind(p, genre)
+                if (chosen !== p) Sound.following = Sound.presets[chosen.preset].name + ", for " + genre
+                p = chosen
+            }
             effects?.apply(p)
             player.skipSilenceEnabled = kind == Sound.Kind.PODCASTS && p.skipSilence
         }

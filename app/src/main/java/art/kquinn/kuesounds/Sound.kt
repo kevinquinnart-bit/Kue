@@ -7,6 +7,7 @@ import android.media.audiofx.LoudnessEnhancer
 import android.media.audiofx.Virtualizer
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import kotlin.math.ln
 
@@ -50,9 +51,46 @@ object Sound {
         Preset("Acoustic", floatArrayOf(3f, 2f, 1f, 2f, 2f)),
         Preset("Country and folk", floatArrayOf(2f, 1f, 2f, 3f, 2f)),
         Preset("Late night, softer", floatArrayOf(-2f, 0f, 2f, 1f, -2f)),
+        // Added 26 November 2026 for following the kind of music: warm low end, smooth voice.
+        Preset("Soul and R&B", floatArrayOf(4f, 3f, 1f, 2f, 1f)),
         Preset("Your own", floatArrayOf(0f, 0f, 0f, 0f, 0f)),
     )
     val OWN = presets.size - 1
+
+    private fun named(name: String) = presets.indexOfFirst { it.name == name }
+
+    /**
+     * The ready-made setting for a kind of music (Kevin, 26 November 2026: "a soul or classical file can have the
+     * correct sound profile switch for playback as the song comes on"). Null when the kind isn't one of these.
+     */
+    fun presetFor(kind: String): Int? {
+        val g = kind.lowercase()
+        fun has(vararg w: String) = w.any { it in g }
+        val name = when {
+            has("classical", "opera", "baroque", "orchestra", "symphon", "chamber", "choral", "concerto") -> "Classical"
+            has("soul", "r&b", "rnb", "rhythm and blues", "funk", "gospel", "motown") -> "Soul and R&B"
+            has("jazz", "blues", "swing", "big band") -> "Jazz"
+            has("hip hop", "hip-hop", "rap", "reggae", "dub", "grime", "trap", "dancehall") -> "Bass boost"
+            has("dance", "house", "techno", "trance", "edm", "electronic", "disco", "garage", "drum and bass", "electro") -> "Dance"
+            has("rock", "metal", "punk", "grunge", "indie", "alternative") -> "Rock"
+            has("folk", "country", "irish", "celtic", "bluegrass", "americana", "traditional") -> "Country and folk"
+            has("acoustic", "singer-songwriter", "singer/songwriter") -> "Acoustic"
+            has("spoken", "comedy", "audiobook") -> "Clear voices"
+            has("pop") -> "Pop"
+            else -> return null
+        }
+        return named(name).takeIf { it >= 0 }
+    }
+
+    /** What the music profile plays for a song of [kind]: its kind's setting when following, else the one chosen. */
+    fun forKind(p: Profile, kind: String): Profile {
+        if (!p.followKind) return p
+        val preset = presetFor(kind) ?: return p
+        return p.copy(eqOn = true, preset = preset)
+    }
+
+    /** The setting the playing song took by its kind, for the screen ("Soul and R&B, for Soul"); "" when none. */
+    var following by mutableStateOf("")
 
     /** One profile: whether the equaliser is on, which setting, your own bands, and the three extras (0 to 100). */
     data class Profile(
@@ -64,6 +102,8 @@ object Sound {
         val louder: Int = 0,
         /** Podcasts: silences in an episode skipped over. */
         val skipSilence: Boolean = false,
+        /** Music: each song takes the setting made for its kind of music as it comes on. */
+        val followKind: Boolean = false,
     ) {
         /** The ten bands as they play now. */
         val levels: List<Float> get() = if (!eqOn) List(10) { 0f } else if (preset == OWN) own else spread(presets[preset].db.toList())
@@ -90,7 +130,8 @@ object Sound {
         return Profile(
             // Off until chosen: nothing sounds different until the person turns it on.
             eqOn = p.getBoolean(k + "eq", false),
-            preset = p.getInt(k + "preset", if (kind == Kind.PODCASTS) 3 else 0).coerceIn(0, OWN),
+            // "Your own" moved from 13 to 14 when Soul and R&B came in (26 November 2026).
+            preset = p.getInt(k + "preset", if (kind == Kind.PODCASTS) 3 else 0).let { if (it == 13 && !p.contains(k + "presets2")) OWN else it }.coerceIn(0, OWN),
             // Your own setting, kept as ten bands since 25 November 2026; one kept as five before that is spread over ten.
             own = if (p.contains(k + "own9")) (0 until 10).map { p.getFloat(k + "own" + it, 0f) }
             else spread((0 until 5).map { p.getFloat(k + "own" + it, 0f) }),
@@ -98,6 +139,7 @@ object Sound {
             surround = p.getInt(k + "surround", 0),
             louder = p.getInt(k + "louder", 0),
             skipSilence = p.getBoolean(k + "skip", false),
+            followKind = p.getBoolean(k + "follow", false),
         )
     }
 
@@ -111,6 +153,8 @@ object Sound {
             putInt(k + "surround", profile.surround)
             putInt(k + "louder", profile.louder)
             putBoolean(k + "skip", profile.skipSilence)
+            putBoolean(k + "follow", profile.followKind)
+            putBoolean(k + "presets2", true)
         }.apply()
         changes++
         onChange?.invoke()

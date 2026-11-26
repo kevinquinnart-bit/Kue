@@ -1062,25 +1062,9 @@ object Ui {
                 val release = Scanner.releaseFor(t)
                 Words(if (release != null) "Matched in the MusicBrainz music catalogue." else "Not matched in the music catalogue.", 14, K.Soft, lines = 2)
                 Button("Play it", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(listOf(t), 0); onClose() }
-                // The artist's own video, found and played here, with KueSounds' sound stopped (Kevin, 25 November 2026).
-                val scope = rememberCoroutineScope()
-                var finding by remember { mutableStateOf(false) }
-                Button(if (finding) "Finding the video…" else "Watch it on YouTube", main = false, icon = KueSettings.Icons.VIDEO, modifier = Modifier.fillMaxWidth()) {
-                    if (finding) return@Button
-                    finding = true
-                    scope.launch {
-                        val found = withContext(Dispatchers.IO) { runCatching { YouTube.find(t.artist, t.title) }.getOrDefault(emptyList()) }
-                        finding = false
-                        if (found.isEmpty()) {
-                            Scanner.note("YouTube: no video read for " + t.artist + " · " + t.title + "; opened YouTube's search instead")
-                            open("https://www.youtube.com/results?search_query=$words")
-                        } else {
-                            Scanner.note("YouTube: " + t.title + " → " + found.first().title + " (" + found.first().channel + ")")
-                            watch = Screen.YouTubePlayer("https://www.youtube.com/watch?v=" + found.first().id, found.take(5).map { it.id }, t.title + " · " + t.artist)
-                            onClose()
-                        }
-                    }
-                }
+                // Open song in YouTube (the artist's own video, in the YouTube app), YouTube Music, Spotify or Apple Music,
+                // as Shazam does (Kevin, 26 November 2026).
+                OpenSong.Choices(t.artist, t.title)
                 Button("Look it up on the web", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://www.google.com/search?q=$words") }
                 if (release != null) Button("Its record in the catalogue", main = false, icon = KueSettings.Icons.OPEN, modifier = Modifier.fillMaxWidth()) { open("https://musicbrainz.org/release/" + release.first) }
                 Button("Close", main = false, icon = KueSettings.Icons.CROSS, modifier = Modifier.fillMaxWidth(), onClick = onClose)
@@ -1919,6 +1903,11 @@ object Ui {
                     val art = Playing.artwork
                     if (art != null) AsyncImage(model = art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                     else Sign(Glyph.DISC, 96.dp, K.Soft)
+                    // Karaoke: the words move up over the cover as the song plays (Kevin, 26 November 2026).
+                    @Suppress("UNUSED_VARIABLE") val seenKaraoke = PlayPrefs.changes
+                    if (PlayPrefs.lyricsOnCover && !Playing.isRadio && !Playing.isPodcast) {
+                        Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }?.let { CoverLyrics(it) }
+                    }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1975,7 +1964,7 @@ object Ui {
                     }
                     ToolChip(KueSettings.Icons.SLEEP, sleepWords, sleeping, Modifier.weight(1f)) { Playing.nextMusicSleep() }
                     val track = Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }
-                    if (track != null) ToolChip(KueSettings.Icons.LYRICS, "Lyrics", SingAlong.on, Modifier.weight(1f)) { tool = "lyrics" }
+                    if (track != null) ToolChip(KueSettings.Icons.LYRICS, "Lyrics", SingAlong.on || PlayPrefs.lyricsOnCover, Modifier.weight(1f)) { tool = "lyrics" }
                     if (track != null) ToolChip(KueSettings.Icons.INFO, "Info", false, Modifier.weight(1f)) { tool = "info" }
                 }
             }
@@ -2058,6 +2047,8 @@ object Ui {
                         Words(t.artist, 14, K.Soft)
                     }
                 }
+                @Suppress("UNUSED_VARIABLE") val seenKaraoke = PlayPrefs.changes
+                KueSettings.Toggle("Karaoke", "The words move up over the cover as the song plays.", PlayPrefs.lyricsOnCover, look) { PlayPrefs.lyricsOnCover = it }
                 KueSettings.Toggle("Sing along", "Turns the singer down so you can sing. Some bass goes with it.", singAlong, look) { on ->
                     singAlong = on
                     SingAlong.on = on
@@ -2094,6 +2085,53 @@ object Ui {
                     }
                 }
                 Words("Words from LRCLIB, the free lyrics library.", 12, K.Soft)
+            }
+        }
+    }
+
+    /**
+     * Karaoke on the cover: the cover dimmed, the words over it, the line being sung big and yellow in the middle,
+     * moving up as the song plays. Words with no timings move down the cover with the song.
+     */
+    @Composable
+    private fun CoverLyrics(t: Track) {
+        val words by androidx.compose.runtime.produceState<Lyrics.Words?>(null, t.id) {
+            value = withContext(Dispatchers.IO) { runCatching { Lyrics.get(t.id, t.artist, t.title, t.album, t.durationMs / 1000) }.getOrNull() }
+        }
+        var position by remember { mutableLongStateOf(Playing.positionMs()) }
+        LaunchedEffect(t.id) {
+            while (true) {
+                position = Playing.positionMs()
+                delay(200)
+            }
+        }
+        val w = words ?: return
+        val timed = w.timed
+        if (timed.isEmpty() && w.plain.isBlank()) return
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).padding(horizontal = 14.dp)) {
+            if (timed.isNotEmpty()) {
+                val now = Lyrics.lineAt(timed, position + 300)
+                val list = androidx.compose.foundation.lazy.rememberLazyListState()
+                LaunchedEffect(now) { if (now >= 0) runCatching { list.animateScrollToItem((now - 2).coerceAtLeast(0)) } }
+                LazyColumn(Modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 60.dp)) {
+                    itemsIndexed(timed) { i, line ->
+                        val on = i == now
+                        Text(
+                            noEmoji(line.words).ifBlank { "· · ·" },
+                            color = if (on) K.Accent else if (i < now) K.Soft.copy(alpha = 0.55f) else K.Ink,
+                            fontSize = if (on) 24.sp else 18.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center,
+                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, lineHeight = if (on) 30.sp else 24.sp,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+            } else {
+                val scroll = androidx.compose.foundation.rememberScrollState()
+                val length = Playing.durationMs.coerceAtLeast(1L)
+                LaunchedEffect(position / 2000) { runCatching { scroll.animateScrollTo((scroll.maxValue * (position.toFloat() / length)).toInt()) } }
+                Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(vertical = 40.dp)) {
+                    Text(noEmoji(w.plain), color = K.Ink, fontSize = 18.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center, lineHeight = 26.sp, modifier = Modifier.fillMaxWidth())
+                }
             }
         }
     }
@@ -2207,6 +2245,14 @@ object Ui {
         val p = Sound.profile(kind)
         var presetsOpen by remember { mutableStateOf(false) }
         KueSettings.Toggle("Equaliser", "Shapes the sound: more bass, clearer voices, and the rest.", p.eqOn, look) { on -> Sound.change(kind) { it.copy(eqOn = on) } }
+        // Each song takes its kind's setting as it comes on (Kevin, 26 November 2026).
+        if (kind == Sound.Kind.MUSIC) {
+            KueSettings.Toggle(
+                "Follow the kind of music", "Each song gets the setting for its kind: Classical, Soul, Jazz, Rock and more. Others keep the one below.",
+                p.followKind, look,
+            ) { on -> Sound.change(kind) { it.copy(followKind = on, eqOn = it.eqOn || on) } }
+            if (p.followKind && Sound.following.isNotEmpty()) Words("Playing now: " + Sound.following, 14, K.Accent)
+        }
         KueSettings.FanOut("Setting", Sound.presets.map { it.name }, p.preset, presetsOpen, look, { presetsOpen = it }) { i ->
             presetsOpen = false
             // Picking your own starts from the setting in use, so it can be changed a little.
@@ -2488,6 +2534,8 @@ object Ui {
         KueSettings.Place("app", "KueSounds", "Library tools", "Start the library again"),
         KueSettings.Place("app", "KueSounds", "Playback", "Play over mobile data"),
         KueSettings.Place("app", "KueSounds", "Playback", "Carry on long songs where you left off"),
+        KueSettings.Place("app", "KueSounds", "Playback", "Karaoke"),
+        KueSettings.Place("app", "KueSounds", "Sound profiles", "Follow the kind of music"),
         KueSettings.Place("app", "KueSounds", "Playback", "Remember shuffle"),
         KueSettings.Place("app", "KueSounds", "Playback", "Pause for other apps and calls"),
         KueSettings.Place("app", "KueSounds", "Playback", "Play when headphones are plugged in"),
@@ -2613,6 +2661,7 @@ object Ui {
                     KueSettings.Toggle("Play over mobile data", "Off: away from Wi-Fi only songs saved on the phone play, so no data is used.", PlayPrefs.mobileData, look) { PlayPrefs.mobileData = it }
                     KueSettings.Toggle("Carry on long songs where you left off", "Songs of " + PlayPrefs.keepPlaceMinutes + " minutes or more (mixes, live sets) start where they were left.", PlayPrefs.keepPlace, look) { PlayPrefs.keepPlace = it }
                     if (PlayPrefs.keepPlace) KueSettings.Choices("Long means", listOf("5 min", "10 min", "20 min", "30 min"), listOf(5, 10, 20, 30).indexOf(PlayPrefs.keepPlaceMinutes).coerceAtLeast(0), look) { PlayPrefs.keepPlaceMinutes = listOf(5, 10, 20, 30)[it] }
+                    KueSettings.Toggle("Karaoke", "The song's words move up over its cover as it plays.", PlayPrefs.lyricsOnCover, look) { PlayPrefs.lyricsOnCover = it }
                     KueSettings.Toggle("Remember shuffle", "Shuffle stays on or off from one time to the next.", PlayPrefs.rememberShuffle, look) { PlayPrefs.rememberShuffle = it }
                     KueSettings.Toggle("Pause for other apps and calls", "Off: KueSounds keeps playing when another app makes a sound.", PlayPrefs.audioFocus, look) { PlayPrefs.audioFocus = it }
                     KueSettings.Toggle("Play when headphones are plugged in", "Carries on with what was playing.", PlayPrefs.headsetPlay, look) { PlayPrefs.headsetPlay = it }

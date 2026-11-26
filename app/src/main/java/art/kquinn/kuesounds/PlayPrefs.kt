@@ -58,6 +58,11 @@ object PlayPrefs {
         set(v) = set("keepPlaceMinutes", v)
 
     /** Shuffle stays on (or off) from one time to the next. */
+    /** Karaoke: the song's words move up over its cover as it plays (Kevin, 26 November 2026). */
+    var lyricsOnCover: Boolean
+        get() = flag("lyricsOnCover", false)
+        set(v) = set("lyricsOnCover", v)
+
     var rememberShuffle: Boolean
         get() = flag("rememberShuffle", false)
         set(v) = set("rememberShuffle", v)
