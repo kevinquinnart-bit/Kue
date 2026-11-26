@@ -2086,7 +2086,13 @@ object Ui {
                     }
                     ToolChip(KueSettings.Icons.SLEEP, sleepWords, sleeping, Modifier.weight(1f)) { Playing.nextMusicSleep() }
                     val track = Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }
-                    if (track != null) ToolChip(KueSettings.Icons.LYRICS, "Lyrics", SingAlong.on || PlayPrefs.lyricsOnCover, Modifier.weight(1f)) { tool = "lyrics" }
+                    // Karaoke on and off in one tap: the words over the cover (Kevin, 26 November 2026: "Karaoke lyrics????").
+                    @Suppress("UNUSED_VARIABLE") val seenKaraokeChip = PlayPrefs.changes
+                    if (track != null) ToolChip(KueSettings.Icons.MIC, "Karaoke", PlayPrefs.lyricsOnCover, Modifier.weight(1f)) {
+                        PlayPrefs.lyricsOnCover = !PlayPrefs.lyricsOnCover
+                        say(if (PlayPrefs.lyricsOnCover) "Karaoke on: the words over the cover" else "Karaoke off")
+                    }
+                    if (track != null) ToolChip(KueSettings.Icons.LYRICS, "Lyrics", SingAlong.on, Modifier.weight(1f)) { tool = "lyrics" }
                     if (track != null) ToolChip(KueSettings.Icons.INFO, "Info", false, Modifier.weight(1f)) { tool = "info" }
                 }
             }
@@ -2227,9 +2233,19 @@ object Ui {
                 delay(200)
             }
         }
-        val w = words ?: return
+        val w = words
+        // Said on the cover while the words are found, and when there are none, so it never just looks broken.
+        if (w == null || (w.timed.isEmpty() && w.plain.isBlank())) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+                Text(
+                    if (w == null) "Finding the words…" else "No words found for this song",
+                    color = K.Ink, fontSize = 14.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.6f)).padding(10.dp),
+                )
+            }
+            return
+        }
         val timed = w.timed
-        if (timed.isEmpty() && w.plain.isBlank()) return
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).padding(horizontal = 14.dp)) {
             if (timed.isNotEmpty()) {
                 val now = Lyrics.lineAt(timed, position + 300)

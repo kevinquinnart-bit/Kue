@@ -91,8 +91,21 @@ object Lyrics {
                 (all.firstOrNull { it.asJsonObject.get("syncedLyrics")?.isJsonNull == false } ?: all.firstOrNull())?.toString()
             }
         }
-        val words = json?.let { read(it) } ?: Words()
-        if (json != null && kept != null) runCatching { kept.writeText(json) }
+        var words = json?.let { read(it) } ?: Words()
+        // Not in LRCLIB: lyrics.ovh, a second free library with no key (26 November 2026). Its words carry no timings,
+        // so they move down the cover with the song rather than line by line.
+        if (words.none) {
+            val other = runCatching {
+                ask("https://api.lyrics.ovh/v1/".toHttpUrl().newBuilder().addPathSegment(artist).addPathSegment(name).build())
+            }.getOrNull()?.let { JsonParser.parseString(it).asJsonObject.get("lyrics")?.takeIf { l -> !l.isJsonNull }?.asString }
+                ?.trim()?.takeIf { it.isNotEmpty() }
+            if (other != null) {
+                json = com.google.gson.JsonObject().apply { addProperty("plainLyrics", other) }.toString()
+                words = read(json)
+            }
+        }
+        // Kept only when words were found: a song with none is asked again another time.
+        if (json != null && kept != null && !words.none) runCatching { kept.writeText(json) }
         return words
     }
 
