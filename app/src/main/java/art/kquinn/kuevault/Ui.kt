@@ -114,9 +114,14 @@ class Asks(
     val pickFiles: (Section) -> Unit,
 )
 
+/**
+ * Words, never cut short with "…" (Kevin, 26 November 2026: nothing truncated at the normal text size, in every Kue
+ * app). [lines] is kept for older callers and no longer limits; the words take the lines they need.
+ */
 @Composable
+@Suppress("UNUSED_PARAMETER")
 internal fun Words(text: String, size: Int = 15, colour: Color = K.Ink, bold: Boolean = false, lines: Int = 2, modifier: Modifier = Modifier) {
-    Text(text, color = colour, fontSize = size.sp, fontFamily = K.Poppins, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, maxLines = lines, overflow = TextOverflow.Ellipsis, modifier = modifier)
+    Text(text, color = colour, fontSize = size.sp, fontFamily = K.Poppins, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, lineHeight = (size * 1.3f).sp, modifier = modifier)
 }
 
 @Composable
@@ -128,7 +133,7 @@ internal fun Button(text: String, main: Boolean = false, modifier: Modifier = Mo
     ) {
         // A drawn Kue icon, never an emoji.
         if (icon != null) { KueSettings.Icon(icon, 18.dp, if (main) Color(0xFF111111) else K.Ink); Spacer(Modifier.width(8.dp)) }
-        Words(text, 15, if (main) Color(0xFF111111) else K.Ink, bold = main)
+        Words(text, 15, if (main) Color(0xFF111111) else K.Ink, bold = main, modifier = Modifier.weight(1f, fill = false))
     }
 }
 
