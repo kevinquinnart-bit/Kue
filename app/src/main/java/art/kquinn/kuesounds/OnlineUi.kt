@@ -359,10 +359,8 @@ object OnlineUi {
     @Composable
     fun SpotifyTab() {
         val context = LocalContext.current
-        var typed by rememberSaveable { mutableStateOf(SpotifyLink.clientId()) }
         var link by rememberSaveable { mutableStateOf("") }
         var find by rememberSaveable { mutableStateOf("") }
-        var steps by remember { mutableStateOf(SpotifyLink.clientId().isEmpty()) }
         // A playlist, album or shelf opened, with what is in it (Kevin, 26 November 2026: as easy as Spotify's own).
         var opened by remember { mutableStateOf<com.spotify.protocol.types.ListItem?>(null) }
         var inside by remember { mutableStateOf<List<com.spotify.protocol.types.ListItem>?>(null) }
@@ -375,7 +373,7 @@ object OnlineUi {
             if (SpotifyLink.problem.isNotEmpty()) item { Ui.Words(SpotifyLink.problem, 15, K.Accent, lines = 4) }
             if (!SpotifyLink.connected) {
                 item { Ui.Words("KueSounds plays your Spotify through the Spotify app on this phone.", 15, K.Soft, lines = 3) }
-                item { Ui.Button("Connect to Spotify", modifier = Modifier.fillMaxWidth()) { SpotifyLink.clientId(typed); SpotifyLink.connect(context) } }
+                item { Ui.Button("Connect to Spotify", modifier = Modifier.fillMaxWidth()) { SpotifyLink.connect(context) } }
                 // Anyone, connected or not, Free or Premium: the search opens in the Spotify app (26 November 2026).
                 item {
                     Field("Find in Spotify, no connecting", find, onDone = { if (find.isNotBlank()) SpotifyLink.openSearch(context, find) }) { find = it }
@@ -416,28 +414,9 @@ object OnlineUi {
                     item { Ui.Button("Disconnect", main = false, modifier = Modifier.fillMaxWidth()) { SpotifyLink.disconnect() } }
                 }
             }
-            if (opened == null) item {
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.clickable { steps = !steps }, verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.rotate(if (steps) 90f else 0f)) { KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Ink, 2.2f) }
-                        Spacer(Modifier.width(6.dp))
-                        Ui.Words("Spotify setup", 16, bold = true)
-                    }
-                    if (steps) {
-                        Field("Client ID", typed) { typed = it; SpotifyLink.clientId(it) }
-                        Ui.Words(
-                            "Spotify lets KueSounds in with a free developer key, made once on developer.spotify.com/dashboard:\n" +
-                                "1. Create app, tick Android.\n" +
-                                "2. Redirect URI: " + SpotifyLink.REDIRECT + "\n" +
-                                "3. Android package: art.kquinn.kuesounds\n" +
-                                "4. SHA1: 17:05:AF:FC:99:35:B9:25:31:9E:4C:10:54:85:A8:99:C9:69:29:2B\n" +
-                                "5. Save, put the Client ID above, tap Connect.\n" +
-                                "Someone else using this key: add their Spotify email under User Management on the same page (Spotify allows 5 people). " +
-                                "Spotify Free works too, shuffled with adverts. Anyone else can use Find in Spotify above, with no connecting.",
-                            14, K.Soft, lines = 24,
-                        )
-                    }
-                }
+            // The Client ID is set in Settings › Account with the other keys (Kevin, 26 November 2026: admin settings apart).
+            if (opened == null && !SpotifyLink.connected && SpotifyLink.clientId().isEmpty()) item {
+                Ui.Words("To connect, put your Spotify Client ID in Settings › Account › Spotify.", 14, K.Soft)
             }
             item { Spacer(Modifier.height(20.dp)) }
         }

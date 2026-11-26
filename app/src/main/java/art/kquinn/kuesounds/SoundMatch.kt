@@ -34,7 +34,7 @@ object SoundMatch {
 
     fun init(context: Context) { if (!::app.isInitialized) app = context.applicationContext }
 
-    /** The AcoustID app key, typed in Settings › KueSounds › Match by sound. */
+    /** The AcoustID app key, typed in Settings › Account › AcoustID. */
     var key: String
         get() = if (::app.isInitialized) prefs().getString("key", "").orEmpty() else ""
         set(v) = prefs().edit().putString("key", v.trim()).apply()
@@ -154,7 +154,7 @@ object SoundMatch {
         val root = JsonParser.parseString(text).asJsonObject
         if (root.get("status")?.asString != "ok") {
             val said = root.getAsJsonObject("error")?.get("message")?.asString.orEmpty()
-            throw IOException(if ("api key" in said.lowercase()) "AcoustID didn't accept the key. Check it in Settings › KueSounds › Match by sound." else "AcoustID said: $said")
+            throw IOException(if ("api key" in said.lowercase()) "AcoustID didn't accept the key. Check it in Settings › Account › AcoustID." else "AcoustID said: $said")
         }
         val out = ArrayList<Found>()
         for (r in root.getAsJsonArray("results") ?: return emptyList()) {

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The one folder KueSounds shares with the phone's installer: where a newer KueSounds is downloaded to. -->
+<!-- The folders KueSounds shares, each only with the app it is given to:
+     where a newer KueSounds is downloaded (the phone's installer), and album covers (Android Auto's screen). -->
 <paths>
     <cache-path name="update" path="update/" />
+    <files-path name="art" path="art/" />
 </paths>

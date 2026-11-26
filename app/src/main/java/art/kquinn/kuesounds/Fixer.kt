@@ -38,6 +38,9 @@ object Fixer {
         private set
     var lastResult by mutableStateOf("")
         private set
+    /** How far through the albums waiting it is, 0 to 1; -1 when not working. For the bar on screen (Kevin: vital). */
+    var progress by mutableStateOf(-1f)
+        private set
 
     /** Why asking for the edit permission failed, shown under the button. */
     var permissionProblem by mutableStateOf("")
@@ -88,9 +91,11 @@ object Fixer {
 
     /**
      * A song whose file got stuck last time (Kevin, 25 November 2026: "skip but record any it gets stuck on and do
-     * the rest"): skipped by Fix, listed in Settings with why, and tried again only with "Try the stuck ones again".
+     * the rest"): skipped by Fix and listed in Settings with why. Tried again by itself once its file has changed.
      */
-    fun stuck(t: Track, d: LibraryData = Scanner.data): Boolean = t.id in d.fixProblems
+    // Kevin, 26 November 2026: "not sure constantly redoing is the answer if nothing has changed in the file". A stuck
+    // song is tried again by itself once its file has changed (its change time differs from when it failed).
+    fun stuck(t: Track, d: LibraryData = Scanner.data): Boolean = t.id in d.fixProblems && d.fixFailedAt[t.id] == t.modified
 
     /** The album's songs still to fix, the stuck ones apart. */
     fun toDo(al: Album, d: LibraryData = Scanner.data): List<Track> =
@@ -108,6 +113,9 @@ object Fixer {
         synchronized(waiting) { albums.filter { canFix(it) && (if (retry) !isFixed(it) else hasWork(it)) }.forEach { waiting += it.key } }
         WorkService.start(context)
     }
+
+    /** Every album with something to write, queued for writing straight after the lookups. */
+    fun queueAll(albums: List<Album>) = synchronized(waiting) { albums.filter { hasWork(it) }.forEach { waiting += it.key } }
 
     /** Tries the stuck songs once more. */
     fun retryStuck(context: Context) {
@@ -152,6 +160,7 @@ object Fixer {
         var done = 0
         for ((i, t) in todo.withIndex()) {
             status = "Naming files · " + (i + 1) + " of " + todo.size
+            this.progress = i.toFloat() / todo.size
             progress(status)
             val name = fileNameFor(t)
             try {
@@ -172,26 +181,38 @@ object Fixer {
     private fun next(): String? = synchronized(waiting) { waiting.firstOrNull()?.also { waiting.remove(it) } }
 
     /** Works through the waiting albums. Called by [WorkService]. */
-    suspend fun run(context: Context, progress: (String) -> Unit) {
+    suspend fun run(context: Context, progress: (String) -> Unit, inline: Boolean = false) {
         running = true
         var fixedCount = 0
         var failed = 0
         var notLookedUp = 0
         var renamed = 0
+        var albumsDone = 0
         try {
             // A search of the Drive going on is let finish first, so the two don't change the library at once.
-            while (Scanner.running) delay(2000)
+            // (Not when the search itself hands over to writing, straight after its lookups.)
+            if (!inline) while (Scanner.running) delay(2000)
             while (true) {
+                val total = synchronized(waiting) { waiting.size } + albumsDone
+                this.progress = if (total > 0) albumsDone.toFloat() / total else -1f
                 val key = next() ?: break
+                albumsDone++
                 val al = Library.albums(Scanner.data.tracks).firstOrNull { it.key == key } ?: continue  // fresh, not the screens' copy
                 // A single of its own has no catalogue record: no list of songs, and no cover (the compilation's comes out).
                 val own = key in Scanner.data.ownSingles && key !in Scanner.data.releases
                 val songs = al.tracks.filter { Tagger.canFix(it.fileName) && !(it.fixed && it.fixedFully) && (retrying || !stuck(it)) }
-                val cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers }
+                var cover = if (own) null else Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() && key in Scanner.data.catalogueCovers }
                 if (!own && cover == null) {
-                    // Recorded, not passed over without a word (it used to be): each song is listed as stuck, with why.
-                    songs.forEach { Scanner.fixTried(it.id, "Its album's cover isn't on this phone. Look for new music fetches it again.") }
-                    failed += songs.size
+                    // The album's cover has gone from the phone: fetched again from the catalogue here and now (it used to
+                    // leave the songs stuck with "Look for new music fetches it again").
+                    status = "Fixing files · " + al.title + " · fetching its cover again"
+                    progress(status)
+                    if (Scanner.coverAgain(key)) cover = Scanner.data.art[key]?.let { File(it) }?.takeIf { it.exists() }
+                }
+                if (!own && cover == null) {
+                    // Not stuck: nothing is wrong with the files. The album waits for the next Fix.
+                    Scanner.note("cover couldn't be fetched for " + al.artist + " / " + al.title + ": left for the next Fix")
+                    notLookedUp++
                     continue
                 }
                 // 1 and 2: the album's own list of songs, with each one's proper name and artist.
@@ -214,6 +235,7 @@ object Fixer {
             renamed = renameFiles(progress)
         } finally {
             status = ""
+            this.progress = -1f
             running = false
             retrying = false
             renameWanted = false
@@ -402,14 +424,33 @@ class WorkService : Service() {
                 // The phone stays awake enough to keep working with the screen off, for at most 6 hours at a time.
                 val awake = getSystemService(android.os.PowerManager::class.java)
                     .newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "KueSounds:work").apply { setReferenceCounted(false) }
+                // And the Wi-Fi with it (Kevin, 26 November 2026: the clean-up stopped when the screen went off). The work
+                // kept the phone awake but not its Wi-Fi, which Android lets doze with the screen off; matching by sound
+                // then waited for Wi-Fi that wasn't coming back.
+                val wifi = runCatching {
+                    @Suppress("DEPRECATION")
+                    val mode = if (android.os.Build.VERSION.SDK_INT >= 29) android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY else android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                    applicationContext.getSystemService(android.net.wifi.WifiManager::class.java).createWifiLock(mode, "KueSounds:work").apply { setReferenceCounted(false) }
+                }.getOrNull()
+                // The screen going off and on, in the report, so a stop can be matched to it.
+                val screen = object : android.content.BroadcastReceiver() {
+                    override fun onReceive(c: Context, i: Intent) {
+                        Scanner.note((if (i.action == Intent.ACTION_SCREEN_OFF) "screen off" else "screen on") + " while working: " + Scanner.status.ifBlank { Fixer.status })
+                    }
+                }
+                runCatching { registerReceiver(screen, android.content.IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_SCREEN_ON) }) }
                 try {
                     do {
                         awake.acquire(6 * 60 * 60_000L)
+                        runCatching { wifi?.acquire() }
                         // Looking through the music: the notice follows how far it has got.
                         var shown = ""
+                        var beat = 0
                         while (Scanner.running) {
                             val now = Scanner.status.ifEmpty { "Looking through your music" }
                             if (now != shown) { shown = now; show(now) }
+                            // Every 5 minutes, where it has got to, so the report shows whether it carried on.
+                            if (++beat % 150 == 0) Scanner.note("still working: $now")
                             kotlinx.coroutines.delay(2000)
                         }
                         if (Offline.hasWork) Offline.run(show)
@@ -417,6 +458,8 @@ class WorkService : Service() {
                     } while (Scanner.running || Offline.hasWork || Fixer.hasWork)
                 } finally {
                     if (awake.isHeld) awake.release()
+                    runCatching { if (wifi?.isHeld == true) wifi.release() }
+                    runCatching { unregisterReceiver(screen) }
                 }
                 started = false
                 stopForeground(STOP_FOREGROUND_REMOVE)
@@ -424,6 +467,17 @@ class WorkService : Service() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Android 15 and later stop this kind of background work after 6 hours in a day. Said in the report and stopped
+     * cleanly (otherwise Android closes KueSounds); the work carries on from where it was at the next look.
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Scanner.note("Android's 6-hour daily limit for background work reached: stopped, carries on at the next look")
+        scope.cancel()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     override fun onDestroy() {

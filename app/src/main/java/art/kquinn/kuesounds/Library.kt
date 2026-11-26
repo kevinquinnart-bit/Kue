@@ -116,6 +116,13 @@ data class LibraryData(
     val soundMatched: Set<String> = emptySet(),
     /** Artist name to the file holding their photo on this phone; "" once looked for and none found. */
     val artistPictures: Map<String, String> = emptyMap(),
+    /**
+     * Song id to its file's change time when fixing it last failed (Kevin, 26 November 2026: no redoing when nothing has
+     * changed). The song is tried again only once its file has changed.
+     */
+    val fixFailedAt: Map<String, String> = emptyMap(),
+    /** Songs given their closest artist and made a single of their own (step 3), so each is done once. */
+    val artistSwept: Set<String> = emptySet(),
 )
 
 object Library {
@@ -454,12 +461,16 @@ object Library {
                 albumArtist = t.albumArtist ?: "", genre = t.genre ?: "",
             )
         }
+        // Every kept part carried over (26 November 2026: kinds of music, dates, artist pictures and songs matched by
+        // sound were left out here, so each time KueSounds started they were lost and step 4 began again from the start).
         @Suppress("USELESS_ELVIS")
-        return LibraryData(
-            tracks, d.folders ?: emptyList(), d.art ?: emptyMap(), d.folderCovers ?: emptyMap(), d.scannedAt,
-            d.releases ?: emptyMap(), d.catalogueCovers ?: emptySet(), d.version,
-            d.singleTitles ?: emptyMap(), d.singleArt ?: emptyMap(), d.collections ?: emptySet(), d.ownSingles ?: emptySet(),
-            d.fixFailures ?: emptyMap(), d.fixProblems ?: emptyMap(), d.soundChecked ?: emptySet(),
+        return d.copy(
+            tracks = tracks, folders = d.folders ?: emptyList(), art = d.art ?: emptyMap(), folderCovers = d.folderCovers ?: emptyMap(),
+            releases = d.releases ?: emptyMap(), catalogueCovers = d.catalogueCovers ?: emptySet(),
+            singleTitles = d.singleTitles ?: emptyMap(), singleArt = d.singleArt ?: emptyMap(), collections = d.collections ?: emptySet(),
+            ownSingles = d.ownSingles ?: emptySet(), fixFailures = d.fixFailures ?: emptyMap(), fixProblems = d.fixProblems ?: emptyMap(),
+            soundChecked = d.soundChecked ?: emptySet(), facts = d.facts ?: emptyMap(), soundMatched = d.soundMatched ?: emptySet(),
+            artistPictures = d.artistPictures ?: emptyMap(), fixFailedAt = d.fixFailedAt ?: emptyMap(), artistSwept = d.artistSwept ?: emptySet(),
         )
     }
 

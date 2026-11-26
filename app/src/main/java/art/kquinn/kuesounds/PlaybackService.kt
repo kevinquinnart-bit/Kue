@@ -12,7 +12,7 @@ import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.session.MediaSession
-import androidx.media3.session.MediaSessionService
+import androidx.media3.session.MediaLibraryService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,8 +25,8 @@ import kotlinx.coroutines.withContext
  * shows on the lock screen and in the pull-down, answers headphone and car buttons, and pauses when
  * headphones are pulled out. Each song plays straight from the Drive with the current sign-in.
  */
-class PlaybackService : MediaSessionService() {
-    private var session: MediaSession? = null
+class PlaybackService : MediaLibraryService() {
+    private var session: MediaLibraryService.MediaLibrarySession? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var retried = ""
 
@@ -38,6 +38,8 @@ class PlaybackService : MediaSessionService() {
         Podcasts.init(this)
         PlayPrefs.init(this)
         Smart.init(this)
+        // The car can start KueSounds' player with the app closed: the playlists and favourites are read in here too.
+        runCatching { Sync.init(this) }
         val upstream = OkHttpDataSource.Factory(Drive.http)
         // Every request for a song carries the current Drive pass, fetched fresh when the old one has run out.
         // Only requests to Google's Drive: a podcast comes from its own website, which must never see the pass.
@@ -109,7 +111,8 @@ class PlaybackService : MediaSessionService() {
             this, 0, Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        session = MediaSession.Builder(this, player).setSessionActivity(open).build()
+        // A library the car's screen can browse (Android Auto), as well as the player (Kevin, 26 November 2026).
+        session = MediaLibraryService.MediaLibrarySession.Builder(this, player, CarLibrary(this)).setSessionActivity(open).build()
     }
 
     private var effects: Sound.Effects? = null
@@ -275,7 +278,7 @@ class PlaybackService : MediaSessionService() {
         })
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? = session
 
     /** Swiping KueSounds away stops it only when nothing is playing. */
     override fun onTaskRemoved(rootIntent: Intent?) {

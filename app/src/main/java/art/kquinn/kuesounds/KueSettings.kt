@@ -245,11 +245,16 @@ object KueSettings {
         }
     }
 
+    /**
+     * Words in settings, never cut short: they take as many lines as they need (Kevin, 26 November 2026: nothing
+     * truncated at the normal text size, in every Kue app). [lines] is kept for older callers and no longer limits.
+     */
     @Composable
+    @Suppress("UNUSED_PARAMETER")
     private fun Say(text: String, size: Int, colour: Color, look: Look, bold: Boolean = false, lines: Int = 1, modifier: Modifier = Modifier) {
         Text(
             text, modifier = modifier, color = colour, fontSize = size.sp, fontFamily = look.font,
-            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, maxLines = lines, overflow = TextOverflow.Ellipsis,
+            fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal,
             lineHeight = (size * 1.3f).sp,
         )
     }
@@ -411,20 +416,25 @@ object KueSettings {
         ) { if (on) Box(Modifier.size(size * 0.48f).clip(CircleShape).background(look.accent)) }
     }
 
-    /** 2 to 4 choices side by side, the chosen one's dot filled. */
+    /** 2 to 4 choices, two to a row so each is read whole, the chosen one's dot filled. */
     @Composable
     fun Choices(label: String, options: List<String>, chosen: Int, look: Look, onPick: (Int) -> Unit) {
         Heading(label, look)
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            options.forEachIndexed { i, o ->
-                Row(
-                    Modifier.weight(1f).heightIn(min = 50.dp).clip(RoundedCornerShape(12.dp)).background(look.raised)
-                        .clickable(role = Role.RadioButton, onClickLabel = o) { onPick(i) }.padding(horizontal = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Dot(i == chosen, look)
-                    Spacer(Modifier.width(8.dp))
-                    Say(o, 14, look.ink, look)
+        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            options.withIndex().chunked(2).forEach { pair ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    pair.forEach { (i, o) ->
+                        Row(
+                            Modifier.weight(1f).heightIn(min = 50.dp).clip(RoundedCornerShape(12.dp)).background(look.raised)
+                                .clickable(role = Role.RadioButton, onClickLabel = o) { onPick(i) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Dot(i == chosen, look)
+                            Spacer(Modifier.width(8.dp))
+                            Say(o, 14, look.ink, look, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    if (pair.size == 1) Spacer(Modifier.weight(1f))
                 }
             }
         }
@@ -440,7 +450,8 @@ object KueSettings {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Say(label, 15, look.ink, look, modifier = Modifier.weight(1f))
-            Say(options.getOrElse(chosen) { "" }, 14, look.soft(), look)
+            Spacer(Modifier.width(8.dp))
+            Say(options.getOrElse(chosen) { "" }, 14, look.soft(), look, modifier = Modifier.weight(1f, fill = false))
             Spacer(Modifier.width(8.dp))
             Box(Modifier.rotate(turn)) { Icon(Icons.CHEVRON, 16.dp, look.soft(), 2.2f) }
         }
@@ -510,7 +521,8 @@ object KueSettings {
     fun Fact(label: String, value: String, look: Look) {
         Row(Modifier.fillMaxWidth().heightIn(min = 40.dp), verticalAlignment = Alignment.CenterVertically) {
             Say(label, 15, look.ink, look, modifier = Modifier.weight(1f))
-            Say(value, 14, look.soft(), look)
+            Spacer(Modifier.width(8.dp))
+            Say(value, 14, look.soft(), look, modifier = Modifier.weight(1f, fill = false))
         }
     }
 

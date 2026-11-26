@@ -332,12 +332,24 @@ object Scanner {
                         if (Google.email.isBlank()) runCatching { Google.keepEmail(Drive.whoAmI()) }
                         stage = 2
                         readDetails()
+                        // The steps of Fix your music files (Kevin, 26 November 2026):
+                        // 1 by name in the music catalogue, 2 by sound, 3 the closest artist, then the files are written.
                         stage = 3
                         matchAlbums()
-                        // Then the ones the catalogue still doesn't know, by their sound; any put right are looked up again.
-                        if (matchBySound()) matchAlbums()
-                        // Step 4: kinds of music, dates, artist pictures and who wrote each song (Kevin, 25 November 2026).
                         stage = 4
+                        if (matchBySound()) matchAlbums()
+                        stage = 5
+                        sweepArtists()
+                        // 4: what was found is written to the files straight away (Kevin, 26 November 2026: "if found,
+                        // applied and crossed off as done"), with the edit permission given once. Google keeps each old
+                        // version for 30 days.
+                        if (Google.canEdit) {
+                            stage = 7
+                            Fixer.queueAll(Library.albums(data.tracks))
+                            if (Fixer.hasWork) Fixer.run(app, { status = it }, inline = true)
+                        }
+                        // Extra details, after: kinds of music, dates, artist pictures and who wrote each song.
+                        stage = 6
                         lookUpFacts()
                         lookUpArtistPictures()
                         readComposers()
@@ -726,6 +738,54 @@ object Scanner {
         return true
     }
 
+    /**
+     * Step 3 (Kevin, 26 November 2026): songs neither the music catalogue nor their sound could place. Each gets the
+     * catalogue's spelling of its artist when one is close (its own otherwise) and becomes a single of its own: the
+     * song's name as its album and no cover, the rest of the old details taken out when its file is fixed. Once a song.
+     */
+    private fun sweepArtists(): Boolean {
+        val d = data
+        val todo = notFound(view, d).flatMap { it.tracks }
+            // Only once its sound has been tried (step 2 comes first).
+            .filter { it.id !in d.artistSwept && it.id in d.soundChecked && it.artist.isNotBlank() && Library.sortName(it.artist) != Library.sortName(Library.UNKNOWN_ARTIST) }
+        if (todo.isEmpty()) return false
+        val artists = todo.map { it.artist }.distinct()
+        note("step 3: closest artist for " + todo.size + " songs, " + artists.size + " artists")
+        val names = HashMap<String, String>()
+        try {
+            artists.forEachIndexed { i, a ->
+                say("Finding the closest artist", i + 1, artists.size)
+                val got = lookup("artist $a") { Catalogue.closestArtist(a) }
+                if (got.isSuccess) names[a] = got.getOrNull() ?: a   // a failed lookup is asked again next time
+            }
+        } catch (e: TooManyFailures) {
+            note("artist lookups stopped: " + e.message)
+        }
+        val ids = todo.filter { it.artist in names }.map { it.id }.toSet()
+        if (ids.isEmpty()) return false
+        val renamed = todo.count { it.id in ids && names[it.artist] != it.artist }
+        data = data.copy(
+            tracks = data.tracks.map { t -> if (t.id !in ids) t else Library.asOwnSingle(t.copy(artist = names.getValue(t.artist))) },
+            artistSwept = data.artistSwept + ids,
+        )
+        data = data.copy(ownSingles = data.ownSingles + data.tracks.filter { it.id in ids }.map { keyOf(it) })
+        save()
+        note("step 3: " + ids.size + " songs made singles of their own, " + renamed + " with the catalogue's spelling of their artist")
+        return true
+    }
+
+    /**
+     * An album's catalogue cover fetched again when its kept picture has gone from the phone (Kevin, 26 November 2026:
+     * "Its album's cover isn't on this phone" left songs stuck). True when it is back. Call off the main thread.
+     */
+    fun coverAgain(key: String): Boolean {
+        val (release, group) = (data.releases[key] ?: return false).split('|').let { it[0] to it.getOrElse(1) { "" } }
+        val bytes = runCatching { Catalogue.cover(Catalogue.Match("", "", 0, release, group)) }.getOrNull() ?: return false
+        val path = keepPicture(bytes, key + "\u0002catalogue") ?: return false
+        synchronized(this) { data = data.copy(art = data.art + (key to path), catalogueCovers = data.catalogueCovers + key); save() }
+        return true
+    }
+
     private fun matchAlbums() {
         waitingForWifi = false
         failsInARow = 0
@@ -953,7 +1013,12 @@ object Scanner {
     /** Keeps why a song's file couldn't be fixed (null: it was fixed), for the list in Settings. */
     fun fixTried(id: String, problem: String?) = synchronized(this) {
         if (problem == null && id !in data.fixProblems) return@synchronized
-        data = data.copy(fixProblems = if (problem == null) data.fixProblems - id else data.fixProblems + (id to problem))
+        // The file's change time with the failure: it is tried again only once the file has changed.
+        val modified = data.tracks.firstOrNull { it.id == id }?.modified.orEmpty()
+        data = data.copy(
+            fixProblems = if (problem == null) data.fixProblems - id else data.fixProblems + (id to problem),
+            fixFailedAt = if (problem == null) data.fixFailedAt - id else data.fixFailedAt + (id to modified),
+        )
         save()
     }
 
@@ -982,6 +1047,28 @@ object Scanner {
                 // Matched by their sound: their names are right, so they drop off the list (Kevin, 26 November 2026).
                 !al.tracks.all { it.id in d.soundMatched }
         }
+
+    /**
+     * The songs not fixed, each with why in plain words (Kevin, 26 November 2026: the final list, kept short). Songs
+     * still to be looked up, or ready to be written, aren't in it: they are on their way.
+     */
+    fun notFixed(view: LibraryView = this.view, d: LibraryData = data): List<Pair<Track, String>> {
+        val missed = notFound(view, d).flatMap { it.tracks }.map { it.id }.toSet()
+        val unknown = Library.sortName(Library.UNKNOWN_ARTIST)
+        return d.tracks.mapNotNull { t ->
+            if (t.fixed && t.fixedFully) return@mapNotNull null
+            val why = when {
+                t.id in d.fixProblems -> d.fixProblems.getValue(t.id)
+                !Tagger.canFix(t.fileName) -> "KueSounds can't write into this kind of file (" + Library.ending(t.fileName).uppercase() + ")."
+                running -> null
+                t.id in missed && (t.artist.isBlank() || Library.sortName(t.artist) == unknown) && t.id in d.soundChecked ->
+                    "No artist, and its sound wasn't recognised. Tap it to put its name in."
+                t.id in missed && t.id in d.soundChecked -> "Not found by its name or its sound. Tap it to put its name right."
+                else -> null
+            } ?: return@mapNotNull null
+            t to why
+        }
+    }
 
     /** Songs put right by Match by sound (Use these): their album leaves the not-found list. */
     fun markSoundMatched(ids: Set<String>) = synchronized(this) {

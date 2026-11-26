@@ -260,6 +260,46 @@ object Catalogue {
      */
     data class SongHome(val album: Match?, val single: Match?, val firstOut: Match? = null)
 
+    /**
+     * Step 3 (Kevin, 26 November 2026): the catalogue's own spelling of an artist close to [name], or null when none is
+     * close. Close: the same once spaces, signs and "the" are left out, or a letter or two off in a longer name.
+     */
+    fun closestArtist(name: String): String? {
+        if (name.isBlank() || name == Library.UNKNOWN_ARTIST || isVarious(name)) return null
+        return chooseArtist(parseArtists(ask("artist", quote(name), 5)), name)
+    }
+
+    /** Reads an artist search: each artist's name and score. */
+    fun parseArtists(json: String): List<Pair<String, Int>> =
+        JsonParser.parseString(json).asJsonObject.getAsJsonArray("artists")?.mapNotNull { e ->
+            val o = e.asJsonObject
+            val n = o.get("name")?.asString ?: return@mapNotNull null
+            n to (o.get("score")?.asInt ?: 0)
+        }.orEmpty()
+
+    fun chooseArtist(found: List<Pair<String, Int>>, name: String): String? {
+        val want = compact(name).removePrefix("the")
+        return found.filter { it.second >= 80 }.firstOrNull { (n, _) ->
+            val got = compact(n).removePrefix("the")
+            got == want || (want.length >= 6 && edits(got, want) <= (if (want.length >= 12) 2 else 1))
+        }?.first?.replace('’', '\'')
+    }
+
+    /** How many letters must change to turn one name into the other. */
+    fun edits(a: String, b: String): Int {
+        val row = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = row[0]
+            row[0] = i
+            for (j in 1..b.length) {
+                val keep = row[j]
+                row[j] = minOf(row[j] + 1, row[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = keep
+            }
+        }
+        return row[b.length]
+    }
+
     /** Reads a song search: each found release with the found song's own title and its score. */
     fun parseRecordings(json: String): List<Triple<Int, String, Release>> {
         val root = JsonParser.parseString(json).asJsonObject
