@@ -88,7 +88,10 @@ class Things2Test {
         }
         rule.waitForIdle()
         assertTrue("the channel's menu", shown("New category with this channel") && shown("Rename this channel"))
-        // ▼ to "Add to Evenings" (with the folder picture in front), OK.
+        // BBC One's own player app is offered under Add to favourites (Kevin, 26 November 2026).
+        assertTrue("BBC One's player app", shown("Watch in BBC iPlayer"))
+        // ▼ past it to "Add to Evenings" (with the folder picture in front), OK.
+        press(Key.DirectionDown)
         press(Key.DirectionDown)
         press(Key.DirectionCenter)
         assertEquals("BBC One is in Evenings", listOf("10"), MyCategories.all(context).single { it.id == evenings.id }.channels)
