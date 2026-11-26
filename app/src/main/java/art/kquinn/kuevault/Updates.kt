@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import okhttp3.CacheControl
 import okhttp3.Request
+import androidx.core.graphics.drawable.toBitmap
 import java.io.File
 import java.util.concurrent.TimeUnit
 
@@ -351,6 +352,10 @@ object Reopen {
         )
         val notice = androidx.core.app.NotificationCompat.Builder(context, "updates")
             .setSmallIcon(R.drawable.kue_status)
+            // The app's own logo beside it, not a plain letter (Kevin, 26 November 2026).
+            .setLargeIcon(androidx.core.content.ContextCompat.getDrawable(context, R.drawable.kue_app_vault)?.toBitmap(192, 192))
+            .setColor(0xFFFFD23F.toInt())
+            .addAction(R.drawable.kue_status, "Open", open)
             .setContentTitle("KueVault " + name + " is on")
             .setContentText("Tap to open KueVault.")
             .setContentIntent(open)
