@@ -112,6 +112,8 @@ data class LibraryData(
     val soundChecked: Set<String> = emptySet(),
     /** Album key to what the catalogue says about it (see [AlbumFacts]). Asked once each. */
     val facts: Map<String, AlbumFacts> = emptyMap(),
+    /** Songs whose name and artist were found by their sound: their album counts as found (Kevin, 26 Nov 2026). */
+    val soundMatched: Set<String> = emptySet(),
     /** Artist name to the file holding their photo on this phone; "" once looked for and none found. */
     val artistPictures: Map<String, String> = emptyMap(),
 )

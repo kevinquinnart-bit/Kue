@@ -698,7 +698,7 @@ object Scanner {
                 if (album != null) moves[t.id] = album to f.artist
             }
         }
-        data = data.copy(tracks = data.tracks.map { t ->
+        data = data.copy(soundMatched = data.soundMatched + best.keys, tracks = data.tracks.map { t ->
             val f = best[t.id] ?: return@map t
             val move = moves[t.id]
             t.copy(
@@ -963,7 +963,17 @@ object Scanner {
      * a name spelt differently): looked up, not matched, and not a collection or a single of its own.
      */
     fun notFound(view: LibraryView = this.view, d: LibraryData = data): List<Album> =
-        view.albums.filter { al -> al.key !in d.releases && al.key !in d.ownSingles && al.key !in d.collections && !onItsOwn(al) && al.tracks.all { it.checked } }
+        view.albums.filter { al ->
+            al.key !in d.releases && al.key !in d.ownSingles && al.key !in d.collections && !onItsOwn(al) && al.tracks.all { it.checked } &&
+                // Matched by their sound: their names are right, so they drop off the list (Kevin, 26 November 2026).
+                !al.tracks.all { it.id in d.soundMatched }
+        }
+
+    /** Songs put right by Match by sound (Use these): their album leaves the not-found list. */
+    fun markSoundMatched(ids: Set<String>) = synchronized(this) {
+        data = data.copy(soundMatched = data.soundMatched + ids)
+        save()
+    }
 
     /**
      * An album's name and artist put right by hand: kept in the library at once and looked up again with the new

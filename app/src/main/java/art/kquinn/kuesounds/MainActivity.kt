@@ -137,6 +137,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Kept upright when chosen in Settings (CloudPlayer's "portrait lock").
+        // Once: let KueSounds keep finding and fixing music with the phone locked.
+        if (Scanner.running || Fixer.running) KueApp.askOnce(this)
         requestedOrientation = if (PlayPrefs.portraitLock) android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT else android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
         readNotices()
         if (signedIn) Sync.later(1000)

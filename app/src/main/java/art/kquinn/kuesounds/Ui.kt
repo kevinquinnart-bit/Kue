@@ -172,10 +172,30 @@ object Ui {
         centre: Boolean = false,
     ) {
         Text(
-            text, modifier = modifier, color = colour, fontSize = size.sp, fontFamily = K.Poppins,
+            noEmoji(text), modifier = modifier, color = colour, fontSize = size.sp, fontFamily = K.Poppins,
             fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, maxLines = lines, overflow = TextOverflow.Ellipsis,
             textAlign = if (centre) TextAlign.Center else null, lineHeight = (size * 1.3f).sp,
         )
+    }
+
+    /**
+     * Words with any emoji taken out (Kevin, 26 November 2026: "never use stock emojis in apps I build", which takes in
+     * the ones in other people's names for things, such as Spotify playlists called by a picture). Signs such as ©
+     * and ® stay.
+     */
+    fun noEmoji(text: String): String {
+        if (text.isEmpty()) return text
+        val out = StringBuilder(text.length)
+        var i = 0
+        while (i < text.length) {
+            val cp = text.codePointAt(i)
+            val emoji = cp >= 0x1F000 && cp <= 0x1FAFF || cp in 0x2600..0x27BF || cp in 0x2B00..0x2BFF || cp in 0x2300..0x23FF ||
+                cp == 0xFE0F || cp == 0xFE0E || cp == 0x200D || cp == 0x20E3 || cp in 0xE0020..0xE007F || cp in 0x1F1E6..0x1F1FF
+            if (!emoji) out.appendCodePoint(cp)
+            i += Character.charCount(cp)
+        }
+        // A name that was only pictures is called "Untitled".
+        return out.toString().replace(Regex(" {2,}"), " ").trim().ifEmpty { if (text.isBlank()) text else "Untitled" }
     }
 
     /** "Kue" in white and "Sounds" in the Kue blue, as KueTV's name is written. */
@@ -270,8 +290,17 @@ object Ui {
     @Composable
     private fun Main() {
         var stack by remember { mutableStateOf(listOf<Screen>(Screen.Home)) }
+        // Each screen in the stack keeps what it had (what was searched, how far down a list was scrolled), so Back
+        // or Close returns to it just as it was left (Kevin, 26 November 2026: back to the search results, not the start).
+        val kept = androidx.compose.runtime.saveable.rememberSaveableStateHolder()
+        val keyAt = { i: Int, sc: Screen -> "$i:$sc" }
         val go: (Screen) -> Unit = { stack = stack + it }
-        val back: () -> Unit = { if (stack.size > 1) stack = stack.dropLast(1) }
+        val back: () -> Unit = {
+            if (stack.size > 1) {
+                kept.removeState(keyAt(stack.lastIndex, stack.last()))
+                stack = stack.dropLast(1)
+            }
+        }
         // A link shared to KueSounds from YouTube, YouTube Music or Spotify.
         val shared = sharedLink
         LaunchedEffect(shared) {
@@ -296,7 +325,9 @@ object Ui {
 
         Column(Modifier.fillMaxSize().imePadding()) {
             Box(Modifier.weight(1f)) {
-                when (val s = stack.last()) {
+                val top = stack.last()
+                kept.SaveableStateProvider(keyAt(stack.lastIndex, top)) {
+                when (val s = top) {
                     Screen.Home -> Home(albums, artists, songs, go)
                     is Screen.AlbumPage -> (view.byKey[s.key] ?: Scanner.renamed[s.key]?.let { id -> albums.firstOrNull { al -> al.tracks.any { it.id == id } } })
                         ?.let { AlbumPage(it, back, go) } ?: Gone(back)
@@ -311,6 +342,7 @@ object Ui {
                     is Screen.EpisodePage -> PodUi.EpisodePage(s.id, back, go)
                     is Screen.PlaylistPage -> ListUi.Page(s.id, back)
                     is Screen.YouTubePlayer -> OnlineUi.YouTubePlayer(s.url, back, s.tries, s.name)
+                }
                 }
             }
             if (stack.last() != Screen.NowPlaying && Playing.active) MiniPlayer { go(Screen.NowPlaying) }
@@ -489,7 +521,7 @@ object Ui {
             // Tapped, it opens the part of Settings that shows it in full (Kevin, 25 November 2026).
             val where = when {
                 Scanner.status.isNotEmpty() -> "app|Your music"
-                Fixer.status.isNotEmpty() -> "app|Fix the files"
+                Fixer.status.isNotEmpty() -> "app|Your music"
                 Offline.status.isNotEmpty() -> "privacy|Space on this phone"
                 else -> "help|Version and updates"
             }
@@ -511,7 +543,7 @@ object Ui {
         val stuck = remember(data) { data.tracks.count { it.id in data.fixProblems && !(it.fixed && it.fixedFully) } }
         if (status.isEmpty() && Scanner.problem.isEmpty() && (view.leftToFix > 0 || stuck > 0)) {
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "Open Fix the files") { settingsAt = "app|Fix the files"; go(Screen.Settings) }
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "Open Fix the files") { settingsAt = "app|Your music"; go(Screen.Settings) }
                     .padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1118,6 +1150,7 @@ object Ui {
                                     val best = found[t.id]!!.first()
                                     when { album != null && album in best.albums -> album; best.albums.isNotEmpty() -> best.albums.first(); else -> best.single }
                                 }
+                                Scanner.markSoundMatched(usable.map { it.id }.toSet())
                                 for ((name, list) in byAlbum) if (name != null) Scanner.setSongsAlbum(list.map { it.id }.toSet(), name, found[list.first().id]!!.first().artist)
                                 saving = ""
                                 done = true
@@ -1678,7 +1711,7 @@ object Ui {
                 val song = Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }
                 var menu by remember { mutableStateOf(false) }
                 if (song != null) MoreButton("Everything for this song") { menu = true } else Spacer(Modifier.size(44.dp))
-                if (menu && song != null) SongBox(song, { s -> close(); go(s) }) { menu = false }
+                if (menu && song != null) SongBox(song, go) { menu = false }
             }
             // The cover as big as the space allows and never bigger, so it can't cover "Playing from" above it or the
             // song's name below (Kevin, 25 November 2026: the square ran over both on a shorter screen). A swipe left
@@ -1870,7 +1903,7 @@ object Ui {
                             itemsIndexed(timed) { i, line ->
                                 val on = i == now
                                 Text(
-                                    line.words.ifBlank { "· · ·" },
+                                    noEmoji(line.words).ifBlank { "· · ·" },
                                     color = if (on) K.Accent else if (i < now) K.Soft.copy(alpha = 0.6f) else K.Ink,
                                     fontSize = if (on) 26.sp else 20.sp, fontFamily = K.Poppins,
                                     fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, lineHeight = if (on) 32.sp else 26.sp,
@@ -2149,7 +2182,11 @@ object Ui {
                 progress = n(view.lookedUp) + " of " + n(albums) + " albums · " + n(view.withCover) + " with a cover" +
                     (if (singlesChecked < songs) "\nSingles: " + n(singlesChecked) + " of " + n(songs) + " songs checked" else "") +
                     (if (Scanner.waitingForWifi && !Scanner.running) "\nSingles carry on when the phone is on Wi-Fi." else "") +
-                    (if (!Scanner.running && Scanner.problem.isNotEmpty()) "\n" + Scanner.problem else ""),
+                    (if (!Scanner.running && Scanner.problem.isNotEmpty()) "\n" + Scanner.problem else "") +
+                    // Why it isn't done, when it has stopped short (Kevin, 26 November 2026: "needs error message").
+                    (if (!Scanner.running && albums > 0 && view.lookedUp < albums) "\n" + n(albums - view.lookedUp) +
+                        (if (albums - view.lookedUp == 1) " album isn't" else " albums aren't") + " looked up yet: the music catalogue didn't answer for " +
+                        (if (albums - view.lookedUp == 1) "it" else "them") + ". Asked again at the next look (Look for new music, below)." else ""),
             )
             // Step 4 (Kevin, 25 November 2026): kinds of music, dates, artist pictures and who wrote each song.
             val withFacts = view.albums.count { it.key in data.facts }
@@ -2162,6 +2199,14 @@ object Ui {
                 progress = n(withFacts) + " of " + n(matchedAlbums) + " matched albums · " + n(pictures) + " artist pictures" +
                     (if (composersLeft > 0) "\nWho wrote each song: " + n(songs - composersLeft) + " of " + n(songs) + " read" else ""),
             )
+            // Step 5, fixing the files, is part of the same flow (Kevin, 26 November 2026: "integrate").
+            val stuck = remember(data) { data.tracks.count { it.id in data.fixProblems && !(it.fixed && it.fixedFully) } }
+            Step(
+                5, "Fix the files", "",
+                state = if (Fixer.running) NOW else if (view.matched.isNotEmpty() && view.leftToFix == 0 && stuck == 0) DONE else WAITING,
+                progress = "",
+            )
+            Column(Modifier.padding(start = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { FixPanel(view, go) }
             // Albums the catalogue didn't find, as a list to put right (Kevin, 25 November 2026: a miss is a spelling).
             val missed = remember(view, data) { Scanner.notFound(view, data) }
             var showMissed by remember { mutableStateOf(false) }
@@ -2180,7 +2225,7 @@ object Ui {
             if (showMissed) AlbumListBox(
                 "Not found in the catalogue",
                 if (SoundMatch.key.isBlank()) "Add the AcoustID key in Match by sound below, and these are matched by their sound. Tap one to open it."
-                else "These are matched by their sound on Wi-Fi, by themselves. Tap one to open it; its ⋮ has Edit album name and artist.",
+                else "Matched by their sound on Wi-Fi by themselves; once matched they leave this list. Tap one to open it and put its name right.",
                 missed, { showMissed = false },
                 action = if (SoundMatch.key.isNotBlank() && !Scanner.running) ("Match these by sound now" to { showMissed = false; Scanner.scan() }) else null,
             ) { al ->
@@ -2247,7 +2292,8 @@ object Ui {
                         progress = { p }, color = K.Accent, trackColor = K.Page, modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
                     )
                     Words(
-                        "Keep KueSounds open: if it is stopped, it carries on from here next time.",
+                        if (KueApp.mayRunLocked(androidx.compose.ui.platform.LocalContext.current)) "Carries on with the phone locked or KueSounds in the background."
+                        else "Carries on in the background once the phone lets it: see Notifications in Settings.",
                         13, K.Soft, lines = 2,
                     )
                 }
@@ -2268,8 +2314,8 @@ object Ui {
         KueSettings.Place("app", "KueSounds", "Your music", "Songs and albums"),
         KueSettings.Place("app", "KueSounds", "Your music", "Covers"),
         KueSettings.Place("app", "KueSounds", "Your music", "Look for new music"),
-        KueSettings.Place("app", "KueSounds", "Fix the files", "Fix them"),
-        KueSettings.Place("app", "KueSounds", "Fix the files", "Albums still to fix"),
+        KueSettings.Place("app", "KueSounds", "Your music", "Fix the files"),
+        KueSettings.Place("app", "KueSounds", "Your music", "Albums still to fix"),
         KueSettings.Place("app", "KueSounds", "Match by sound", "AcoustID key"),
         KueSettings.Place("app", "KueSounds", "Match by sound", "Match by sound, like Shazam"),
         KueSettings.Place("app", "KueSounds", "Your music", "Start the library again"),
@@ -2317,7 +2363,7 @@ object Ui {
         val stamp = { at: Long -> java.text.SimpleDateFormat("HH:mm, d MMM", java.util.Locale.UK).format(java.util.Date(at)) }
         // Sections inside a group fold away too (Kevin, 25 November 2026); Search all settings opens the right one.
         var sections by rememberSaveable { mutableStateOf(askedFor?.let { "\n" + it } ?: "") }
-        // One open section a line. Not "|" between them: a section's own id has a "|" in it ("app|Fix the files"),
+        // One open section a line. Not "|" between them: a section's own id has a "|" in it ("app|Your music"),
         // so split on "|" no section ever counted as open and none could be opened (Kevin, 25 November 2026).
         val sectionOpen = { id: String -> id in sections.split("\n") }
         val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("\n").filter { it != id }.joinToString("\n") else sections + "\n" + id }
@@ -2348,7 +2394,17 @@ object Ui {
                 count(data.tracks.size, "song") + " · " + String.format("%,d", view.leftToFix) + " albums to fix",
                 open == "app", look, { toggle("app") },
             ) {
-                KueSettings.Section("Your music", sectionOpen("app|Your music"), look, { flip("app|Your music") }, note = if (Scanner.running) "Step " + Scanner.stage + " of 4" else "") {
+                // What is left to fix shows on the closed section (Kevin, 25 November 2026); fixing is step 5 inside it.
+                val stuck = data.tracks.count { it.id in data.fixProblems && !(it.fixed && it.fixedFully) }
+                val fixNote = when {
+                    Scanner.running -> "Step " + Scanner.stage + " of 5"
+                    Fixer.running -> "Fixing now"
+                    view.leftToFix > 0 -> String.format("%,d", view.leftToFix) + " to fix" + if (stuck > 0) " · $stuck stuck" else ""
+                    stuck > 0 -> "$stuck stuck"
+                    view.matched.isNotEmpty() -> "All fixed"
+                    else -> ""
+                }
+                KueSettings.Section("Your music", sectionOpen("app|Your music"), look, { flip("app|Your music") }, note = fixNote) {
                     MusicSteps(view, go)
                     if (!Scanner.running) Button("Look for new music", main = false, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
                     // CloudPlayer's "library cleanup" and "reset": songs gone from the Drive drop out at every look; this
@@ -2359,16 +2415,6 @@ object Ui {
                     }
                     if (sureAgain) Words("Every song's details, covers and lookups are read again from your Drive, which takes hours. Favourites, playlists and songs on the phone stay.", 13, K.Soft, lines = 4)
                 }
-                // What is left shows on the closed section (Kevin, 25 November 2026).
-                val stuck = data.tracks.count { it.id in data.fixProblems && !(it.fixed && it.fixedFully) }
-                val fixNote = when {
-                    Fixer.running -> "Fixing now"
-                    view.leftToFix > 0 -> String.format("%,d", view.leftToFix) + " to fix" + if (stuck > 0) " · $stuck stuck" else ""
-                    stuck > 0 -> "$stuck stuck"
-                    view.matched.isNotEmpty() -> "All fixed"
-                    else -> ""
-                }
-                KueSettings.Section("Fix the files", sectionOpen("app|Fix the files"), look, { flip("app|Fix the files") }, note = fixNote) { FixPanel(view, go) }
                 KueSettings.Section("Match by sound", sectionOpen("app|Match by sound"), look, { flip("app|Match by sound") }) {
                     var key by remember { mutableStateOf(SoundMatch.key) }
                     Words("KueSounds listens to a song and finds out what it is, as Shazam does. It uses AcoustID's free song database, which needs its key.", 14, K.Soft, lines = 4)
@@ -2440,6 +2486,10 @@ object Ui {
                     } else Fixer.askNotices()
                 }
                 if (on) KueSettings.Note("Turning it off is done in the phone's own settings, which open when you tap it.", look)
+                // Long jobs carry on with the phone locked only once the phone stops putting KueSounds to sleep (Kevin,
+                // 26 November 2026: the find music flow must carry on in the background).
+                val free = KueApp.mayRunLocked(context)
+                KueSettings.Toggle("Keep working with the phone locked", "Finding, fixing and saving music carry on in the background.", free, look) { KueApp.askToRunLocked(context) }
             }
 
             // 5. Backup and sync

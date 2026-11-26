@@ -132,3 +132,27 @@ object PlayPrefs {
         app.getSharedPreferences("places", Context.MODE_PRIVATE).edit().apply { if (ms > 0) putLong(id, ms) else remove(id) }.apply()
     }
 }
+
+/** The phone's own battery rules for KueSounds (Kevin, 26 November 2026: finding music must carry on in the background). */
+object KueApp {
+    /** Whether the phone lets KueSounds keep working with the screen off, rather than putting it to sleep. */
+    fun mayRunLocked(context: Context): Boolean =
+        context.getSystemService(android.os.PowerManager::class.java)?.isIgnoringBatteryOptimizations(context.packageName) == true
+
+    /** Asks the phone, with its own question, to let KueSounds keep working in the background. */
+    fun askToRunLocked(context: Context) {
+        val ask = android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, android.net.Uri.parse("package:" + context.packageName))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(ask) }.onFailure {
+            runCatching { context.startActivity(android.content.Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        }
+    }
+
+    /** Asked once, the first time a long job starts, so it isn't stopped when the phone is locked. */
+    fun askOnce(context: Context) {
+        val prefs = context.getSharedPreferences("play", Context.MODE_PRIVATE)
+        if (mayRunLocked(context) || prefs.getBoolean("askedBattery", false)) return
+        prefs.edit().putBoolean("askedBattery", true).apply()
+        askToRunLocked(context)
+    }
+}

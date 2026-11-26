@@ -38,6 +38,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -335,68 +336,144 @@ object OnlineUi {
         var typed by rememberSaveable { mutableStateOf(SpotifyLink.clientId()) }
         var link by rememberSaveable { mutableStateOf("") }
         var steps by remember { mutableStateOf(SpotifyLink.clientId().isEmpty()) }
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item {
-                Ui.Words(
-                    "With Spotify Premium, KueSounds can play your Spotify through the Spotify app on this device.", 15, K.Soft, lines = 3,
-                )
-            }
+        // A playlist, album or shelf opened, with what is in it (Kevin, 26 November 2026: as easy as Spotify's own).
+        var opened by remember { mutableStateOf<com.spotify.protocol.types.ListItem?>(null) }
+        var inside by remember { mutableStateOf<List<com.spotify.protocol.types.ListItem>?>(null) }
+        LaunchedEffect(opened) {
+            inside = null
+            opened?.let { o -> SpotifyLink.open(o) { inside = it } }
+        }
+        androidx.activity.compose.BackHandler(enabled = opened != null) { opened = null }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (SpotifyLink.problem.isNotEmpty()) item { Ui.Words(SpotifyLink.problem, 15, K.Accent, lines = 4) }
             if (!SpotifyLink.connected) {
+                item { Ui.Words("KueSounds plays your Spotify through the Spotify app on this phone.", 15, K.Soft, lines = 3) }
                 item { Ui.Button("Connect to Spotify", modifier = Modifier.fillMaxWidth()) { SpotifyLink.clientId(typed); SpotifyLink.connect(context) } }
             } else {
-                item {
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Raised).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Ui.Words(if (SpotifyLink.track.isEmpty()) "Nothing playing in Spotify" else SpotifyLink.track, 17, bold = true, lines = 2)
-                        if (SpotifyLink.artist.isNotEmpty()) Ui.Words(SpotifyLink.artist, 14, K.Soft)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(52.dp).clip(CircleShape).clickable { SpotifyLink.previous() }, contentAlignment = Alignment.Center) { Sign(Glyph.PREVIOUS, 26.dp, K.Ink) }
-                            Box(Modifier.size(64.dp).clip(CircleShape).background(K.Accent).clickable { SpotifyLink.toggle() }, contentAlignment = Alignment.Center) {
-                                Sign(if (SpotifyLink.paused) Glyph.PLAY else Glyph.PAUSE, 28.dp, K.Page)
-                            }
-                            Box(Modifier.size(52.dp).clip(CircleShape).clickable { SpotifyLink.next() }, contentAlignment = Alignment.Center) { Sign(Glyph.NEXT, 26.dp, K.Ink) }
-                        }
-                    }
+                // What is playing, with its cover.
+                item { SpotifyNowPlaying() }
+                if (!SpotifyLink.canChoose) item {
+                    Ui.Words("Spotify Free: playlists and albums play shuffled, with Spotify's adverts. Premium plays any song you pick.", 13, K.Soft, lines = 3)
                 }
-                item {
-                    Field("Or paste a Spotify link", link, onDone = { if (SpotifyLink.playLink(link)) link = "" }) { link = it }
-                }
-                for ((name, list) in SpotifyLink.shelves) {
-                    item { Ui.Words(name, 18, bold = true, modifier = Modifier.padding(top = 6.dp)) }
+                val o = opened
+                if (o != null) {
                     item {
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            items(list, key = { it.id }) { it ->
-                                Column(Modifier.width(130.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable { SpotifyLink.play(it) }.padding(10.dp)) {
-                                    Ui.Words(it.title, 14, bold = true, lines = 2)
-                                    Ui.Words(it.subtitle.orEmpty(), 12, K.Soft, lines = 2)
-                                }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Ui.RoundButton(Glyph.BACK, "Back") { opened = null }
+                            Spacer(Modifier.width(12.dp))
+                            Ui.Words(o.title, 20, bold = true, lines = 2, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    if (o.playable) item { Ui.Button(if (SpotifyLink.canChoose) "Play" else "Shuffle play", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { SpotifyLink.play(o) } }
+                    val kids = inside
+                    when {
+                        kids == null -> item { CircularProgressIndicator(color = K.Accent) }
+                        kids.isEmpty() -> item { Ui.Words("Nothing in here that Spotify lets other apps show.", 15, K.Soft, lines = 2) }
+                        else -> items(kids, key = { "k:" + it.id }) { k -> SpotifyRow(k) { if (k.hasChildren) opened = k else SpotifyLink.play(k) } }
+                    }
+                } else {
+                    item { Field("Or paste a Spotify link", link, onDone = { if (SpotifyLink.playLink(link)) link = "" }) { link = it } }
+                    for ((name, list) in SpotifyLink.shelves) {
+                        item { Ui.Words(name, 20, bold = true, modifier = Modifier.padding(top = 6.dp)) }
+                        item {
+                            LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                items(list, key = { it.id }) { it -> SpotifyTile(it) { if (it.hasChildren) opened = it else SpotifyLink.play(it) } }
                             }
                         }
                     }
+                    item { Ui.Button("Disconnect", main = false, modifier = Modifier.fillMaxWidth()) { SpotifyLink.disconnect() } }
                 }
-                item { Ui.Button("Disconnect", main = false, modifier = Modifier.fillMaxWidth()) { SpotifyLink.disconnect() } }
             }
-            item {
+            if (opened == null) item {
                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.clickable { steps = !steps }, verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.rotate(if (steps) 90f else 0f)) { KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Ink, 2.2f) }
                         Spacer(Modifier.width(6.dp))
-                        Ui.Words("Your Spotify Client ID", 16, bold = true)
+                        Ui.Words("Spotify setup", 16, bold = true)
                     }
-                    Field("Client ID", typed) { typed = it; SpotifyLink.clientId(it) }
-                    if (steps) Ui.Words(
-                        "Spotify only lets apps like KueSounds in with a free developer key, made once with a Premium account:\n" +
-                            "1. On a computer, go to developer.spotify.com/dashboard and sign in with your Premium account.\n" +
-                            "2. Create app. Any name and description. Tick \"Android\".\n" +
-                            "3. Redirect URI: " + SpotifyLink.REDIRECT + "\n" +
-                            "4. Android package: art.kquinn.kuesounds\n" +
-                            "5. Package SHA1 fingerprint: 17:05:AF:FC:99:35:B9:25:31:9E:4C:10:54:85:A8:99:C9:69:29:2B\n" +
-                            "6. Save, then copy the Client ID into the box above and tap Connect.",
-                        14, K.Soft, lines = 20,
-                    )
+                    if (steps) {
+                        Field("Client ID", typed) { typed = it; SpotifyLink.clientId(it) }
+                        Ui.Words(
+                            "Spotify lets KueSounds in with a free developer key, made once on developer.spotify.com/dashboard:\n" +
+                                "1. Create app, tick Android.\n" +
+                                "2. Redirect URI: " + SpotifyLink.REDIRECT + "\n" +
+                                "3. Android package: art.kquinn.kuesounds\n" +
+                                "4. SHA1: 17:05:AF:FC:99:35:B9:25:31:9E:4C:10:54:85:A8:99:C9:69:29:2B\n" +
+                                "5. Save, put the Client ID above, tap Connect.\n" +
+                                "Someone else using this key: add their Spotify email under User Management on the same page (up to 25 people). " +
+                                "Spotify Free works too, shuffled with adverts.",
+                            14, K.Soft, lines = 24,
+                        )
+                    }
                 }
             }
             item { Spacer(Modifier.height(20.dp)) }
+        }
+    }
+
+    /** The song Spotify is playing: its cover big, its name and artist, and the buttons. */
+    @Composable
+    private fun SpotifyNowPlaying() {
+        val pic = SpotifyLink.playingImage?.raw?.let { SpotifyLink.pictures[it] }
+        Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(K.Raised).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(96.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel), contentAlignment = Alignment.Center) {
+                if (pic != null) androidx.compose.foundation.Image(pic.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Sign(Glyph.NOTE, 40.dp, K.Soft)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Ui.Words(SpotifyLink.track.ifEmpty { "Nothing playing in Spotify" }, 17, bold = true, lines = 2)
+                if (SpotifyLink.artist.isNotEmpty()) Ui.Words(SpotifyLink.artist, 14, K.Soft)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Box(Modifier.size(44.dp).clip(CircleShape).clickable { SpotifyLink.previous() }, contentAlignment = Alignment.Center) { Sign(Glyph.PREVIOUS, 22.dp, K.Ink) }
+                    Box(Modifier.size(52.dp).clip(CircleShape).background(K.Accent).clickable { SpotifyLink.toggle() }, contentAlignment = Alignment.Center) {
+                        Sign(if (SpotifyLink.paused) Glyph.PLAY else Glyph.PAUSE, 24.dp, K.Page)
+                    }
+                    Box(Modifier.size(44.dp).clip(CircleShape).clickable { SpotifyLink.next() }, contentAlignment = Alignment.Center) { Sign(Glyph.NEXT, 22.dp, K.Ink) }
+                    // Brings the playing to this phone when another of the account's devices has it.
+                    Box(Modifier.size(44.dp).clip(CircleShape).background(K.Panel).clickable(onClickLabel = "Play on this phone") { SpotifyLink.playHere() }, contentAlignment = Alignment.Center) {
+                        KueSettings.Icon(KueSettings.Icons.PHONE, 20.dp, K.Ink, 2f)
+                    }
+                }
+            }
+        }
+    }
+
+    /** A Spotify playlist, album or mix: its cover, name and the line under it. */
+    @Composable
+    private fun SpotifyTile(item: com.spotify.protocol.types.ListItem, onClick: () -> Unit) {
+        LaunchedEffect(item.id) { SpotifyLink.picture(item.imageUri) }
+        val pic = item.imageUri?.raw?.let { SpotifyLink.pictures[it] }
+        Column(Modifier.width(150.dp).clickable(onClick = onClick), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(150.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel), contentAlignment = Alignment.Center) {
+                if (pic != null) androidx.compose.foundation.Image(pic.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Sign(Glyph.DISC, 48.dp, K.Soft)
+            }
+            Ui.Words(item.title, 14, bold = true, lines = 2)
+            if (!item.subtitle.isNullOrBlank()) Ui.Words(item.subtitle.orEmpty(), 12, K.Soft, lines = 2)
+        }
+    }
+
+    /** One song or item inside a playlist or album, as a row with its picture. */
+    @Composable
+    private fun SpotifyRow(item: com.spotify.protocol.types.ListItem, onClick: () -> Unit) {
+        LaunchedEffect(item.id) { SpotifyLink.picture(item.imageUri) }
+        val pic = item.imageUri?.raw?.let { SpotifyLink.pictures[it] }
+        val on = SpotifyLink.track.isNotEmpty() && Ui.noEmoji(item.title) == Ui.noEmoji(SpotifyLink.track)
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (on) K.Raised else K.Panel).clickable(onClick = onClick).padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(56.dp).clip(RoundedCornerShape(8.dp)).background(K.Raised), contentAlignment = Alignment.Center) {
+                if (pic != null) androidx.compose.foundation.Image(pic.asImageBitmap(), null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                else Sign(Glyph.NOTE, 24.dp, K.Soft)
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Ui.Words(item.title, 15, if (on) K.Accent else K.Ink, bold = true)
+                if (!item.subtitle.isNullOrBlank()) Ui.Words(item.subtitle.orEmpty(), 13, K.Soft)
+            }
+            if (item.hasChildren) KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
         }
     }
 }

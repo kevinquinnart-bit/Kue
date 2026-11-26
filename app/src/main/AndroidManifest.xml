@@ -12,6 +12,8 @@
     <!-- Set as ringtone: making a song the phone's ringtone (asked for once, on Android's own page). -->
     <uses-permission android:name="android.permission.WRITE_SETTINGS" tools:ignore="ProtectedPermissions" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Asking the phone to let the music search carry on with the screen off. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- The equaliser, deep bass, surround and louder on KueSounds' own sound (25 November 2026). -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Putting a newer KueSounds on. The phone asks first. -->

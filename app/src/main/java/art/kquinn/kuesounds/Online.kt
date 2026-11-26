@@ -280,6 +280,41 @@ object SpotifyLink {
         private set
     var paused by mutableStateOf(true)
         private set
+    /** The cover of what Spotify is playing now. */
+    var playingImage by mutableStateOf<com.spotify.protocol.types.ImageUri?>(null)
+        private set
+
+    /** False for Spotify Free: Spotify then plays a playlist or album shuffled, with its adverts, not one chosen song. */
+    var canChoose by mutableStateOf(true)
+        private set
+
+    /** Pictures fetched from the Spotify app, by their Spotify address, kept while KueSounds is open. */
+    val pictures = androidx.compose.runtime.mutableStateMapOf<String, android.graphics.Bitmap>()
+    private val asked = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    /** Asks the Spotify app for a cover or photo (Kevin, 26 November 2026: "need posters and images"). */
+    fun picture(uri: com.spotify.protocol.types.ImageUri?) {
+        val r = remote ?: return
+        val key = uri?.raw ?: return
+        if (key in pictures || !asked.add(key)) return
+        r.imagesApi.getImage(uri, com.spotify.protocol.types.Image.Dimension.MEDIUM)
+            .setResultCallback { b -> pictures[key] = b }
+            .setErrorCallback { asked.remove(key) }
+    }
+
+    /** What is inside a playlist, album or shelf: its songs or items. */
+    fun open(item: com.spotify.protocol.types.ListItem, got: (List<com.spotify.protocol.types.ListItem>) -> Unit) {
+        remote?.contentApi?.getChildrenOfItem(item, 50, 0)?.setResultCallback { got(it.items.toList()) }?.setErrorCallback { got(emptyList()) }
+    }
+
+    /**
+     * Brings Spotify's playing to this phone (Kevin, 26 November 2026: it played on his daughter's phone, which was the
+     * account's last device in use).
+     */
+    fun playHere() {
+        remote?.connectApi?.connectSwitchToLocalDevice()?.setErrorCallback { Scanner.note("spotify: couldn't bring playing to this phone: " + it.message) }
+    }
+
     /** What Spotify offers to play: recently played, your playlists and so on, each with its first few items. */
     var shelves by mutableStateOf<List<Pair<String, List<com.spotify.protocol.types.ListItem>>>>(emptyList())
         private set
@@ -321,10 +356,14 @@ object SpotifyLink {
                 problem = ""
                 remote = r
                 connected = true
+                playHere()
+                r.userApi.capabilities.setResultCallback { c -> canChoose = c.canPlayOnDemand }
                 r.playerApi.subscribeToPlayerState().setEventCallback { s ->
                     track = s.track?.name.orEmpty()
                     artist = s.track?.artist?.name.orEmpty()
                     paused = s.isPaused
+                    playingImage = s.track?.imageUri
+                    picture(s.track?.imageUri)
                     // One thing plays at a time: KueSounds' own player stops when Spotify plays.
                     if (!s.isPaused && Playing.isPlaying) Playing.toggle()
                 }
@@ -374,6 +413,7 @@ object SpotifyLink {
     }
 
     fun play(item: com.spotify.protocol.types.ListItem) {
+        playHere()
         remote?.contentApi?.playContentItem(item)
     }
 
@@ -381,6 +421,7 @@ object SpotifyLink {
     fun playLink(text: String): Boolean {
         val m = Regex("open\\.spotify\\.com/(?:intl-[a-z]+/)?(track|album|playlist|artist|episode|show)/([A-Za-z0-9]+)").find(text)
             ?: Regex("spotify:(track|album|playlist|artist|episode|show):([A-Za-z0-9]+)").find(text) ?: return false
+        playHere()
         remote?.playerApi?.play("spotify:" + m.groupValues[1] + ":" + m.groupValues[2])
         return true
     }
