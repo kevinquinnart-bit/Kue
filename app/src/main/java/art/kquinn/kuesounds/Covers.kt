@@ -103,6 +103,32 @@ object Covers {
         }
     }.getOrDefault(emptyList())
 
+    /**
+     * A song's kind of music, for Follow the kind of music when neither its file nor the catalogue says (Kevin, 26
+     * November 2026: the equaliser didn't change with the song, as most songs had no kind known yet). Apple's song
+     * search gives it straight away; Deezer's album gives it as a second try. Off the main thread.
+     */
+    fun genre(artist: String, title: String): String? {
+        if (title.isBlank() || artist.isBlank() || artist == Library.UNKNOWN_ARTIST) return null
+        val name = Library.withoutBrackets(title)
+        val apple = get("https://itunes.apple.com/search".toHttpUrl().newBuilder().addQueryParameter("term", "$artist $name").addQueryParameter("entity", "song").addQueryParameter("limit", "10").addQueryParameter("country", "gb").build())
+        runCatching {
+            JsonParser.parseString(apple ?: "").asJsonObject.getAsJsonArray("results").map { it.asJsonObject }
+                .firstOrNull { same(it.get("trackName")?.asString.orEmpty(), name) && sameArtist(it.get("artistName")?.asString.orEmpty(), artist) }
+                ?.get("primaryGenreName")?.asString?.takeIf { it.isNotBlank() && it != "Music" }
+        }.getOrNull()?.let { return it }
+        val deezer = get("https://api.deezer.com/search".toHttpUrl().newBuilder().addQueryParameter("q", "$artist $name").addQueryParameter("limit", "10").build())
+        val albumId = runCatching {
+            JsonParser.parseString(deezer ?: "").asJsonObject.getAsJsonArray("data").map { it.asJsonObject }
+                .firstOrNull { same(it.get("title")?.asString.orEmpty(), name) && sameArtist(it.getAsJsonObject("artist")?.get("name")?.asString.orEmpty(), artist) }
+                ?.getAsJsonObject("album")?.get("id")?.asLong
+        }.getOrNull() ?: return null
+        val album = get(("https://api.deezer.com/album/$albumId").toHttpUrl())
+        return runCatching {
+            JsonParser.parseString(album ?: "").asJsonObject.getAsJsonObject("genres")?.getAsJsonArray("data")?.firstOrNull()?.asJsonObject?.get("name")?.asString
+        }.getOrNull()?.takeIf { it.isNotBlank() }
+    }
+
     /** A cover's picture. Off the main thread. */
     fun download(url: String): ByteArray? = Smart.download(url)
 }

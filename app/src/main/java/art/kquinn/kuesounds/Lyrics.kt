@@ -28,7 +28,8 @@ object Lyrics {
     private lateinit var folder: File
 
     fun init(context: Context) {
-        folder = File(context.filesDir, "lyrics").apply { mkdirs() }
+        // "lyrics2" since 26 November 2026: words kept before could be another version's timings (see [choose]).
+        folder = File(context.filesDir, "lyrics2").apply { mkdirs() }
     }
 
     /** Reads "[01:23.45] words" lines: the time each is sung and its words, in order. Lines with no time are left out. */
@@ -76,20 +77,19 @@ object Lyrics {
         val kept = if (::folder.isInitialized) File(folder, id.filter { it.isLetterOrDigit() || it == '-' || it == '_' }.take(80) + ".json") else null
         if (kept != null && kept.exists()) runCatching { return read(kept.readText()) }
         val name = Library.withoutBrackets(title)
+        // By name and length only: LRCLIB matches the length to within 2 seconds. (The album was asked too before,
+        // and it is often named differently, so this missed and the search below took any version.)
         val exact = "https://lrclib.net/api/get".toHttpUrl().newBuilder()
             .addQueryParameter("artist_name", artist).addQueryParameter("track_name", name)
-            .apply { if (album.isNotBlank()) addQueryParameter("album_name", album) }
             .apply { if (seconds > 0) addQueryParameter("duration", seconds.toString()) }
             .build()
-        var json = ask(exact)
-        if (json == null || read(json).none) {
+        var json = if (seconds > 0) ask(exact) else null
+        // No timings in that one: another version of the same length may have them.
+        if (json == null || read(json).timed.isEmpty()) {
             val search = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
                 .addQueryParameter("artist_name", artist).addQueryParameter("track_name", name).build()
-            json = ask(search)?.let { list ->
-                // The first with timings, else the first with words.
-                val all = JsonParser.parseString(list).takeIf { it.isJsonArray }?.asJsonArray ?: return@let null
-                (all.firstOrNull { it.asJsonObject.get("syncedLyrics")?.isJsonNull == false } ?: all.firstOrNull())?.toString()
-            }
+            val chosen = ask(search)?.let { choose(it, seconds) }
+            if (chosen != null && (json == null || read(json).none || read(chosen).timed.isNotEmpty())) json = chosen
         }
         var words = json?.let { read(it) } ?: Words()
         // Not in LRCLIB: lyrics.ovh, a second free library with no key (26 November 2026). Its words carry no timings,
@@ -107,6 +107,22 @@ object Lyrics {
         // Kept only when words were found: a song with none is asked again another time.
         if (json != null && kept != null && !words.none) runCatching { kept.writeText(json) }
         return words
+    }
+
+    /**
+     * Which of LRCLIB's versions to use (Kevin, 26 November 2026: "lyrics are rolling about 30 seconds ahead"). Timings
+     * are only taken from a version within 4 seconds of the song's own length: 10cc's "Dreadlock Holiday" on Kevin's
+     * phone is 5:01, and the first version found was 4:25, whose words came in half a minute early. With no version that
+     * long, the words are taken without their timings, and move down the cover with the song instead.
+     */
+    fun choose(list: String, seconds: Long): String? {
+        val all = JsonParser.parseString(list).takeIf { it.isJsonArray }?.asJsonArray?.mapNotNull { it.takeIf { e -> e.isJsonObject }?.asJsonObject } ?: return null
+        fun length(o: com.google.gson.JsonObject) = o.get("duration")?.takeIf { !it.isJsonNull }?.asDouble ?: -1.0
+        fun gap(o: com.google.gson.JsonObject) = if (seconds <= 0) 0.0 else kotlin.math.abs(length(o) - seconds)
+        fun has(o: com.google.gson.JsonObject, field: String) = o.get(field)?.takeIf { !it.isJsonNull }?.asString?.isNotBlank() == true
+        all.filter { has(it, "syncedLyrics") && gap(it) <= 4.0 }.minByOrNull { gap(it) }?.let { return it.toString() }
+        val plain = all.filter { has(it, "plainLyrics") }.minByOrNull { gap(it) } ?: return null
+        return com.google.gson.JsonObject().apply { add("plainLyrics", plain.get("plainLyrics")) }.toString()
     }
 
     private fun ask(url: okhttp3.HttpUrl): String? {

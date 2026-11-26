@@ -2000,8 +2000,11 @@ object Ui {
                 val side = if (maxWidth < maxHeight) maxWidth else maxHeight
                 val slide = remember { androidx.compose.animation.core.Animatable(0f) }
                 val swipes = !Playing.isRadio && !Playing.isPodcast
+                // Karaoke takes the whole space, not just the square, so the words are big enough to read (Kevin, 26 Nov).
+                @Suppress("UNUSED_VARIABLE") val seenKaraokeSize = PlayPrefs.changes
+                val karaoke = PlayPrefs.lyricsOnCover && swipes
                 Box(
-                    Modifier.size(side)
+                    (if (karaoke) Modifier.fillMaxSize() else Modifier.size(side))
                         .graphicsLayer { translationX = slide.value; alpha = 1f - (kotlin.math.abs(slide.value) / (size.width * 1.4f)).coerceIn(0f, 0.6f) }
                         .clip(RoundedCornerShape(20.dp)).background(K.Panel)
                         .then(
@@ -2025,9 +2028,8 @@ object Ui {
                     val art = Playing.artwork
                     if (art != null) AsyncImage(model = art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
                     else Sign(Glyph.DISC, 96.dp, K.Soft)
-                    // Karaoke: the words move up over the cover as the song plays (Kevin, 26 November 2026).
-                    @Suppress("UNUSED_VARIABLE") val seenKaraoke = PlayPrefs.changes
-                    if (PlayPrefs.lyricsOnCover && !Playing.isRadio && !Playing.isPodcast) {
+                    // Karaoke: the words move up over the cover, darkened, as the song plays (Kevin, 26 November 2026).
+                    if (karaoke) {
                         Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }?.let { CoverLyrics(it) }
                     }
                 }
@@ -2046,6 +2048,19 @@ object Ui {
                     contentAlignment = Alignment.Center,
                 ) { KueSettings.Icon(KueSettings.Icons.PLAYLIST, 26.dp, K.Soft, 2f) }
                 if (adding) ListUi.AddBox("this song", listOf(Playing.currentId), onAdded = { say("Added to " + it) }) { adding = false }
+                // Karaoke on and off, beside the playlist and favourite buttons (Kevin, 26 November 2026).
+                if (songNow) {
+                    Spacer(Modifier.width(10.dp))
+                    @Suppress("UNUSED_VARIABLE") val seenKaraokeButton = PlayPrefs.changes
+                    val on = PlayPrefs.lyricsOnCover
+                    Box(
+                        Modifier.size(52.dp).clip(CircleShape).background(if (on) K.Accent else K.Panel).clickable(onClickLabel = "Karaoke") {
+                            PlayPrefs.lyricsOnCover = !on
+                            say(if (!on) "Karaoke on" else "Karaoke off")
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) { KueSettings.Icon(KueSettings.Icons.MIC, 26.dp, if (on) K.Page else K.Soft, 2f) }
+                }
                 if (songNow) Spacer(Modifier.width(10.dp))
                 if (songNow) Box(
                     Modifier.size(52.dp).clip(CircleShape).background(K.Panel)
@@ -2085,15 +2100,8 @@ object Ui {
                         else -> "Sleep"
                     }
                     ToolChip(KueSettings.Icons.SLEEP, sleepWords, sleeping, Modifier.weight(1f)) { Playing.nextMusicSleep() }
-                    val track = Scanner.data.tracks.firstOrNull { it.id == Playing.currentId }
-                    // Karaoke on and off in one tap: the words over the cover (Kevin, 26 November 2026: "Karaoke lyrics????").
-                    @Suppress("UNUSED_VARIABLE") val seenKaraokeChip = PlayPrefs.changes
-                    if (track != null) ToolChip(KueSettings.Icons.MIC, "Karaoke", PlayPrefs.lyricsOnCover, Modifier.weight(1f)) {
-                        PlayPrefs.lyricsOnCover = !PlayPrefs.lyricsOnCover
-                        say(if (PlayPrefs.lyricsOnCover) "Karaoke on: the words over the cover" else "Karaoke off")
-                    }
-                    if (track != null) ToolChip(KueSettings.Icons.LYRICS, "Lyrics", SingAlong.on, Modifier.weight(1f)) { tool = "lyrics" }
-                    if (track != null) ToolChip(KueSettings.Icons.INFO, "Info", false, Modifier.weight(1f)) { tool = "info" }
+                    // Karaoke is the button beside the song's name; Song info is in the ⋯ menu (Kevin, 26 November 2026:
+                    // the row was too squashed, and Lyrics and Karaoke did the same thing).
                 }
             }
             when (tool) {
@@ -2246,19 +2254,20 @@ object Ui {
             return
         }
         val timed = w.timed
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).padding(horizontal = 14.dp)) {
+        // The cover almost black behind the words, the words bright (Kevin, 26 November 2026).
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.86f)).padding(horizontal = 16.dp)) {
             if (timed.isNotEmpty()) {
                 val now = Lyrics.lineAt(timed, position + 300)
                 val list = androidx.compose.foundation.lazy.rememberLazyListState()
                 LaunchedEffect(now) { if (now >= 0) runCatching { list.animateScrollToItem((now - 2).coerceAtLeast(0)) } }
-                LazyColumn(Modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 60.dp)) {
+                LazyColumn(Modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(top = 56.dp, bottom = 120.dp)) {
                     itemsIndexed(timed) { i, line ->
                         val on = i == now
                         Text(
                             noEmoji(line.words).ifBlank { "· · ·" },
-                            color = if (on) K.Accent else if (i < now) K.Soft.copy(alpha = 0.55f) else K.Ink,
-                            fontSize = if (on) 24.sp else 18.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center,
-                            fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, lineHeight = if (on) 30.sp else 24.sp,
+                            color = if (on) K.Accent else if (i < now) Color.White.copy(alpha = 0.4f) else Color.White.copy(alpha = 0.9f),
+                            fontSize = if (on) 28.sp else 21.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center,
+                            fontWeight = if (on) FontWeight.Bold else FontWeight.Normal, lineHeight = if (on) 34.sp else 28.sp,
                             modifier = Modifier.fillMaxWidth(),
                         )
                     }
@@ -2267,9 +2276,18 @@ object Ui {
                 val scroll = androidx.compose.foundation.rememberScrollState()
                 val length = Playing.durationMs.coerceAtLeast(1L)
                 LaunchedEffect(position / 2000) { runCatching { scroll.animateScrollTo((scroll.maxValue * (position.toFloat() / length)).toInt()) } }
-                Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(vertical = 40.dp)) {
-                    Text(noEmoji(w.plain), color = K.Ink, fontSize = 18.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center, lineHeight = 26.sp, modifier = Modifier.fillMaxWidth())
+                Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(top = 56.dp, bottom = 60.dp)) {
+                    Text(noEmoji(w.plain), color = Color.White, fontSize = 21.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center, lineHeight = 30.sp, modifier = Modifier.fillMaxWidth())
                 }
+            }
+            // Sing along (the singer turned down) belongs to karaoke, so it is here, not on a button of its own.
+            var singAlong by remember { mutableStateOf(SingAlong.on) }
+            Row(
+                Modifier.align(Alignment.TopEnd).padding(top = 10.dp).clip(RoundedCornerShape(50)).background(if (singAlong) K.Accent else K.Raised)
+                    .clickable(onClickLabel = "Turn the singer down") { singAlong = !singAlong; SingAlong.on = singAlong }.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (singAlong) "Singer down: on" else "Singer down", color = if (singAlong) K.Page else K.Ink, fontSize = 14.sp, fontFamily = K.Poppins, fontWeight = FontWeight.SemiBold)
             }
         }
     }

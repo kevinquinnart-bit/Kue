@@ -116,6 +116,10 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private var effects: Sound.Effects? = null
+    /** Puts the sound settings on again (after a song's kind of music is found). */
+    private var soundAgain: (() -> Unit)? = null
+    /** Songs whose kind of music has been asked for while KueSounds is open, so each is asked once. */
+    private val asked = java.util.Collections.synchronizedSet(HashSet<String>())
 
     /**
      * The equaliser and the rest (Settings › KueSounds › Sound): put on the player's sound, with the music profile for
@@ -130,10 +134,24 @@ class PlaybackService : MediaLibraryService() {
             // Following the kind of music: the song's own kind picks its setting as it comes on (26 November 2026).
             Sound.following = ""
             if (kind == Sound.Kind.MUSIC && p.followKind) {
-                val genre = Scanner.data.tracks.firstOrNull { it.id == id }?.let { Library.genreOf(it, Scanner.data) }.orEmpty()
+                val t = Scanner.data.tracks.firstOrNull { it.id == id }
+                val genre = t?.let { Library.genreOf(it, Scanner.data) }.orEmpty()
                 val chosen = Sound.forKind(p, genre)
-                if (chosen !== p) Sound.following = Sound.presets[chosen.preset].name + ", for " + genre
+                Sound.following = when {
+                    chosen !== p -> Sound.presets[chosen.preset].name + ", for " + genre
+                    genre.isBlank() -> "Finding this song's kind of music"
+                    else -> genre + ": no setting for it, so yours"
+                }
                 p = chosen
+                // Kind not known yet: asked now, kept with the song, and the sound changed as soon as it is known.
+                if (t != null && genre.isBlank() && asked.add(t.id)) scope.launch {
+                    val found = withContext(Dispatchers.IO) { runCatching { Covers.genre(t.artist, t.title) }.getOrNull() }
+                    Scanner.note("kind of music for " + t.artist + " / " + t.title + ": " + (found ?: "not found"))
+                    if (found != null) {
+                        Scanner.changeTracks(setOf(t.id)) { it.copy(genre = found) }
+                        if (player.currentMediaItem?.mediaId == t.id) soundAgain?.invoke()
+                    } else if (player.currentMediaItem?.mediaId == t.id) Sound.following = "Kind of music not known, so your own setting"
+                }
             }
             effects?.apply(p)
             player.skipSilenceEnabled = kind == Sound.Kind.PODCASTS && p.skipSilence
@@ -143,6 +161,7 @@ class PlaybackService : MediaLibraryService() {
             effects = if (session == C.AUDIO_SESSION_ID_UNSET) null else Sound.Effects(session).also { Sound.missing = it.missing }
             apply()
         }
+        soundAgain = apply
         make(player.audioSessionId)
         player.addListener(object : Player.Listener {
             override fun onAudioSessionIdChanged(audioSessionId: Int) = make(audioSessionId)
