@@ -184,14 +184,14 @@ object Fingerprint {
     }
 
     /**
-     * Any sound to 11,025 a second, one channel: the channels averaged, then slowed down with a smooth low-pass filter
+     * Any sound to 11,025 a second (or [target]), one channel: the channels averaged, then slowed down with a smooth low-pass filter
      * (a windowed sinc, cut at 80% of the new top pitch) so no high pitches fold back in.
      */
-    fun toRate(interleaved: ShortArray, length: Int, rate: Int, channels: Int): ShortArray {
+    fun toRate(interleaved: ShortArray, length: Int, rate: Int, channels: Int, target: Int = RATE): ShortArray {
         val frames = length / channels
         val mono = FloatArray(frames) { f -> var s = 0; for (c in 0 until channels) s += interleaved[f * channels + c]; s.toFloat() / channels }
-        if (rate == RATE) return ShortArray(frames) { mono[it].toInt().coerceIn(-32768, 32767).toShort() }
-        val step = rate.toDouble() / RATE
+        if (rate == target) return ShortArray(frames) { mono[it].toInt().coerceIn(-32768, 32767).toShort() }
+        val step = rate.toDouble() / target
         val cutoff = 0.8 * minOf(1.0, 1.0 / step)
         val half = (16 * maxOf(1.0, step)).toInt()
         val outLen = (frames / step).toInt()

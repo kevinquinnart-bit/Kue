@@ -16,6 +16,9 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- The equaliser, deep bass, surround and louder on KueSounds' own sound (25 November 2026). -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Name that song: hearing music around the phone, and what another app on the phone is playing (26 November 2026). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <!-- Putting a newer KueSounds on. The phone asks first. -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
@@ -68,6 +71,9 @@
         </service>
 
         <service android:name=".WorkService" android:exported="false" android:foregroundServiceType="dataSync" />
+
+        <!-- Name that song › On this phone: hears what another app is playing, after Android asks. -->
+        <service android:name=".CaptureService" android:exported="false" android:foregroundServiceType="mediaProjection" />
 
         <!-- Hears back from the phone's installer when a newer KueSounds is put on. -->
         <receiver android:name=".UpdateReceiver" android:exported="false" />

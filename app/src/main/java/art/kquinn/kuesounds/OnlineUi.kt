@@ -335,6 +335,7 @@ object OnlineUi {
         val context = LocalContext.current
         var typed by rememberSaveable { mutableStateOf(SpotifyLink.clientId()) }
         var link by rememberSaveable { mutableStateOf("") }
+        var find by rememberSaveable { mutableStateOf("") }
         var steps by remember { mutableStateOf(SpotifyLink.clientId().isEmpty()) }
         // A playlist, album or shelf opened, with what is in it (Kevin, 26 November 2026: as easy as Spotify's own).
         var opened by remember { mutableStateOf<com.spotify.protocol.types.ListItem?>(null) }
@@ -349,6 +350,11 @@ object OnlineUi {
             if (!SpotifyLink.connected) {
                 item { Ui.Words("KueSounds plays your Spotify through the Spotify app on this phone.", 15, K.Soft, lines = 3) }
                 item { Ui.Button("Connect to Spotify", modifier = Modifier.fillMaxWidth()) { SpotifyLink.clientId(typed); SpotifyLink.connect(context) } }
+                // Anyone, connected or not, Free or Premium: the search opens in the Spotify app (26 November 2026).
+                item {
+                    Field("Find in Spotify, no connecting", find, onDone = { if (find.isNotBlank()) SpotifyLink.openSearch(context, find) }) { find = it }
+                }
+                if (find.isNotBlank()) item { Ui.Button("Open in Spotify", main = false, icon = KueSettings.Icons.SEARCH, modifier = Modifier.fillMaxWidth()) { SpotifyLink.openSearch(context, find) } }
             } else {
                 // What is playing, with its cover.
                 item { SpotifyNowPlaying() }
@@ -400,8 +406,8 @@ object OnlineUi {
                                 "3. Android package: art.kquinn.kuesounds\n" +
                                 "4. SHA1: 17:05:AF:FC:99:35:B9:25:31:9E:4C:10:54:85:A8:99:C9:69:29:2B\n" +
                                 "5. Save, put the Client ID above, tap Connect.\n" +
-                                "Someone else using this key: add their Spotify email under User Management on the same page (up to 25 people). " +
-                                "Spotify Free works too, shuffled with adverts.",
+                                "Someone else using this key: add their Spotify email under User Management on the same page (Spotify allows 5 people). " +
+                                "Spotify Free works too, shuffled with adverts. Anyone else can use Find in Spotify above, with no connecting.",
                             14, K.Soft, lines = 24,
                         )
                     }

@@ -672,13 +672,12 @@ object Scanner {
 
     /**
      * Match by sound, by itself (Kevin, 25 November 2026: "should find these"): every song on an album the catalogue
-     * didn't find, or with no known artist, is listened to once and asked about in AcoustID's free database. A sure
-     * match (75% or more) puts its name and artist right here, and the songs of one album on the album most of them
-     * are on; the files get it at the next Fix. Needs the AcoustID key; only on Wi-Fi (it reads two minutes of each
-     * song). True when any song was changed.
+     * didn't find, or with no known artist, is listened to once and named by Shazam's song finder (26 November 2026:
+     * no key needed), or AcoustID's free database when a key is set and Shazam doesn't know it. A sure match (75% or
+     * more) puts its name and artist right here, and the songs of one album on the album most of them are on; the
+     * files get it at the next Fix. Only on Wi-Fi. True when any song was changed.
      */
     private fun matchBySound(): Boolean {
-        if (SoundMatch.key.isBlank()) return false
         val d = data
         val missed = notFound(view, d).flatMap { it.tracks } +
             d.tracks.filter { Library.sortName(it.artist) == Library.sortName(Library.UNKNOWN_ARTIST) || it.artist.isBlank() }

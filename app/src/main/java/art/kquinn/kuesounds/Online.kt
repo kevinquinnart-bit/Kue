@@ -426,6 +426,20 @@ object SpotifyLink {
         return true
     }
 
+    /**
+     * Opens a search in the Spotify app, with no connecting and no sign-in to KueSounds (26 November 2026). Spotify
+     * only lets 5 named people connect a home-made app, and opens it to everyone only for registered companies with
+     * 250,000 people a month; this works for anyone with the Spotify app, Free or Premium. Spotify's website if the
+     * app isn't on the phone.
+     */
+    fun openSearch(context: Context, words: String) {
+        val app = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("spotify:search:" + android.net.Uri.encode(words)))
+            .setPackage(SPOTIFY_APP).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        val web = android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://open.spotify.com/search/" + android.net.Uri.encode(words)))
+            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(app) }.onFailure { runCatching { context.startActivity(web) } }
+    }
+
     fun toggle() { remote?.playerApi?.let { if (paused) it.resume() else it.pause() } }
     fun next() { remote?.playerApi?.skipNext() }
     fun previous() { remote?.playerApi?.skipPrevious() }

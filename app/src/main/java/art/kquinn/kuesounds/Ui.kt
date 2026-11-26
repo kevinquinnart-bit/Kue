@@ -118,6 +118,8 @@ sealed class Screen {
     data object NowPlaying : Screen()
     data object Settings : Screen()
     data object PodcastFind : Screen()
+    /** Name that song: the microphone, or what another app on the phone is playing (26 November 2026). */
+    data object NameSong : Screen()
     data class ShowPage(val feed: String) : Screen()
     data class EpisodePage(val id: String) : Screen()
     data class PlaylistPage(val id: String) : Screen()
@@ -325,6 +327,7 @@ object Ui {
                     Screen.NowPlaying -> NowPlaying(back, go)
                     Screen.Settings -> Settings(back, go)
                     Screen.PodcastFind -> PodUi.Find(back, go)
+                    Screen.NameSong -> NameUi.Page(back)
                     is Screen.ShowPage -> PodUi.ShowPage(s.feed, back, go)
                     is Screen.EpisodePage -> PodUi.EpisodePage(s.id, back, go)
                     is Screen.PlaylistPage -> ListUi.Page(s.id, back)
@@ -362,6 +365,12 @@ object Ui {
                         Spacer(Modifier.width(10.dp))
                         Brand(24)
                     }
+                    // Name that song, beside Settings (Kevin, 26 November 2026).
+                    Box(
+                        Modifier.size(44.dp).clip(RoundedCornerShape(12.dp)).background(K.Panel).clickable(onClickLabel = "Name that song") { go(Screen.NameSong) },
+                        contentAlignment = Alignment.Center,
+                    ) { KueSettings.Icon(KueSettings.Icons.MIC, 22.dp, K.Ink, 2f) }
+                    Spacer(Modifier.width(8.dp))
                     RoundButton(Glyph.GEAR, "Settings") { go(Screen.Settings) }
                 }
                 SearchBox(query) { query = it }
@@ -1118,7 +1127,7 @@ object Ui {
                                         else -> ""
                                     }
                                     if (on.isNotEmpty()) Words(on, 13, K.Soft, lines = 2)
-                                    Words("Sure: " + (best.score * 100).toInt() + "%", 13, K.Soft)
+                                    Words(if (best.from == "Shazam") "Named by Shazam" else "Sure: " + (best.score * 100).toInt() + "%", 13, K.Soft)
                                 }
                                 t.id in problems -> Words(problems[t.id].orEmpty(), 13, K.Accent, lines = 3)
                                 t.id in found -> Words("Not in the sound database.", 13, K.Soft)
@@ -2361,10 +2370,9 @@ object Ui {
             }
             if (showMissed) AlbumListBox(
                 "Not found in the catalogue",
-                if (SoundMatch.key.isBlank()) "Add the AcoustID key in Match by sound below, and these are matched by their sound. Tap one to open it."
-                else "Matched by their sound on Wi-Fi by themselves; once matched they leave this list. Tap one to open it and put its name right.",
+                "Matched by their sound on Wi-Fi by themselves; once matched they leave this list. Tap one to open it and put its name right.",
                 missed, { showMissed = false },
-                action = if (SoundMatch.key.isNotBlank() && !Scanner.running) ("Match these by sound now" to { showMissed = false; Scanner.scan() }) else null,
+                action = if (!Scanner.running) ("Match these by sound now" to { showMissed = false; Scanner.scan() }) else null,
             ) { al ->
                 showMissed = false
                 go(Screen.AlbumPage(al.key))
@@ -2560,10 +2568,10 @@ object Ui {
                 }
                 KueSettings.Section("Match by sound", sectionOpen("app|Match by sound"), look, { flip("app|Match by sound") }) {
                     var key by remember { mutableStateOf(SoundMatch.key) }
-                    Words("KueSounds listens to a song and finds out what it is, as Shazam does. It uses AcoustID's free song database, which needs its key.", 14, K.Soft, lines = 4)
-                    Words("AcoustID key", 13, K.Soft)
+                    Words("KueSounds listens to a song and names it, using Shazam's song finder. Nothing to sign up for.", 14, K.Soft, lines = 3)
+                    Words("AcoustID key (a second song database, tried when Shazam doesn't know a song)", 13, K.Soft, lines = 2)
                     EditField(key) { key = it.trim(); SoundMatch.key = key }
-                    Words(if (key.isBlank()) "No key yet. Get it at acoustid.org, under Applications." else "Key saved.", 13, if (key.isBlank()) K.Accent else K.Soft, lines = 2)
+                    Words(if (key.isBlank()) "No key: Shazam only." else "Key saved.", 13, K.Soft, lines = 2)
                 }
                 // How songs play (Kevin, 25 November 2026: CloudPlayer's settings as the least).
                 @Suppress("UNUSED_VARIABLE") val seenPrefs = PlayPrefs.changes

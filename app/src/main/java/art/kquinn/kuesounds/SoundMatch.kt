@@ -11,14 +11,23 @@ import okhttp3.Request
 import java.io.IOException
 
 /**
- * Match by sound, like Shazam (Kevin, 25 November 2026): KueSounds listens to the first two minutes of a song's file,
- * makes its own fingerprint of the sound ([Fingerprint]), and asks AcoustID's free song database which recording it
- * is. AcoustID's answers are MusicBrainz recordings, the same catalogue KueSounds already uses. Free for an app that
- * isn't sold; it needs the app key from acoustid.org (Settings › KueSounds › Match by sound).
+ * Match by sound, like Shazam (Kevin, 25-26 November 2026). KueSounds listens to a piece of the song and asks:
+ *  1. Shazam's song finder first, with KueSounds' own Shazam signature ([ShazamSig]). No key and no sign-up. It names
+ *     the song, artist, album, year, record label and kind of music, with the cover.
+ *  2. AcoustID's free song database if Shazam doesn't know it and an AcoustID key is in Settings (its own fingerprint,
+ *     [Fingerprint]; answers are MusicBrainz recordings, the catalogue KueSounds already uses).
+ * Shazam's song finder is not a published service: used here without its say-so, so it could stop answering. Fine for
+ * Kevin's own phone, not for an app on sale.
  */
 object SoundMatch {
-    /** What a song sounds like: its name, artist, the albums it is on, and how sure the match is (0 to 1). */
-    data class Found(val title: String, val artist: String, val albums: List<String>, val single: String?, val score: Double, val recordingId: String)
+    /**
+     * What a song is: its name, artist, the albums it is on, and how sure the match is (0 to 1). Shazam also gives
+     * the cover, year, label and kind of music.
+     */
+    data class Found(
+        val title: String, val artist: String, val albums: List<String>, val single: String?, val score: Double, val recordingId: String,
+        val cover: String? = null, val year: String = "", val label: String = "", val genre: String = "", val from: String = "AcoustID",
+    )
 
     private lateinit var app: Context
     private fun prefs() = app.getSharedPreferences("soundmatch", Context.MODE_PRIVATE)
@@ -34,15 +43,36 @@ object SoundMatch {
 
     /** Listens to a song and asks what it is. Call off the main thread. Throws with a plain reason when it can't. */
     fun identify(t: Track): List<Found> {
-        if (key.isBlank()) throw IOException("Match by sound needs the AcoustID key, in Settings › KueSounds › Match by sound.")
+        // Shazam: 12 seconds from a third of the way in (past any quiet start), no key needed.
+        val shazam = runCatching {
+            val seconds = if (t.durationMs > 0) t.durationMs / 1000 else 0L
+            val from = if (seconds > 40) minOf(maxOf(20L, seconds / 3), seconds - 15) else 0L
+            val (pcm, have, rate, channels) = decode(t, from.toInt(), ShazamSig.SECONDS)
+            val mono = Fingerprint.toRate(pcm, have, rate, channels, ShazamSig.RATE)
+            if (mono.size < ShazamSig.RATE * 3) throw IOException("There wasn't enough sound to go on.")
+            Shazam.name(mono)
+        }
+        shazam.getOrNull()?.let { return listOf(it) }
+        if (key.isBlank()) {
+            shazam.exceptionOrNull()?.let { throw it }
+            return emptyList()
+        }
         val (fp, seconds) = listen(t)
         if (fp.size < 20) throw IOException("There wasn't enough sound to go on.")
         val duration = (if (t.durationMs > 0) t.durationMs / 1000 else seconds.toLong()).coerceAtLeast(1)
         return ask(Fingerprint.encode(fp), duration.toInt())
     }
 
-    /** The song's first two minutes, from the phone if it is saved there, otherwise straight from the Drive. */
+    /** AcoustID's fingerprint of the song's first two minutes. */
     private fun listen(t: Track): Pair<IntArray, Int> {
+        val (pcm, have, rate, channels) = decode(t, 0, Fingerprint.SECONDS)
+        return Fingerprint.of(Fingerprint.toRate(pcm, have, rate, channels)) to (have / channels / maxOf(rate, 1))
+    }
+
+    private data class Pcm(val samples: ShortArray, val length: Int, val rate: Int, val channels: Int)
+
+    /** [seconds] of the song from [fromSec] in, from the phone if it is saved there, otherwise straight from the Drive. */
+    private fun decode(t: Track, fromSec: Int, seconds: Int): Pcm {
         val ex = MediaExtractor()
         val local = Offline.fileFor(t)
         if (local != null) ex.setDataSource(local.path)
@@ -51,13 +81,15 @@ object SoundMatch {
             val track = (0 until ex.trackCount).firstOrNull { ex.getTrackFormat(it).getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true }
                 ?: throw IOException("No sound found in the file.")
             ex.selectTrack(track)
+            if (fromSec > 0) ex.seekTo(fromSec * 1_000_000L, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            val endUs = (fromSec + seconds) * 1_000_000L
             val format = ex.getTrackFormat(track)
             val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             codec.configure(format, null, null, 0)
             codec.start()
             var rate = format.getInteger(MediaFormat.KEY_SAMPLE_RATE)
             var channels = format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-            var pcm = ShortArray(rate * channels * Fingerprint.SECONDS)
+            var pcm = ShortArray(rate * channels * seconds)
             var have = 0
             val info = MediaCodec.BufferInfo()
             var inputDone = false
@@ -68,7 +100,7 @@ object SoundMatch {
                         if (i >= 0) {
                             val buf = codec.getInputBuffer(i)!!
                             val n = ex.readSampleData(buf, 0)
-                            if (n < 0 || ex.sampleTime > Fingerprint.SECONDS * 1_000_000L) {
+                            if (n < 0 || ex.sampleTime > endUs) {
                                 codec.queueInputBuffer(i, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                                 inputDone = true
                             } else {
@@ -82,7 +114,7 @@ object SoundMatch {
                         val f = codec.outputFormat
                         rate = f.getInteger(MediaFormat.KEY_SAMPLE_RATE)
                         channels = f.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
-                        if (pcm.size < rate * channels * Fingerprint.SECONDS) pcm = pcm.copyOf(rate * channels * Fingerprint.SECONDS)
+                        if (pcm.size < rate * channels * seconds) pcm = pcm.copyOf(rate * channels * seconds)
                     } else if (o >= 0) {
                         val out = codec.getOutputBuffer(o)!!.order(java.nio.ByteOrder.nativeOrder()).asShortBuffer()
                         val n = minOf(out.remaining(), pcm.size - have)
@@ -96,8 +128,7 @@ object SoundMatch {
                 runCatching { codec.stop() }
                 codec.release()
             }
-            val mono = Fingerprint.toRate(pcm, have, rate, channels)
-            return Fingerprint.of(mono) to (have / channels / maxOf(rate, 1))
+            return Pcm(pcm, have, rate, channels)
         } finally {
             ex.release()
         }
