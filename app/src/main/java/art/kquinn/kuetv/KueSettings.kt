@@ -81,6 +81,26 @@ object KueSettings {
         val font: FontFamily,
     )
 
+    /**
+     * One look for every Kue app (Kevin, 26 November 2026): fields, drop-downs, choices and second-choice buttons all
+     * carry the same thin edge so they stand off the page, and every close or back button is the same raised shade
+     * with that edge. Use these rather than a one-off colour.
+     */
+    fun edgeColour(look: Look): Color = look.soft().copy(alpha = 0.45f)
+
+    fun Modifier.kueEdge(look: Look, shape: androidx.compose.ui.graphics.Shape = RoundedCornerShape(14.dp)): Modifier =
+        this.border(1.dp, edgeColour(look), shape)
+
+    /** The one close button: a raised square with a cross, the same in every Kue app. */
+    @Composable
+    fun CloseButton(look: Look, label: String = "Close", size: Dp = 44.dp, onClick: () -> Unit) {
+        Box(
+            Modifier.size(size).clip(RoundedCornerShape(12.dp)).background(look.raised).kueEdge(look, RoundedCornerShape(12.dp))
+                .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.CROSS, size * 0.42f, look.ink, 2.2f) }
+    }
+
     /** The Kue apps, for "Your Kue apps". */
     data class KueApp(val name: String, val pkg: String, val download: String, val colour: Color, val logo: Int)
 
@@ -371,7 +391,7 @@ object KueSettings {
     @Composable
     fun Search(query: String, all: List<Place>, look: Look, onQuery: (String) -> Unit, onPick: (Place) -> Unit) {
         Row(
-            Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(look.panel).padding(horizontal = 14.dp),
+            Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(look.panel).kueEdge(look).padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.SEARCH, 20.dp, look.soft())
@@ -426,7 +446,7 @@ object KueSettings {
                     pair.forEach { (i, o) ->
                         Row(
                             Modifier.weight(1f).heightIn(min = 50.dp).clip(RoundedCornerShape(12.dp)).background(look.raised)
-                                .clickable(role = Role.RadioButton, onClickLabel = o) { onPick(i) }.padding(horizontal = 10.dp, vertical = 6.dp),
+                                .kueEdge(look, RoundedCornerShape(12.dp)).clickable(role = Role.RadioButton, onClickLabel = o) { onPick(i) }.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Dot(i == chosen, look)
@@ -446,7 +466,7 @@ object KueSettings {
         val turn by animateFloatAsState(if (open) 90f else 0f, tween(220), label = "fan")
         Row(
             Modifier.fillMaxWidth().heightIn(min = 54.dp).clip(RoundedCornerShape(12.dp)).background(look.raised)
-                .clickable(role = Role.Button, onClickLabel = label) { onOpen(!open) }.padding(horizontal = 14.dp),
+                .kueEdge(look, RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClickLabel = label) { onOpen(!open) }.padding(horizontal = 14.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Say(label, 15, look.ink, look, modifier = Modifier.weight(1f))
