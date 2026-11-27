@@ -1406,7 +1406,9 @@ object Ui {
         val context = LocalContext.current
         var adding by remember { mutableStateOf(false) }
         var editing by remember { mutableStateOf(false) }
-        if (editing) { EditAlbum(al, onClose); return }
+        // Edit file: every detail in the files, the cover, sound and web, then the check (Kevin, 27 November 2026: "give
+        // full file edit"). An album of one song opens as that song.
+        if (editing) { FixByHandUi.Page(al.tracks, if (al.tracks.size == 1) null else al.title, "", onClose = onClose); return }
         var matching by remember { mutableStateOf(false) }
         if (matching) { MatchBox(al.tracks, onClose); return }
         if (adding) { ListUi.AddBox("the album", al.tracks.map { it.id }, onClose = onClose); return }
@@ -1419,7 +1421,7 @@ object Ui {
             }
             CommonChoices(al.tracks, { adding = true }, onClose)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button("Edit names", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.weight(1f)) { editing = true }
+                Button("Edit file", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.weight(1f)) { editing = true }
                 Button("Cover", main = false, icon = KueSettings.Icons.DISC, modifier = Modifier.weight(1f)) { picking = true }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1622,8 +1624,8 @@ object Ui {
                     if (adding) ListUi.AddBox("the album", al.tracks.map { it.id }) { adding = false }
                     Spacer(Modifier.height(12.dp))
                     var editingAlbum by remember { mutableStateOf(false) }
-                    Button("Edit album name and artist", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editingAlbum = true }
-                    if (editingAlbum) EditAlbum(al) { editingAlbum = false }
+                    Button("Edit file", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { editingAlbum = true }
+                    if (editingAlbum) FixByHandUi.Page(al.tracks, if (al.tracks.size == 1) null else al.title, "") { editingAlbum = false }
                     Spacer(Modifier.height(12.dp))
                     var matchingAlbum by remember { mutableStateOf(false) }
                     Button("Match every song by sound", main = false, icon = KueSettings.Icons.EQUALISER, modifier = Modifier.fillMaxWidth()) { matchingAlbum = true }
