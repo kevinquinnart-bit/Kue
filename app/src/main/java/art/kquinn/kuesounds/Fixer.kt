@@ -319,6 +319,9 @@ object Fixer {
         }
     }
 
+    /** Saves by hand run here, not on a page, so closing the page never stops one halfway. */
+    val saves = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+
     /**
      * The copy of a song downloaded when Fix it by hand opens: read for its details, listened to by Shazam and written
      * from, so the song is fetched from the Drive once, not three times (Kevin, 27 November 2026: "extremely slow").

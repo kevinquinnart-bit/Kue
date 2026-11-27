@@ -106,9 +106,11 @@ object FixByHandUi {
         var pictureSaying by remember { mutableStateOf("") }
         val scroll = rememberScrollState()
 
+        var pageOpen by remember { mutableStateOf(true) }
         androidx.compose.runtime.DisposableEffect(first.id) {
             openCount++
             onDispose {
+                pageOpen = false
                 openCount--
                 Fixer.dropCopy(context.applicationContext, first)
             }
@@ -175,7 +177,9 @@ object FixByHandUi {
             saving = true
             saying = ""
             val go = {
-                scope.launch {
+                // Saved in the app's own scope, so closing the page never stops a save halfway (Kevin, 27 November 2026:
+                // "Saving into the file" never cleared and the page couldn't be closed while it showed).
+                Fixer.saves.launch {
                     val said = withContext(Dispatchers.IO) {
                         Fixer.saveByHand(context.applicationContext, songs, changes.mapValues { it.value.trim() }, removed.filter { it.value }.keys, cover)
                     }
@@ -186,27 +190,36 @@ object FixByHandUi {
                         cover = null
                         editing = null
                         fixed = true
-                        scroll.animateScrollTo(0)
+                        runCatching { scroll.animateScrollTo(0) }
                     }
                     saying = said
                     saving = false
+                    if (!pageOpen) android.widget.Toast.makeText(context.applicationContext, said, android.widget.Toast.LENGTH_LONG).show()
                 }
                 Unit
             }
             if (Google.canEdit) go() else Fixer.askPermission { go() }
         }
 
-        Dialog(onDismissRequest = { if (!saving) onClose() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Column(
-                Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().verticalScroll(scroll).padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Ui.PullBar { if (!saving) onClose() }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Ui.RoundButton(Glyph.BACK, "Back") { if (!saving) onClose() }
+        // Closes at any time, saving or not: a save carries on and says when it's done (Kevin, 27 November 2026).
+        val leave = {
+            if (saving) android.widget.Toast.makeText(context.applicationContext, "Still saving. It finishes by itself.", android.widget.Toast.LENGTH_SHORT).show()
+            onClose()
+        }
+        Dialog(onDismissRequest = leave, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+          // The pull bar, back and close stay at the top while the page scrolls under them.
+          Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, top = 8.dp)) {
+                Ui.PullBar(leave)
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
+                    Ui.RoundButton(Glyph.BACK, "Back", onClick = leave)
                     Spacer(Modifier.width(12.dp))
                     Ui.Words("Fix it by hand", 20, bold = true, modifier = Modifier.weight(1f))
+                    KueSettings.CloseButton(Ui.look, onClick = leave)
                 }
+            Column(
+                Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 // The names as they are now in the file, not as they were when the list was made.
                 val title = if (isAlbum) was[FieldKey.ALBUM].orEmpty().ifBlank { albumTitle.orEmpty() } else was[FieldKey.TITLE].orEmpty().ifBlank { first.title }
                 val who = if (isAlbum) was[FieldKey.ALBUM_ARTIST].orEmpty().ifBlank { first.albumArtist.ifBlank { first.artist } } else was[FieldKey.ARTIST].orEmpty().ifBlank { first.artist }
@@ -359,6 +372,7 @@ object FixByHandUi {
                 }
                 Ui.Button("Play it", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(songs, 0) }
             }
+          }
         }
     }
 
@@ -497,9 +511,11 @@ object FixByHandUi {
         var looking by remember { mutableStateOf(false) }
         var forSongs by remember { mutableStateOf(songs) }
         var link by remember { mutableStateOf<String?>(null) }
+        var more by remember { mutableStateOf(false) }
         val search = {
             looking = true
             found = null
+            more = false
             scope.launch {
                 found = withContext(Dispatchers.IO) { Covers.lookUp(words, forSongs) }
                 looking = false
@@ -520,10 +536,17 @@ object FixByHandUi {
             Ui.Button("Search", modifier = Modifier.height(52.dp), onClick = search)
         }
         KueSettings.Choices("Look for", listOf("Songs", "Albums"), if (forSongs) 0 else 1, Ui.look) { forSongs = it == 0; if (words.isNotBlank()) search() }
+        // The three best, the rest only when asked for (Kevin, 27 November 2026: "don't need these, too much").
         when {
             looking -> Busy("Looking in Apple Music, Deezer and Wikipedia…")
             found?.isEmpty() == true -> Ui.Words("Nothing found for that. Change the words and search again, or use the web below.", 14, K.Soft)
-            else -> found?.take(20)?.forEach { f -> Found(f, null) { onUse(f) } }
+            else -> found?.let { all ->
+                val best = all.filter { !it.coverOnly }.ifEmpty { all }
+                best.take(if (more) 20 else 3).forEach { f -> Found(f, null) { onUse(f) } }
+                if (!more && best.size > 3) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    Ui.Words("Show " + (minOf(best.size, 20) - 3) + " more", 14, K.Accent, bold = true, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { more = true }.padding(8.dp))
+                }
+            }
         }
         val q = android.net.Uri.encode(words)
         Line("Search the web", KueSettings.Icons.WEB) { open("https://www.google.com/search?q=$q") }

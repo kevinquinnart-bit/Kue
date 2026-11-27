@@ -101,7 +101,10 @@ object ReviewUi {
     }
 
     @Composable
-    fun Review(items: List<Item>, onClose: () -> Unit) {
+    fun Review(items0: List<Item>, onClose: () -> Unit) {
+        // The list as it was when opened (Kevin, 27 November 2026): the list in Settings shrinks as each one is saved,
+        // which moved this on to the next song before the last was finished and showed the wrong song's file.
+        val items = remember { items0 }
         var at by remember { mutableIntStateOf(0) }
         var saved by remember { mutableIntStateOf(0) }
         var left by remember { mutableIntStateOf(0) }
@@ -124,7 +127,7 @@ object ReviewUi {
                         16,
                     )
                     Ui.Button("Done", modifier = Modifier.fillMaxWidth(), onClick = onClose)
-                } else key(at) {
+                } else key(at, items[at].songs.first().id) {
                     One(items[at]) { result ->
                         when (result) { "saved" -> saved++; "left" -> left++; else -> skipped++ }
                         at++
@@ -268,7 +271,8 @@ object ReviewUi {
                         saving = true
                         problem = ""
                         val go = {
-                            scope.launch {
+                            // In the app's own scope: closing this never stops a save halfway.
+                            Fixer.saves.launch {
                                 val set = changesOf(item, a, now.orEmpty()).filter { (k, _, v) -> now?.get(k).orEmpty() != v }.associate { (k, _, v) -> k to v }
                                 val cover = withContext(Dispatchers.IO) { a.big.takeIf { it.isNotBlank() }?.let { Covers.download(it) }?.let { FixByHandUi.asJpeg(it) } }
                                 val said = withContext(Dispatchers.IO) { Fixer.saveByHand(context.applicationContext, item.songs, set, emptySet(), cover) }
