@@ -43,6 +43,11 @@ data class Track(
     var composer: String? = null,
     /** True once [composer] has been read from the file, found or not. */
     var composerRead: Boolean = false,
+    /**
+     * Settled by Kevin himself in Fix it by hand (saved, or left as it is): KueSounds never writes it or lists it as not
+     * fixed again unless he edits it (27 November 2026).
+     */
+    var settled: Boolean = false,
 )
 
 /**
@@ -456,6 +461,8 @@ object Library {
                     id = f.id, fileName = f.name, mime = f.mime, size = f.size, folderId = f.parent, modified = f.modified,
                     title = g.title, artist = g.artist, album = g.album, albumArtist = "", trackNo = g.trackNo, discNo = g.discNo,
                     year = 0, durationMs = 0, genre = "", tagged = false,
+                    // Settled by hand stays settled when the file changes (its details are read again, nothing flagged).
+                    settled = before?.settled == true, named = before?.settled == true,
                 )
             }
         }

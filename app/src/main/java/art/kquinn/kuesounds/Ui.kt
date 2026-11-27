@@ -543,11 +543,18 @@ object Ui {
         // songs stuck, opening Fix the files.
         val view = Scanner.view
         val data = Scanner.data
-        val stuck = remember(data) { data.tracks.count { it.id in data.fixProblems && !(it.fixed && it.fixedFully) } }
+        // The same count as Fix your music files (Kevin, 27 November 2026: it said 2 here and 56 there). Tapping it
+        // goes straight to checking them one at a time.
+        val left = remember(data, view, Scanner.running) { Scanner.left(view, data) }
+        val stuck = left.total
+        var checking by remember { mutableStateOf(false) }
+        if (checking) ReviewUi.Review(ReviewUi.items(left)) { checking = false }
         if (status.isEmpty() && Scanner.problem.isEmpty() && (view.leftToFix > 0 || stuck > 0)) {
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "Open Fix the files") { settingsAt = "app|Fix your music files"; go(Screen.Settings) }
-                    .padding(vertical = 4.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "Check them") {
+                    if (stuck > 0 && view.leftToFix == 0 && !Scanner.running && !Fixer.running) checking = true
+                    else { settingsAt = "app|Fix your music files"; go(Screen.Settings) }
+                }.padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 KueSettings.Icon(KueSettings.Icons.FIX, 16.dp, K.Accent, 2f)
@@ -555,8 +562,8 @@ object Ui {
                 Words(
                     listOfNotNull(
                         if (view.leftToFix > 0) count(view.leftToFix, "album") + " ready to write to the files" else null,
-                        if (stuck > 0) count(stuck, "song") + " not fixed" else null,
-                    ).joinToString(" · ") + ". Tap to see.",
+                        if (stuck > 0) "$stuck to check" else null,
+                    ).joinToString(" · ") + (if (stuck > 0 && view.leftToFix == 0) ". Tap to check them one at a time." else ". Tap to see."),
                     14, K.Soft, modifier = Modifier.weight(1f),
                 )
                 KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
@@ -1908,25 +1915,34 @@ object Ui {
         }
         val total = noCover.size + notFixed.size
         if (total == 0) return
-        Words("Not fixed: " + total + ". Tap one to fix it by hand.", 16, K.Accent, bold = true)
-        @Composable
-        fun Item(title: String, sub: String, why: String, onTap: () -> Unit) {
+        // Folded, numbered (Kevin, 27 November 2026): "Check them one at a time" above is the way through; the list is
+        // here to pick one out.
+        var shown by remember { mutableStateOf(false) }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).border(1.dp, K.Edge, RoundedCornerShape(12.dp))
+                .clickable { shown = !shown }.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Words("To check: $total", 16, K.Accent, bold = true, modifier = Modifier.weight(1f))
+            Words(if (shown) "Hide the list" else "Show the list", 14, K.Soft)
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.graphicsLayer { rotationZ = if (shown) 90f else 0f }) { KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f) }
+        }
+        if (!shown) return
+        items.take(200).forEachIndexed { i, x ->
+            val t = x.first.first()
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable(onClick = onTap).padding(12.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable { fixing = x }.padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                Words((i + 1).toString() + ".", 14, K.Soft, modifier = Modifier.width(36.dp))
                 Column(Modifier.weight(1f)) {
-                    Words(title, 15, bold = true)
-                    Words(sub, 13, K.Soft)
-                    Words(why, 13, K.Accent)
+                    Words(x.second ?: t.title, 15, bold = true)
+                    Words(if (x.second == null) t.artist else (t.albumArtist.ifBlank { t.artist }) + " · " + count(x.first.size, "song"), 13, K.Soft)
+                    Words(x.third, 13, K.Accent)
                 }
                 KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
             }
-        }
-        for (x in items.take(200)) {
-            val t = x.first.first()
-            if (x.second == null) Item(t.title, t.artist + " · " + t.fileName, x.third) { fixing = x }
-            else Item(x.second!!, (t.albumArtist.ifBlank { t.artist }) + " · " + count(x.first.size, "song"), x.third) { fixing = x }
         }
         if (total > 200) Words("And " + String.format("%,d", total - 200) + " more.", 14, K.Soft)
     }
@@ -2633,17 +2649,22 @@ object Ui {
                     }
                     Scanner.waitingForWifi -> Words("Paused: carries on when the phone is on Wi-Fi.", 15, K.Accent, bold = true)
                     else -> {
+                        // Finished: one line, and one button for what is left (Kevin, 27 November 2026: less on the
+                        // screen, pop-ups to confirm; the rest is checked one at a time, each with KueSounds' answer).
                         val at = Scanner.finishedAt
+                        val fixedSongs = remember(data) { data.tracks.count { (it.fixed && it.fixedFully) || it.settled } }
+                        val left = leftNow.total
                         Words(
                             "Finished" + (if (at > 0) " at " + java.text.SimpleDateFormat("HH:mm", java.util.Locale.UK).format(java.util.Date(at)) else "") +
-                                ". Nothing more happens until new music is added.",
-                            15, bold = true,
+                                ". " + n(fixedSongs) + " fixed" + (if (left > 0) " · $left to check" else ""),
+                            16, bold = true,
                         )
                         if (retrying > 0) Words(count(retrying, "song") + " to try again: press Look for new music below.", 14, K.Accent)
-                        // Everything KueSounds couldn't finish is in one list, fixed by hand (Kevin, 27 November 2026).
-                        val left = noCovers + stuckNow
-                        if (left > 0) Words("Not fixed: $left. KueSounds has tried everything it can. Fix each by hand from the list below: listen with Shazam, look it up, or change anything in the file.", 14, K.Accent)
-                        if (retrying == 0 && left == 0) Words("Every song has its right name and cover.", 14)
+                        if (left > 0) {
+                            var checking by remember { mutableStateOf(false) }
+                            if (checking) ReviewUi.Review(ReviewUi.items(leftNow)) { checking = false }
+                            Button("Check the $left, one at a time", icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { checking = true }
+                        } else if (retrying == 0) Words("Every song has its right name and cover.", 14)
                     }
                 }
             }
@@ -2652,8 +2673,16 @@ object Ui {
 
             val singlesChecked = data.tracks.count { it.singleChecked }
             val nameDone = albums > 0 && view.lookedUp >= albums && singlesChecked >= songs
+            // Each step's list, in a pop-up (Kevin, 27 November 2026: "need lists of match sound, closest artist etc").
+            var listing by remember { mutableStateOf(0) }
+            when (listing) {
+                1 -> ReviewUi.SongList("Not found by name", remember(view, data) { Scanner.notFound(view, data).flatMap { it.tracks } }, "Every album was found by its name.") { listing = 0 }
+                2 -> ReviewUi.SongList("Named by their sound", remember(data) { data.tracks.filter { it.id in data.soundMatched } }, "No songs named by their sound yet.") { listing = 0 }
+                3 -> ReviewUi.SongList("Given their closest artist", remember(data) { data.tracks.filter { it.id in data.artistSwept } }, "No songs given their closest artist yet.") { listing = 0 }
+                4 -> ReviewUi.SongList("Fixed", remember(data) { data.tracks.filter { (it.fixed && it.fixedFully) || it.settled }.sortedBy { it.title.lowercase() } }, "Nothing written yet.") { listing = 0 }
+            }
             Step(
-                1, "Match by name", state = if (stage == 3) NOW else if (nameDone) DONE else WAITING,
+                1, "Match by name", state = if (stage == 3) NOW else if (nameDone) DONE else WAITING, onTap = { listing = 1 },
                 progress = n(view.lookedUp) + " of " + n(albums) + " albums looked up · " + n(view.withCover) + " with a cover" +
                     (if (!running && albums > view.lookedUp) "\nThe music catalogue didn't answer for " + n(albums - view.lookedUp) + ". Asked again at the next look." else "") +
                     (if (!running && Scanner.problem.isNotEmpty()) "\n" + Scanner.problem else ""),
@@ -2665,7 +2694,7 @@ object Ui {
             }
             val listened = soundTodo.count { it.id in data.soundChecked }
             Step(
-                2, "Match by sound", state = if (stage == 4) NOW else if (nameDone && listened >= soundTodo.size) DONE else WAITING,
+                2, "Match by sound", state = if (stage == 4) NOW else if (nameDone && listened >= soundTodo.size) DONE else WAITING, onTap = { listing = 2 },
                 progress = count(data.soundMatched.size, "song") + " named by their sound" +
                     (if (listened < soundTodo.size) " · " + n(listened) + " of " + n(soundTodo.size) + " listened to" else "") +
                     (if (!running && Scanner.waitingForWifi) "\nCarries on when the phone is on Wi-Fi." else ""),
@@ -2673,13 +2702,13 @@ object Ui {
 
             val artistTodo = missed.count { it.id !in data.artistSwept && it.id in data.soundChecked && Library.sortName(it.artist) != Library.sortName(Library.UNKNOWN_ARTIST) }
             Step(
-                3, "Closest artist", state = if (stage == 5) NOW else if (nameDone && listened >= soundTodo.size && artistTodo == 0) DONE else WAITING,
+                3, "Closest artist", state = if (stage == 5) NOW else if (nameDone && listened >= soundTodo.size && artistTodo == 0) DONE else WAITING, onTap = { listing = 3 },
                 progress = count(data.artistSwept.size, "song") + " given their artist and made a single" + (if (artistTodo > 0) " · " + n(artistTodo) + " to do" else ""),
             )
 
             val leftToWrite = view.leftToFix
             Step(
-                4, "Write to the files", state = if (Fixer.running) NOW else if (view.matched.isNotEmpty() && leftToWrite == 0) DONE else WAITING,
+                4, "Write to the files", state = if (Fixer.running) NOW else if (view.matched.isNotEmpty() && leftToWrite == 0) DONE else WAITING, onTap = { listing = 4 },
                 progress = "", working = Fixer.running, doing = Fixer.status, fraction = Fixer.progress,
             )
             Column(Modifier.padding(start = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { FixPanel(view) }
@@ -2747,8 +2776,12 @@ object Ui {
     private fun Step(
         number: Int, name: String, state: Int, progress: String,
         working: Boolean = state == NOW && Scanner.running, doing: String = Scanner.status, fraction: Float = Scanner.progress,
+        onTap: (() -> Unit)? = null,
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).then(if (onTap != null) Modifier.clickable(onClickLabel = "See the list", onClick = onTap) else Modifier),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Box(
                 Modifier.size(28.dp).clip(androidx.compose.foundation.shape.CircleShape)
                     .background(if (state == WAITING) K.Page else K.Accent),
@@ -2761,6 +2794,7 @@ object Ui {
                 if (progress.isNotEmpty()) Words(progress, 14, if (state == NOW) K.Accent else K.Ink)
                 if (working) Doing(doing.removePrefix("Fixing files · ").ifBlank { "Working…" }, fraction)
             }
+            if (onTap != null) KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
         }
     }
 

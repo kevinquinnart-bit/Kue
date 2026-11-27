@@ -1159,7 +1159,7 @@ object Scanner {
         val missed = notFound(view, d).flatMap { it.tracks }.map { it.id }.toSet()
         val unknown = Library.sortName(Library.UNKNOWN_ARTIST)
         return d.tracks.mapNotNull { t ->
-            if (t.fixed && t.fixedFully) return@mapNotNull null
+            if ((t.fixed && t.fixedFully) || t.settled) return@mapNotNull null
             val why = when {
                 t.id in d.fixProblems && !Fixer.stuck(t, d) -> "Tried again at the next look, with the fixes made since."
                 t.id in d.fixProblems -> d.fixProblems.getValue(t.id)
@@ -1192,7 +1192,7 @@ object Scanner {
     /** Albums whose songs are written but have no cover from anywhere yet, for the list in Settings. */
     fun noCover(d: LibraryData = data): List<Album> =
         Library.albums(d.tracks).filter { al ->
-            al.key !in d.catalogueCovers && al.key !in d.ownSingles && al.tracks.any { it.fixed && !it.fixedFully }
+            al.key !in d.catalogueCovers && al.key !in d.ownSingles && al.tracks.any { it.fixed && !it.fixedFully && !it.settled }
         }
 
     /** Songs put right by Match by sound (Use these): their album leaves the not-found list. */

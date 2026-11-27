@@ -3,6 +3,7 @@ package art.kquinn.kuesounds
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,6 +73,7 @@ object FixByHandUi {
         out.toByteArray()
     }.getOrNull()
 
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
     @Composable
     fun Page(songs: List<Track>, albumTitle: String?, why: String, left: Int = 0, onNext: (() -> Unit)? = null, onClose: () -> Unit) {
         val context = LocalContext.current
@@ -96,6 +98,7 @@ object FixByHandUi {
         var heard by remember { mutableStateOf<Covers.Lookup?>(null) }
         var listening by remember { mutableStateOf("") }
         var heardSaying by remember { mutableStateOf("") }
+        var pictureMenu by remember { mutableStateOf(false) }
         var pictureSaying by remember { mutableStateOf("") }
         val scroll = rememberScrollState()
 
@@ -218,8 +221,16 @@ object FixByHandUi {
                     }
                 } else if (why.isNotBlank()) Ui.Words(why, 14, K.Accent)
 
-                // The cover: as it is, or the one chosen here.
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                // The cover: as it is, or the one chosen here. Tap or hold it for the ways to change it (Kevin, 27 November 2026).
+                if (pictureMenu) PictureMenu(
+                    words = listOf(was[FieldKey.ARTIST].orEmpty().ifBlank { first.artist }, if (isAlbum) albumTitle.orEmpty() else was[FieldKey.ALBUM].orEmpty().ifBlank { first.album })
+                        .filter { it.isNotBlank() && it != Library.UNKNOWN_ARTIST }.joinToString(" "),
+                    onPicture = { b, from -> pictureMenu = false; takePicture(b, from) },
+                ) { pictureMenu = false }
+                Box(
+                    Modifier.fillMaxWidth().combinedClickable(onClickLabel = "Change the cover", onLongClick = { pictureMenu = true }) { pictureMenu = true },
+                    contentAlignment = Alignment.Center,
+                ) {
                     val shape = RoundedCornerShape(16.dp)
                     val m = Modifier.size(220.dp).clip(shape).background(K.Panel)
                     when {
@@ -227,7 +238,7 @@ object FixByHandUi {
                         else -> Ui.Cover(Scanner.artForTrack(Scanner.data.tracks.firstOrNull { it.id == first.id } ?: first) ?: Scanner.singleArtFor(first), m, corner = 16.dp, glyphSize = 64.dp)
                     }
                 }
-                if (pictureSaying.isNotEmpty()) Ui.Words(pictureSaying, 13, K.Accent, centre = true, modifier = Modifier.fillMaxWidth())
+                Ui.Words(if (pictureSaying.isNotEmpty()) pictureSaying else "Tap the cover to change it.", 13, if (pictureSaying.isNotEmpty()) K.Accent else K.Soft, centre = true, modifier = Modifier.fillMaxWidth())
                 if (changed && !saving) SaveRow(isAlbum, songs.size, onSave = { save() }) {
                     was.forEach { (k, v) -> now[k] = v }
                     removed.clear(); cover = null; editing = null; pictureSaying = ""
@@ -344,6 +355,73 @@ object FixByHandUi {
         }
     }
 
+    /**
+     * The ways to change the cover, in a pop-up: pictures found for it (shops and Wikipedia, tap one), a picture file on
+     * the phone, a link, or a picture search on the web.
+     */
+    @Composable
+    private fun PictureMenu(words: String, onPicture: (ByteArray?, String) -> Unit, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val scope = rememberCoroutineScope()
+        var found by remember { mutableStateOf<List<Covers.Lookup>?>(null) }
+        var fetching by remember { mutableStateOf(false) }
+        LaunchedEffect(words) {
+            found = withContext(Dispatchers.IO) {
+                runCatching { (Covers.lookUp(words, false) + Covers.lookUp(words, true)).filter { it.big.isNotBlank() }.distinctBy { it.big }.take(24) }.getOrDefault(emptyList())
+            }
+        }
+        val fromFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            scope.launch { onPicture(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }, "the file") }
+        }
+        Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Ui.PullBar(onClose)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Ui.Words("Change the cover", 19, bold = true, modifier = Modifier.weight(1f))
+                    KueSettings.CloseButton(Ui.look, onClick = onClose)
+                }
+                Line("Use a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
+                Line("Use a picture from a link you copied", KueSettings.Icons.OPEN) {
+                    val clip = (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager)
+                        ?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                    if (!clip.contains("http")) android.widget.Toast.makeText(context, "Copy the link to the picture or its page first.", android.widget.Toast.LENGTH_LONG).show()
+                    else { fetching = true; scope.launch { val b = withContext(Dispatchers.IO) { Covers.pictureFromLink(clip) }; fetching = false; onPicture(b, "the link") } }
+                }
+                Line("Find pictures on the web", KueSettings.Icons.WEB) {
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.google.com/search?tbm=isch&q=" + android.net.Uri.encode(words + " cover"))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+                if (fetching) Busy("Fetching the picture…")
+                Ui.Words("Or tap one found for it:", 15, bold = true)
+                val list = found
+                when {
+                    list == null -> Busy("Looking in Apple Music, Deezer and Wikipedia…")
+                    list.isEmpty() -> Ui.Words("None found. Use a file, a link or the web above.", 14, K.Soft)
+                    else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
+                        androidx.compose.foundation.lazy.grid.GridCells.Adaptive(104.dp), Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        items(list.size) { i ->
+                            val c = list[i]
+                            Column(
+                                Modifier.clip(RoundedCornerShape(10.dp)).clickable {
+                                    if (fetching) return@clickable
+                                    fetching = true
+                                    scope.launch { val b = withContext(Dispatchers.IO) { Covers.download(c.big) }; fetching = false; onPicture(b, c.from) }
+                                },
+                                verticalArrangement = Arrangement.spacedBy(3.dp),
+                            ) {
+                                AsyncImage(model = c.small, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxWidth().aspectRatio(1f).clip(RoundedCornerShape(10.dp)).background(K.Panel))
+                                Ui.Words(c.album.ifBlank { c.title }, 12, bold = true)
+                                Ui.Words(c.artist.take(60) + " · " + c.from, 11, K.Soft)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /** Save and Undo, at the top and at the foot of the page. */
     @Composable
     private fun SaveRow(isAlbum: Boolean, count: Int, onSave: () -> Unit, onUndo: () -> Unit) {
@@ -425,9 +503,10 @@ object FixByHandUi {
             runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
             Unit
         }
-        val fromPhone = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        // Any picture file on the phone (Downloads, Files, Photos), not just the photo gallery (Kevin, 27 November 2026: "use file").
+        val fromFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
-            scope.launch { onPicture(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }, "your phone") }
+            scope.launch { onPicture(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }, "the file") }
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.weight(1f)) { Field(words) { words = it } }
@@ -443,9 +522,7 @@ object FixByHandUi {
         Line("Search the web", KueSettings.Icons.WEB) { open("https://www.google.com/search?q=$q") }
         Line("Find pictures on the web", KueSettings.Icons.DISC) { open("https://www.google.com/search?tbm=isch&q=$q") }
         Line("Look in Spotify", KueSettings.Icons.SEARCH) { SpotifyLink.openSearch(context, words) }
-        Line("Use a picture on your phone", KueSettings.Icons.PHONE) {
-            fromPhone.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
-        }
+        Line("Use a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
         Line("Use a picture from a link", KueSettings.Icons.OPEN) {
             val clip = (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager)
                 ?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()

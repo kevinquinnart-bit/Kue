@@ -121,7 +121,8 @@ object Fixer {
      * one now. A song written with no cover anywhere is not written again until one turns up (no redoing).
      */
     fun needsWrite(t: Track, al: Album, d: LibraryData = Scanner.data): Boolean =
-        !t.fixed || (!t.fixedFully && al.key in d.catalogueCovers)
+        // Settled by hand: never written or flagged by KueSounds again unless Kevin edits it (27 November 2026).
+        !t.settled && (!t.fixed || (!t.fixedFully && al.key in d.catalogueCovers))
 
     /** Whether Fix has anything to do on this album: matched, and a song left that isn't stuck. */
     fun hasWork(al: Album, d: LibraryData = Scanner.data): Boolean = canFix(al, d) && toDo(al, d).isNotEmpty()
@@ -394,7 +395,7 @@ object Fixer {
                             composer = v(org.jaudiotagger.tag.FieldKey.COMPOSER) ?: it.composer,
                             fileName = newName ?: it.fileName,
                             // Set by hand: KueSounds keeps these names and doesn't look the album up again.
-                            named = true, ownLook = true, checked = true,
+                            named = true, ownLook = true, checked = true, settled = true,
                             fixed = true, fixedFully = cover != null || it.fixedFully,
                         )
                     }
@@ -426,6 +427,17 @@ object Fixer {
     }
 
     /**
+     * Leave as it is (Kevin, 27 November 2026: "a few left at the end ... and not flag again automatically"): the songs
+     * are taken off the not-fixed list and never written or flagged by KueSounds again, with nothing changed in them.
+     */
+    fun leaveAsItIs(tracks: List<Track>) {
+        val ids = tracks.map { it.id }.toSet()
+        Scanner.changeTracks(ids) { it.copy(settled = true) }
+        ids.forEach { Scanner.fixTried(it, null) }
+        Scanner.note("left as they are, by hand: " + tracks.joinToString(", ") { it.fileName })
+    }
+
+    /**
      * Writes [d] into [file]. An M4A that can't be written even after its sound is copied into a fresh file (Gordon
      * Lightfoot's "Live in Concert", 25-26 November 2026) has its sound made again as AAC at the same quality, once,
      * and is then written: the one way left to get its details in.
@@ -435,6 +447,24 @@ object Fixer {
         try {
             Tagger.fix(file, d, seconds) { from, to -> rebuildMp4(from, to) }
         } catch (first: Exception) {
+            if (Library.ending(file.name) == "mp3" && first.message?.contains("length changed") == true) {
+                // Haunted and Sunday Game (27 November 2026): taking everything out of these MP3s first upset them, but
+                // changing the details in place worked (Haunted, fixed by hand at 05:46 and 06:01). So: in place, with
+                // the old details and pictures taken out one by one instead.
+                Drive.downloadChecked(t.id, file, token, t.size)
+                val other = runCatching { Tagger.readAll(file).other.map { it.first }.toSet() }.getOrDefault(emptySet())
+                val set = linkedMapOf(
+                    org.jaudiotagger.tag.FieldKey.TITLE to d.title, org.jaudiotagger.tag.FieldKey.ARTIST to d.artist,
+                    org.jaudiotagger.tag.FieldKey.ALBUM to d.album, org.jaudiotagger.tag.FieldKey.ALBUM_ARTIST to d.albumArtist,
+                    org.jaudiotagger.tag.FieldKey.YEAR to (if (d.year > 0) d.year.toString() else ""),
+                    org.jaudiotagger.tag.FieldKey.TRACK to (if (d.trackNo > 0) d.trackNo.toString() else ""),
+                    org.jaudiotagger.tag.FieldKey.DISC_NO to (if (d.discNo > 0) d.discNo.toString() else ""),
+                    org.jaudiotagger.tag.FieldKey.COMMENT to "",
+                )
+                Tagger.edit(file, set, other, d.cover, seconds)
+                Scanner.note("written in place, as taking everything out first upset it: " + t.fileName)
+                return
+            }
             if (Library.ending(file.name) !in setOf("m4a", "m4b", "mp4")) throw first
             Drive.downloadWhole(t.id, file, token)
             val again = File(file.parentFile, t.id + ".again.m4a")

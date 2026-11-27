@@ -101,12 +101,24 @@ object Playing {
 
     private lateinit var appContext: Context
 
+    @Volatile private var connecting = false
+
     fun connect(context: Context) {
         appContext = context.applicationContext
-        if (controller != null) return
-        val token = SessionToken(context, ComponentName(context, PlaybackService::class.java))
-        val future = MediaController.Builder(context, token).buildAsync()
+        if (controller != null || connecting) return
+        connecting = true
+        // Bound with the app's own context, not the screen's (27 November 2026 crash, "Service not registered"): the
+        // screen is made twice when KueSounds opens and the first one goes, taking its service link with it; when the
+        // player later let go of that link, Android had already dropped it, and KueSounds closed.
+        val token = SessionToken(appContext, ComponentName(appContext, PlaybackService::class.java))
+        val future = MediaController.Builder(appContext, token)
+            // The player's link dropped (Android closed the player): connect again next time it's needed.
+            .setListener(object : MediaController.Listener {
+                override fun onDisconnected(c: MediaController) { if (controller === c) controller = null }
+            })
+            .buildAsync()
         future.addListener({
+            connecting = false
             val c = runCatching { future.get() }.getOrNull() ?: return@addListener
             controller = c
             c.addListener(object : Player.Listener {
