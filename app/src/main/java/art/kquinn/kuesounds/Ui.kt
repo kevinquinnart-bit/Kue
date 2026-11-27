@@ -2359,8 +2359,6 @@ object Ui {
         }
     }
 
-    /** A small button under the song: a drawn icon and a word, yellow when it is on. */
-    @Composable
     /** A small round icon with no words (its name is read out by the phone's screen reader); yellow when on. */
     @Composable
     private fun SmallIcon(icon: String, label: String, on: Boolean, onClick: () -> Unit) {
@@ -2370,6 +2368,7 @@ object Ui {
         ) { KueSettings.Icon(icon, 22.dp, if (on) K.Page else K.Soft, 2f) }
     }
 
+    /** A small button under the song: a drawn icon and a word, yellow when it is on. */
     @Composable
     private fun ToolChip(icon: String, label: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
         Column(
