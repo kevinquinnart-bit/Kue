@@ -570,10 +570,11 @@ object Ui {
         if (checking) ReviewUi.Review(ReviewUi.items(left)) { checking = false }
         if (status.isEmpty() && Scanner.problem.isEmpty() && (view.leftToFix > 0 || stuck > 0)) {
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "Check them") {
+                // A soft edge round it (Kevin, 27 November 2026: "give subtle border").
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, K.Edge, RoundedCornerShape(12.dp)).clickable(onClickLabel = "Check them") {
                     if (stuck > 0 && view.leftToFix == 0 && !Scanner.running && !Fixer.running) checking = true
                     else { settingsAt = "app|Fix your music files"; go(Screen.Settings) }
-                }.padding(vertical = 4.dp),
+                }.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 KueSettings.Icon(KueSettings.Icons.FIX, 16.dp, K.Accent, 2f)
@@ -821,7 +822,7 @@ object Ui {
 
     @Composable
     @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-    private fun Row2(top: String, below: String, glyph: Glyph?, highlight: Boolean = false, lead: String = "", onHold: (() -> Unit)? = null, onClick: () -> Unit) {
+    private fun Row2(top: String, below: String, glyph: Glyph?, highlight: Boolean = false, lead: String = "", onHold: (() -> Unit)? = null, picture: (() -> File?)? = null, round: Boolean = false, onClick: () -> Unit) {
         Row(
             Modifier.fillMaxWidth().heightIn(min = 60.dp).clip(RoundedCornerShape(12.dp))
                 .background(if (highlight) K.Panel else Color.Transparent)
@@ -832,6 +833,10 @@ object Ui {
             if (lead.isNotEmpty()) {
                 Words(lead, 15, if (highlight) K.Accent else K.Soft, modifier = Modifier.width(30.dp))
                 Spacer(Modifier.width(8.dp))
+            } else if (picture != null) {
+                // Its picture, the drawn sign when it has none (Kevin, 27 November 2026: photos in the search results).
+                Cover(picture(), Modifier.size(44.dp), corner = 10.dp, glyphSize = 22.dp, glyph = glyph ?: Glyph.DISC, round = round)
+                Spacer(Modifier.width(12.dp))
             } else if (glyph != null) {
                 Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(K.Panel), contentAlignment = Alignment.Center) { Sign(glyph, 22.dp, K.Soft) }
                 Spacer(Modifier.width(12.dp))
@@ -1572,12 +1577,14 @@ object Ui {
         heldSong?.let { t -> SongBox(t, go) { heldSong = null } }
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp)) {
             if (r.artists.isNotEmpty()) item { Heading("Artists") }
-            items(r.artists, key = { "a:" + it.name }) { a -> Row2(a.name, count(a.albums.size, "album"), Glyph.PERSON, onHold = { heldArtist = a }) { go(Screen.ArtistPage(a.name)) } }
+            items(r.artists, key = { "a:" + it.name }) { a -> Row2(a.name, count(a.albums.size, "album"), Glyph.PERSON, onHold = { heldArtist = a },
+                picture = { Scanner.artistPicture(a.name) ?: a.albums.firstNotNullOfOrNull { Scanner.artFor(it) } }, round = true) { go(Screen.ArtistPage(a.name)) } }
             if (r.albums.isNotEmpty()) item { Heading("Albums") }
-            items(r.albums, key = { "l:" + it.key }) { al -> Row2(al.title, al.artist, Glyph.DISC, onHold = { heldAlbum = al }) { go(Screen.AlbumPage(al.key)) } }
+            items(r.albums, key = { "l:" + it.key }) { al -> Row2(al.title, al.artist, Glyph.DISC, onHold = { heldAlbum = al }, picture = { Scanner.artFor(al) }) { go(Screen.AlbumPage(al.key)) } }
             if (r.songs.isNotEmpty()) item { Heading("Songs") }
             itemsIndexed(r.songs, key = { _, t -> "s:" + t.id }) { i, t ->
-                Row2(t.title, t.artist + " · " + t.album, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { heldSong = t }) { Playing.play(r.songs, i) }
+                Row2(t.title, t.artist + " · " + t.album, Glyph.NOTE, highlight = t.id == Playing.currentId, onHold = { heldSong = t },
+                    picture = { Scanner.singleArtFor(t) ?: Scanner.artForTrack(t) }) { Playing.play(r.songs, i) }
             }
         }
     }

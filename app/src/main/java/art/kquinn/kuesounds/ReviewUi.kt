@@ -144,7 +144,6 @@ object ReviewUi {
         var nothing by remember { mutableStateOf(false) }
         var saving by remember { mutableStateOf(false) }
         var problem by remember { mutableStateOf("") }
-        var sure by remember { mutableStateOf(false) }
         var byHand by remember { mutableStateOf(false) }
         // After a save: what is in the file now, read back from the Drive, to check before moving on (Kevin, 27 November
         // 2026: "needs to be a final check that all is ok before moving on").
@@ -166,11 +165,6 @@ object ReviewUi {
             // Saved in there: that page ended on the final check of the file, so this one is done.
             if (item.songs.all { s -> Scanner.data.tracks.firstOrNull { it.id == s.id }?.settled == true }) onDone("saved")
         }
-        if (sure) Confirm(
-            "It's right as it is?",
-            "Nothing is changed in the file, and KueSounds won't ask about it again. You can still change it any time from Song info.",
-            "Yes, it's right", onYes = { sure = false; Fixer.leaveAsItIs(item.songs); onDone("left") }, onNo = { sure = false },
-        )
 
         if (savedTimes > 0) {
             // Saved: the file itself, read back, with its picture, before moving on.
@@ -207,22 +201,9 @@ object ReviewUi {
                     item.songs, if (item.songs.size == 1) null else item.album, item.why, scroll,
                     suggest = a,
                     note = when {
-                        a == null -> "Nothing knows it by its sound or its name: search the web below, or keep it as it is."
+                        a == null -> "Nothing knows it by its sound or its name: search the web below, or Save to keep it as it is."
                         a.coverOnly -> "KueSounds suggests the cover from " + a.from + "."
                         else -> "KueSounds suggests these from " + a.from + ": the changes are in yellow. Keep, change, then Save."
-                    },
-                    extra = {
-                        // Not the same thing: one stops it being asked about, the other brings it back next time.
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                            Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { sure = true }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Ui.Words("It's right as it is", 14, K.Accent, bold = true, centre = true)
-                                Ui.Words("Don't ask again", 11, K.Soft, centre = true)
-                            }
-                            Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onDone("skipped") }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                Ui.Words("Not now", 14, K.Accent, bold = true, centre = true)
-                                Ui.Words("Ask me next time", 11, K.Soft, centre = true)
-                            }
-                        }
                     },
                     onSaved = { savedTimes++ },
                     onClose = {},

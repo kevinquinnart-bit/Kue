@@ -53,7 +53,6 @@ import org.jaudiotagger.tag.FieldKey
  */
 object FixByHandUi {
     private val albumKeys = listOf(FieldKey.ALBUM, FieldKey.ALBUM_ARTIST, FieldKey.YEAR, FieldKey.GENRE, FieldKey.RECORD_LABEL)
-    private val alwaysShown = listOf(FieldKey.TITLE, FieldKey.ARTIST, FieldKey.ALBUM, FieldKey.ALBUM_ARTIST, FieldKey.YEAR, FieldKey.TRACK, FieldKey.DISC_NO, FieldKey.GENRE)
 
     /** True while the page is open: a picture or link shared to KueSounds from the browser comes here. */
     private var openCount by mutableStateOf(0)
@@ -120,7 +119,6 @@ object FixByHandUi {
         val now = remember { mutableStateMapOf<FieldKey, String>() }
         val removed = remember { mutableStateMapOf<String, Boolean>() }
         var cover by remember { mutableStateOf<ByteArray?>(null) }
-        var everyDetail by remember { mutableStateOf(false) }
         var editing by remember { mutableStateOf<FieldKey?>(null) }
         var saving by remember { mutableStateOf(false) }
         var saying by remember { mutableStateOf("") }
@@ -314,7 +312,8 @@ object FixByHandUi {
                     all == null -> Busy("Reading the file…")
                     else -> {
                         val keys = if (isAlbum) albumKeys
-                        else Tagger.named.map { it.first }.filter { everyDetail || it in alwaysShown || was[it].orEmpty().isNotBlank() || now[it].orEmpty().isNotBlank() }
+                        // Every detail a file can hold, always (Kevin, 27 November 2026: the Show every detail button struck out).
+                        else Tagger.named.map { it.first }
                         Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 6.dp)) {
                             for (k in keys) {
                                 val label = Tagger.named.first { it.first == k }.second
@@ -339,7 +338,6 @@ object FixByHandUi {
                                 }
                             }
                         }
-                        if (!isAlbum) Line(if (everyDetail) "Show only the details that are set" else "Show every detail a file can hold", KueSettings.Icons.CHEVRON) { everyDetail = !everyDetail }
                         // Anything else the file holds, by its own code (encoder, ratings, old tags): each can be taken out.
                         if (!isAlbum && all.other.isNotEmpty()) {
                             Ui.Words("Also in the file", 15, bold = true)
@@ -378,7 +376,12 @@ object FixByHandUi {
             // The foot of the page, always there: Save and Undo once (not at the top and the bottom, Kevin 27 November
             // 2026), what saving is doing, and a small player for the song instead of a big Play button.
             Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (changed && !saving) SaveRow(isAlbum, songs.size, onSave = { save() }) {
+                // Save and Undo always (Kevin, 27 November 2026: It's right as it is and Not now struck out). Save with
+                // nothing changed keeps the file as it is, never asks about it again, and goes on to the check.
+                if (!saving) SaveRow(isAlbum, songs.size, onSave = {
+                    if (changed) save()
+                    else { keyboard?.hide(); editing = null; Fixer.leaveAsItIs(songs); fixed = true; saying = "Kept as it is."; onSaved() }
+                }) {
                     was.forEach { (k, v) -> now[k] = v }
                     removed.clear(); cover = null; editing = null; pictureSaying = ""
                 }
@@ -390,7 +393,7 @@ object FixByHandUi {
 
     /**
      * The ways to change the cover, in a pop-up: pictures found for it (shops and Wikipedia, tap one), a picture file on
-     * the phone, a link, or a picture search on the web.
+     * the phone, or a link.
      */
     @Composable
     private fun PictureMenu(words: String, onPicture: (ByteArray?, String) -> Unit, onClose: () -> Unit) {
@@ -410,22 +413,19 @@ object FixByHandUi {
         Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
             Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 KueSettings.PanelHeader("Change the cover", Ui.look, onClose = onClose)
-                Line("Use a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
-                Line("Use a picture from a link you copied", KueSettings.Icons.OPEN) {
+                Line("Upload a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
+                Line("Upload a picture from a link you copied", KueSettings.Icons.OPEN) {
                     val clip = (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager)
                         ?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
                     if (!clip.contains("http")) android.widget.Toast.makeText(context, "Copy the link to the picture or its page first.", android.widget.Toast.LENGTH_LONG).show()
                     else { fetching = true; scope.launch { val b = withContext(Dispatchers.IO) { Covers.pictureFromLink(clip) }; fetching = false; onPicture(b, "the link") } }
-                }
-                Line("Find pictures on the web", KueSettings.Icons.WEB) {
-                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://www.google.com/search?tbm=isch&q=" + android.net.Uri.encode(words + " cover"))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
                 if (fetching) Busy("Fetching the picture…")
                 Ui.Words("Or tap one found for it:", 15, bold = true)
                 val list = found
                 when {
                     list == null -> Busy("Looking in Apple Music, Deezer and Discogs…")
-                    list.isEmpty() -> Ui.Words("None found. Use a file, a link or the web above.", 14, K.Soft)
+                    list.isEmpty() -> Ui.Words("None found. Upload a picture file or a link above.", 14, K.Soft)
                     else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                         androidx.compose.foundation.lazy.grid.GridCells.Adaptive(104.dp), Modifier.weight(1f),
                         horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -509,7 +509,7 @@ object FixByHandUi {
         }
     }
 
-    /** The search: Apple, Deezer and Wikipedia in the app, each find with its cover; then the web, Spotify, the phone and a link. */
+    /** The search: Apple, Deezer and Wikipedia in the app, each find with its cover; then Discogs, the web, and a picture from the phone or a link. */
     @Composable
     private fun Search(start: String, songs: Boolean, song: String?, onUse: (Covers.Lookup) -> Unit, onPicture: (ByteArray?, String) -> Unit) {
         val context = LocalContext.current
@@ -533,10 +533,9 @@ object FixByHandUi {
         Line("Search Discogs", KueSettings.Icons.SEARCH) { open("https://www.discogs.com/search/?q=$q&type=all") }
         // With "album and year", so the answer at the top is the song's album and when it came out (Kevin, 27 November 2026).
         Line("Search the web", KueSettings.Icons.WEB) { open("https://www.google.com/search?q=" + android.net.Uri.encode("$words album and year")) }
-        Line("Find pictures on the web", KueSettings.Icons.DISC) { open("https://www.google.com/search?tbm=isch&q=$q") }
-        Line("Look in Spotify", KueSettings.Icons.SEARCH) { SpotifyLink.openSearch(context, words) }
-        Line("Use a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
-        Line("Use a picture from a link", KueSettings.Icons.OPEN) {
+        // Find pictures on the web and Look in Spotify taken out (Kevin, 27 November 2026).
+        Line("Upload a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
+        Line("Upload a picture from a link", KueSettings.Icons.OPEN) {
             val clip = (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager)
                 ?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
             link = if (clip.contains("http")) clip.trim() else ""
