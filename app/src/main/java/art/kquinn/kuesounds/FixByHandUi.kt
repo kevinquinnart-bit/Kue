@@ -116,7 +116,8 @@ object FixByHandUi {
                     saying = withContext(Dispatchers.IO) {
                         Fixer.saveByHand(context.applicationContext, songs, changes.mapValues { it.value.trim() }, removed.filter { it.value }.keys, cover)
                     }
-                    if (saying.startsWith("Saved into")) {
+                    // Only a full save counts: "Saved into 0 of 1 files" kept the changes on screen, Take out included (27 November 2026).
+                    if (saying.startsWith("Saved into the file") || saying.startsWith("Saved into all")) {
                         changes.forEach { (k, v) -> was[k] = v.trim() }
                         removed.clear()
                     }
@@ -231,7 +232,7 @@ object FixByHandUi {
                                     val out = removed[id] == true
                                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                                         Column(Modifier.weight(1f)) {
-                                            Ui.Words(id, 13, K.Soft)
+                                            Ui.Words(plainName(id), 13, K.Soft)
                                             Ui.Words(if (out) "Taken out when you save" else text.take(200), 14, if (out) K.Accent else K.Ink)
                                         }
                                         Spacer(Modifier.width(8.dp))
@@ -278,6 +279,32 @@ object FixByHandUi {
             }
         }
     }
+
+    /** What a file's own code for a detail means, in plain words (Kevin, 27 November 2026: "don't know what this is"). */
+    fun plainName(id: String): String = when (id.uppercase().substringBefore(':')) {
+        "TSSE", "ENCODER", "©TOO", "ENCODING" -> "The program that made the file"
+        "TENC", "ENCODED-BY", "ENCODEDBY" -> "Who made the file"
+        "TXXX" -> "Extra note" + id.substringAfter(':', "").let { if (it.isNotBlank()) " (" + it + ")" else "" }
+        "PRIV" -> "Private data from another program"
+        "TCOP", "COPYRIGHT", "CPRT" -> "Copyright"
+        "WXXX", "WOAR", "WOAF", "WCOM", "URL" -> "Web address"
+        "TMED" -> "Where it came from (CD, record)"
+        "TFLT" -> "Kind of sound file"
+        "POPM", "RATING" -> "Star rating from another player"
+        "PCNT" -> "Play count from another player"
+        "TPUB", "ORGANIZATION", "LABEL" -> "Publisher"
+        "TSRC", "ISRC" -> "ISRC code"
+        "MCDI" -> "CD it was copied from"
+        "UFID" -> "Code from a music catalogue"
+        "TDRC", "TYER", "DATE" -> "Date"
+        "TDAT", "TIME", "TRDA" -> "Date recorded"
+        "TOAL" -> "First album"
+        "TOPE" -> "First artist"
+        "TSOP", "TSOA", "TSOT", "TSO2", "ARTISTSORT", "ALBUMSORT", "TITLESORT" -> "Name for sorting"
+        "ITUNNORM", "COMM" -> "Comment"
+        "----" -> "Note from iTunes"
+        else -> "Other detail"
+    } + " · " + id
 
     /** The search: Apple and Deezer in the app, each find with its cover; then the web, web pictures, Spotify and the phone. */
     @Composable

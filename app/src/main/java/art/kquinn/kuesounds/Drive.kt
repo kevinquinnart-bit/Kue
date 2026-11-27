@@ -139,6 +139,30 @@ object Drive {
         }
     }
 
+    /** A file's size as the Drive has it now, or -1 when it can't be asked. Call off the main thread. */
+    fun sizeNow(id: String, token: String): Long = runCatching {
+        val request = Request.Builder().url("$API/$id?fields=size").header("Authorization", "Bearer $token").build()
+        http.newCall(request).execute().use { r ->
+            if (!r.isSuccessful) return -1L
+            JsonParser.parseString(r.body.string()).asJsonObject.get("size")?.asLong ?: -1L
+        }
+    }.getOrDefault(-1L)
+
+    /**
+     * Downloads a file whole and checks it is all there, against the size the Drive gives for it NOW (27 November 2026:
+     * "Haunted: the download was cut short" when the size kept in KueSounds was out of date). A short download is tried
+     * once more. The answer is the file's real size. Call off the main thread.
+     */
+    fun downloadChecked(id: String, target: File, token: String, known: Long): Long {
+        val want = sizeNow(id, token).takeIf { it > 0 } ?: known
+        repeat(2) { attempt ->
+            downloadWhole(id, target, token)
+            if (want <= 0 || target.length() == want) return target.length()
+            if (attempt == 1) throw IOException("the download was cut short (" + target.length() + " of " + want + " bytes)")
+        }
+        return target.length()
+    }
+
     /**
      * Puts [file] back in the Drive as the new version of the same file (same name, same folder, same
      * place in the person's Drive). Google keeps the old version for 30 days. Gives back the file's new

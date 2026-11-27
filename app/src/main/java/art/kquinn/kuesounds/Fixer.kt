@@ -286,8 +286,7 @@ object Fixer {
         val albumChanged = e.album != t.album || e.albumArtist != Library.albumArtistOf(t)
         return try {
             val token = Google.editToken() ?: throw Drive.SignedOut()
-            Drive.downloadWhole(t.id, file, token)
-            if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
+            Drive.downloadChecked(t.id, file, token, t.size)
             writeDetails(file, t, Tagger.Details(e.title, e.artist, e.album, e.albumArtist, e.year, e.trackNo, e.discNo, cover), token)
             val named = t.copy(title = e.title, artist = e.artist)
             val newName = fileNameFor(named, e.title, e.artist)
@@ -322,7 +321,7 @@ object Fixer {
         val file = File(work, t.id + "." + Library.ending(Library.realName(t)).ifEmpty { "audio" })
         try {
             val token = Google.token() ?: throw Drive.SignedOut()
-            Drive.downloadWhole(t.id, file, token)
+            Drive.downloadChecked(t.id, file, token, t.size)
             return Tagger.readAll(file)
         } finally {
             file.delete()
@@ -341,13 +340,13 @@ object Fixer {
         val problems = ArrayList<String>()
         val couldNotHold = LinkedHashSet<String>()
         try {
-            for (t in tracks) {
+            for (t0 in tracks) {
+                val t = Scanner.data.tracks.firstOrNull { it.id == t0.id } ?: t0
                 if (!Tagger.canFix(Library.realName(t))) { problems += t.title + ": KueSounds can't write into this kind of file"; continue }
                 val file = File(work, t.id + "." + Library.ending(Library.realName(t)))
                 try {
                     val token = Google.editToken() ?: throw Drive.SignedOut()
-                    Drive.downloadWhole(t.id, file, token)
-                    if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
+                    Drive.downloadChecked(t.id, file, token, t.size)
                     val seconds = (t.durationMs / 1000).toInt()
                     couldNotHold += try {
                         Tagger.edit(file, set, remove, coverFile, seconds)
@@ -500,8 +499,7 @@ object Fixer {
         val file = File(work, t.id + "." + Library.ending(Library.realName(t)))
         return try {
             val token = Google.editToken() ?: throw Drive.SignedOut()
-            Drive.downloadWhole(t.id, file, token)
-            if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
+            Drive.downloadChecked(t.id, file, token, t.size)
             val artist = t.albumArtist.ifBlank { al.artist }
             // The catalogue's name and artist for this song when the album lists it; otherwise the file's own.
             // A name put right by hand is kept.
