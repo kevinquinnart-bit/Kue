@@ -176,6 +176,7 @@ object ReviewUi {
             Ui.Words(item.why, 14, K.Accent)
 
             val a = answer
+            if (a == null) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel)) { Hear(t) }
             when {
                 finding.isNotEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
@@ -184,10 +185,11 @@ object ReviewUi {
                 a != null -> {
                     Ui.Words("KueSounds suggests, from " + a.from + ":", 15, K.Soft)
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        AsyncImage(
-                            model = a.big.ifBlank { null }, contentDescription = null, contentScale = ContentScale.Crop,
-                            modifier = Modifier.size(240.dp).clip(RoundedCornerShape(16.dp)).background(K.Panel).border(2.dp, K.Accent, RoundedCornerShape(16.dp)),
-                        )
+                        Box(Modifier.size(240.dp).clip(RoundedCornerShape(16.dp)).background(K.Panel).border(2.dp, K.Accent, RoundedCornerShape(16.dp))) {
+                            AsyncImage(model = a.big.ifBlank { null }, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            // Hear it before deciding (Kevin, 27 November 2026): play, pause and a slider over the cover.
+                            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))) { Hear(t) }
+                        }
                     }
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         for ((k, label, v) in changesOf(item, a, now.orEmpty())) {
@@ -231,6 +233,44 @@ object ReviewUi {
                     Ui.Button("Skip for now", main = false, modifier = Modifier.fillMaxWidth()) { onDone("skipped") }
                 }
             }
+        }
+    }
+
+    /**
+     * Play, pause and a slider for one song, as thin as the player's own (no big buttons). Plays through the normal
+     * player; moving on to the next one stops it.
+     */
+    @Composable
+    private fun Hear(t: Track) {
+        val mine = Playing.currentId == t.id
+        var position by remember { mutableStateOf(0L) }
+        var dragging by remember { mutableStateOf(false) }
+        var dragAt by remember { mutableStateOf(0f) }
+        LaunchedEffect(mine) {
+            while (mine) { if (!dragging) position = Playing.positionMs(); kotlinx.coroutines.delay(500) }
+        }
+        DisposableEffect(t.id) { onDispose { if (Playing.currentId == t.id && Playing.isPlaying) Playing.pause() } }
+        val duration = if (mine) Playing.durationMs else t.durationMs
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clickable(onClickLabel = if (mine && Playing.isPlaying) "Pause" else "Play") {
+                    if (mine) Playing.toggle() else Playing.play(listOf(t), 0)
+                },
+                contentAlignment = Alignment.Center,
+            ) { Sign(if (mine && Playing.isPlaying) Glyph.PAUSE else Glyph.PLAY, 24.dp, K.Ink) }
+            androidx.compose.material3.Slider(
+                value = if (dragging) dragAt else if (mine && duration > 0) (position.toFloat() / duration).coerceIn(0f, 1f) else 0f,
+                onValueChange = { dragging = true; dragAt = it },
+                onValueChangeFinished = {
+                    if (mine) { Playing.seekTo((dragAt * duration).toLong()); position = (dragAt * duration).toLong() }
+                    dragging = false
+                },
+                enabled = mine,
+                colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = K.Ink, activeTrackColor = K.Accent, inactiveTrackColor = K.Raised, disabledThumbColor = K.Soft, disabledInactiveTrackColor = K.Raised),
+                modifier = Modifier.weight(1f),
+            )
+            Spacer(Modifier.width(6.dp))
+            Ui.Words(Library.clock(if (mine) (if (dragging) (dragAt * duration).toLong() else position) else duration), 12, K.Ink)
         }
     }
 
