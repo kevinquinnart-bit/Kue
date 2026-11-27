@@ -589,7 +589,7 @@ object Ui {
     }
 
     @Composable
-    private fun Cover(file: File?, modifier: Modifier, corner: Dp = 14.dp, glyphSize: Dp = 40.dp, glyph: Glyph = Glyph.DISC, round: Boolean = false) {
+    internal fun Cover(file: File?, modifier: Modifier, corner: Dp = 14.dp, glyphSize: Dp = 40.dp, glyph: Glyph = Glyph.DISC, round: Boolean = false) {
         Box(modifier.clip(if (round) CircleShape else RoundedCornerShape(corner)).background(K.Panel), contentAlignment = Alignment.Center) {
             if (file != null) {
                 AsyncImage(model = file, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
@@ -1127,6 +1127,10 @@ object Ui {
                         }
                     }
                 }
+                // Every detail in the file, look-ups and the cover in one place (Kevin, 27 November 2026: "full access").
+                var byHand by remember { mutableStateOf(false) }
+                if (byHand) FixByHandUi.Page(listOf(t), null, Scanner.data.fixProblems[t.id].orEmpty()) { byHand = false }
+                Button("Everything in the file, and look it up", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { byHand = true }
                 if (busy.isNotEmpty() && busy != "listen") Working(busy)
                 if (saying.isNotEmpty()) Words(saying, 14, K.Accent)
                 if (changed && busy.isEmpty()) {
@@ -1883,50 +1887,41 @@ object Ui {
     @Composable
     private fun FinalList(view: Scanner.LibraryView, go: (Screen) -> Unit) {
         val data = Scanner.data
-        var held by remember { mutableStateOf<Track?>(null) }
-        held?.let { t -> SongBox(t, go) { held = null } }
         // Fixed means the right names AND a cover (Kevin, 26 November 2026: "fixed" was counting songs with no cover).
         val fixed = remember(data) { data.tracks.count { it.fixed && it.fixedFully } }
         val noCover = remember(data) { Scanner.noCover(data) }
         val notFixed = remember(data, view, Scanner.running) { Scanner.notFixed(view, data) }
-        var picking by remember { mutableStateOf<Album?>(null) }
-        picking?.let { al -> CoverPicker(al) { picking = null } }
+        // One list for everything not fixed, each opening the same page (Kevin, 27 November 2026: "the options for the 54
+        // and 2 not fixed should be the same as all are not fixed still").
+        var fixing by remember { mutableStateOf<Triple<List<Track>, String?, String>?>(null) }
+        fixing?.let { (songs, album, why) -> FixByHandUi.Page(songs, album, why) { fixing = null } }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             KueSettings.Icon(KueSettings.Icons.TICK, 20.dp, K.Accent, 2.6f)
             Words("Fixed, with names and cover: " + count(fixed, "song"), 16, bold = true)
         }
-        if (noCover.isNotEmpty()) {
-            Words("Names written, no cover found yet: " + count(noCover.size, "album"), 16, K.Accent, bold = true)
-            for (al in noCover.take(60)) {
-                Row(
-                    Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable { picking = al }.padding(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Words(al.title, 15, bold = true)
-                        Words(al.artist + " · tap to choose its cover", 13, K.Soft)
-                    }
-                    KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
-                }
-            }
-            if (noCover.size > 60) Words("And " + String.format("%,d", noCover.size - 60) + " more.", 14, K.Soft)
-        }
-        if (notFixed.isEmpty()) return
-        Words("Not fixed: " + count(notFixed.size, "song"), 16, K.Accent, bold = true)
-        for ((t, why) in notFixed.take(100)) {
+        val total = noCover.size + notFixed.size
+        if (total == 0) return
+        Words("Not fixed: " + total + ". Tap one to fix it by hand.", 16, K.Accent, bold = true)
+        @Composable
+        fun Item(title: String, sub: String, why: String, onTap: () -> Unit) {
             Row(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable { held = t }.padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).clickable(onClick = onTap).padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
-                    Words(t.title, 15, bold = true)
-                    Words(t.artist + " · " + t.fileName, 13, K.Soft)
+                    Words(title, 15, bold = true)
+                    Words(sub, 13, K.Soft)
                     Words(why, 13, K.Accent)
                 }
-                MoreButton("Everything you can do with it") { held = t }
+                KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
             }
         }
-        if (notFixed.size > 100) Words("And " + String.format("%,d", notFixed.size - 100) + " more.", 14, K.Soft)
+        for ((t, why) in notFixed.take(100)) Item(t.title, t.artist + " · " + t.fileName, why) { fixing = Triple(listOf(t), null, why) }
+        for (al in noCover.take(100)) {
+            val why = "No cover found anywhere."
+            Item(al.title, al.artist + " · " + count(al.tracks.size, "song"), why) { fixing = Triple(al.tracks, al.title, why) }
+        }
+        if (total > 200) Words("And " + String.format("%,d", total - 200) + " more.", 14, K.Soft)
     }
 
     @Composable
@@ -2637,9 +2632,10 @@ object Ui {
                             15, bold = true,
                         )
                         if (retrying > 0) Words(count(retrying, "song") + " to try again: press Look for new music below.", 14, K.Accent)
-                        if (noCovers > 0) Words(count(noCovers, "album") + " with no cover anywhere: tap one in the list below to choose its cover.", 14, K.Accent)
-                        if (stuckNow > 0) Words(count(stuckNow, "song") + " couldn't be fixed: the reason is under each one below.", 14, K.Accent)
-                        if (retrying == 0 && noCovers == 0 && stuckNow == 0) Words("Every song has its right name and cover.", 14)
+                        // Everything KueSounds couldn't finish is in one list, fixed by hand (Kevin, 27 November 2026).
+                        val left = noCovers + stuckNow
+                        if (left > 0) Words("Not fixed: $left. KueSounds has tried everything it can. Fix each by hand from the list below: listen with Shazam, look it up, or change anything in the file.", 14, K.Accent)
+                        if (retrying == 0 && left == 0) Words("Every song has its right name and cover.", 14)
                     }
                 }
             }
@@ -2882,7 +2878,7 @@ object Ui {
                 open == "app", look, { toggle("app") },
             ) {
                 // What is happening shows on the closed section (Kevin, 26 November 2026: steps 1 to 4).
-                val notFixedCount = remember(data, view, Scanner.running) { Scanner.notFixed(view, data).size }
+                val notFixedCount = remember(data, view, Scanner.running) { Scanner.notFixed(view, data).size + Scanner.noCover(data).size }
                 val fixNote = when {
                     Scanner.running -> when (Scanner.stage) { 1, 2 -> "Reading your Drive"; 3 -> "Step 1 of 4"; 4 -> "Step 2 of 4"; 5 -> "Step 3 of 4"; 7 -> "Step 4 of 4"; else -> "Extra details" }
                     Fixer.running -> "Step 4 of 4"

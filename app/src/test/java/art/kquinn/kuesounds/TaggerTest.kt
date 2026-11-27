@@ -89,4 +89,34 @@ class TaggerTest {
         Tagger.fix(f, Tagger.Details("Right Song", "Right Singer", "Right Album", "Right Artist", 1995, 3, 1, right), knownSeconds = real)
         assertEquals("Right Album", Tagger.read(f).album)
     }
+
+    // Fix it by hand (27 November 2026): only what is changed changes; everything else in the file stays.
+    private fun editsByHand(name: String) {
+        val f = File("build/tagger-out", "hand-" + name).also { copyOf(name).copyTo(it, overwrite = true) }
+        org.jaudiotagger.audio.AudioFileIO.read(f).let { a ->
+            a.tagOrCreateAndSetDefault.setField(org.jaudiotagger.tag.FieldKey.COMMENT, "Keep this")
+            org.jaudiotagger.audio.AudioFileIO.write(a)
+        }
+        val before = Tagger.readAll(f)
+        assertEquals("Keep this", before.known[org.jaudiotagger.tag.FieldKey.COMMENT])
+        val cannot = Tagger.edit(
+            f,
+            mapOf(org.jaudiotagger.tag.FieldKey.TITLE to "By Hand", org.jaudiotagger.tag.FieldKey.GENRE to "Folk", org.jaudiotagger.tag.FieldKey.ALBUM to "Hand Album"),
+            emptySet(), right,
+        )
+        assertTrue(cannot.isEmpty())
+        val after = Tagger.readAll(f)
+        assertEquals("By Hand", after.known[org.jaudiotagger.tag.FieldKey.TITLE])
+        assertEquals("Folk", after.known[org.jaudiotagger.tag.FieldKey.GENRE])
+        assertEquals("Hand Album", after.known[org.jaudiotagger.tag.FieldKey.ALBUM])
+        assertEquals("Keep this", after.known[org.jaudiotagger.tag.FieldKey.COMMENT])
+        assertArrayEquals(right.readBytes(), after.picture)
+        assertEquals(before.lengthSeconds, after.lengthSeconds)
+    }
+
+    @Test fun mp3ByHand() = editsByHand("song.mp3")
+
+    @Test fun m4aByHand() = editsByHand("song.m4a")
+
+    @Test fun flacByHand() = editsByHand("song.flac")
 }

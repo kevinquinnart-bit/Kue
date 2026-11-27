@@ -2,6 +2,7 @@ package art.kquinn.kuesounds
 
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 
@@ -32,5 +33,23 @@ class Mp3SoundTest {
     @Test fun aChangedSoundIsSeen() {
         val changed = frames.copyOf().also { it[1000] = (it[1000] + 1).toByte() }
         assertFalse(Tagger.mp3Sound(file(id3v2(300) + frames)).contentEquals(Tagger.mp3Sound(file(id3v2(300) + changed))))
+    }
+
+    // 27 November 2026: the two songs were still left after the check above. Files of two kinds the check misjudged,
+    // made here as 3-second tones and changed by the tag library itself (before = as made, after = as it wrote them).
+    private fun res(name: String) = javaClass.getResourceAsStream("/mp3/$name")!!.readBytes()
+
+    @Test fun strayBytesBeforeTheSoundAreNotSound() = assertTrue(Tagger.soundKept(res("junk_before.mp3"), res("junk_after.mp3")))
+
+    @Test fun aPictureWithAWrongSizeIsNotSound() = assertTrue(Tagger.soundKept(res("badsize_before.mp3"), res("badsize_after.mp3")))
+
+    @Test fun soundCutOffAtTheStartIsCaught() = assertFalse(Tagger.soundKept(res("base_before.mp3"), res("cut_after.mp3")))
+
+    @Test fun fixingSuchFilesWorks() {
+        for (name in listOf("junk_before.mp3", "badsize_before.mp3")) {
+            val f = file(res(name))
+            Tagger.fix(f, Tagger.Details("Haunted", "Shane MacGowan", "Test", "Shane MacGowan", 1995, 1, 1, null))
+            assertTrue(Tagger.soundKept(res(name), f.readBytes()))
+        }
     }
 }

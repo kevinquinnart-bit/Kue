@@ -82,7 +82,7 @@ object Tagger {
 
     private fun write(file: File, d: Details, knownSeconds: Int) {
         val length = runCatching { AudioFileIO.read(file).audioHeader?.trackLength ?: 0 }.getOrDefault(0)
-        val soundBefore = if (Library.ending(file.name) == "mp3") runCatching { mp3Sound(file) }.getOrNull() else null
+        val bytesBefore = if (Library.ending(file.name) == "mp3") runCatching { file.readBytes() }.getOrNull() else null
         // Everything written inside the file goes: every kind of details block it holds, and its pictures.
         AudioFileIO.delete(AudioFileIO.read(file))
         val clean = AudioFileIO.read(file)
@@ -110,17 +110,90 @@ object Tagger {
         // an MP3's length can be thrown off by what was inside it before (Kevin's "Walk Like An Egyptian", 24-25 Nov 2026).
         // An MP3 whose sound is byte for byte as it was is right, whatever length the tag library reads (26 November 2026:
         // "Haunted" and "Sunday Game Theme Tune" were left unfixed on a misread length, with nothing wrong with them).
-        val soundSame = soundBefore != null && runCatching { mp3Sound(file) }.getOrNull()?.contentEquals(soundBefore) == true
+        // 27 November 2026: they were still left, the byte-for-byte check starting at the wrong place in files with stray
+        // bytes before the sound; now the sound is matched from its end (soundKept).
+        val soundSame = bytesBefore != null && runCatching { soundKept(bytesBefore, file.readBytes()) }.getOrDefault(false)
         check(soundSame || kotlin.math.abs(after.lengthSeconds - length) <= 1 || (knownSeconds > 0 && kotlin.math.abs(after.lengthSeconds - knownSeconds) <= 2)) { "the song's length changed" }
     }
 
     /**
-     * A fingerprint of an MP3's sound alone: every byte from its first sound frame to its end, with the details blocks
-     * around it (ID3v2 at the front; ID3v1, APE and Lyrics3 at the back) left out. Two files with the same answer
-     * hold exactly the same sound.
+     * Everything written in a file, for Fix it by hand (Kevin, 27 November 2026: "I need full access to the meta data in
+     * the file"). [known] are the details every kind of file can hold, by name; [other] are any other text details the
+     * file holds, by the file's own code for them; [picture] is the first picture inside.
      */
-    fun mp3Sound(file: File): ByteArray {
-        val b = file.readBytes()
+    data class All(val known: Map<FieldKey, String>, val other: List<Pair<String, String>>, val picture: ByteArray?, val lengthSeconds: Int)
+
+    /** The details shown by name, in this order, with the words used for them. */
+    val named: List<Pair<FieldKey, String>> = listOf(
+        FieldKey.TITLE to "Song name", FieldKey.ARTIST to "Artist", FieldKey.ALBUM to "Album", FieldKey.ALBUM_ARTIST to "Album artist",
+        FieldKey.YEAR to "Year", FieldKey.TRACK to "Track number", FieldKey.TRACK_TOTAL to "Tracks on the album", FieldKey.DISC_NO to "Disc",
+        FieldKey.DISC_TOTAL to "Discs", FieldKey.GENRE to "Kind of music", FieldKey.COMPOSER to "Written by", FieldKey.LYRICIST to "Words by",
+        FieldKey.CONDUCTOR to "Conductor", FieldKey.RECORD_LABEL to "Record label", FieldKey.CATALOG_NO to "Catalogue number",
+        FieldKey.ORIGINAL_YEAR to "First out", FieldKey.COMMENT to "Comment", FieldKey.LYRICS to "Lyrics", FieldKey.BPM to "Beats a minute",
+        FieldKey.ISRC to "ISRC code", FieldKey.GROUPING to "Grouping", FieldKey.LANGUAGE to "Language", FieldKey.MOOD to "Mood",
+    )
+
+    fun readAll(file: File): All {
+        val audio = AudioFileIO.read(file)
+        val tag = audio.tag
+        val known = LinkedHashMap<FieldKey, String>()
+        val knownIds = HashSet<String>()
+        for ((k, _) in named) {
+            val v = runCatching { tag?.getFirst(k) }.getOrNull().orEmpty()
+            known[k] = v
+            runCatching { tag?.getFields(k).orEmpty().forEach { knownIds += it.id } }
+        }
+        val other = ArrayList<Pair<String, String>>()
+        tag?.fields?.forEach { f ->
+            if (f.isBinary || f.id in knownIds) return@forEach
+            val text = (f as? org.jaudiotagger.tag.TagTextField)?.content ?: f.toString()
+            if (text.isNotBlank() && text.length < 2000) other += f.id to text
+        }
+        return All(known, other, runCatching { tag?.firstArtwork?.binaryData }.getOrNull(), audio.audioHeader?.trackLength ?: 0)
+    }
+
+    /**
+     * Changes the details in [file] as given by hand, leaving everything else in it as it is: [set] details are written
+     * (a blank one is taken out), [remove] are other details taken out by their code, and [cover] (when given) becomes
+     * the one picture. An MP3's old second block of details (ID3v1, which some players read first) is taken out so it
+     * can't show the old names. Checked the same way as [fix]; throws when the check fails. The answer is the details
+     * this kind of file can't hold, by name (none, mostly).
+     */
+    fun edit(file: File, set: Map<FieldKey, String>, remove: Set<String>, cover: File?, knownSeconds: Int = 0): List<String> {
+        val length = runCatching { AudioFileIO.read(file).audioHeader?.trackLength ?: 0 }.getOrDefault(0)
+        val bytesBefore = if (Library.ending(file.name) == "mp3") runCatching { file.readBytes() }.getOrNull() else null
+        val audio = AudioFileIO.read(file)
+        val tag = audio.tagOrCreateAndSetDefault
+        val failed = HashSet<FieldKey>()
+        for ((k, v) in set) {
+            runCatching { if (v.isBlank()) tag.deleteField(k) else tag.setField(k, v.trim()) }.onFailure { failed += k }
+        }
+        for (id in remove) runCatching { tag.deleteField(id) }
+        if (cover != null) {
+            runCatching { tag.deleteArtworkField() }
+            val art = CoverArt().apply { setFromFile(cover) }
+            art.pictureType = PictureTypes.DEFAULT_ID
+            art.description = ""
+            tag.setField(art)
+        }
+        if (audio is org.jaudiotagger.audio.mp3.MP3File && audio.hasID3v1Tag()) audio.setID3v1Tag(null as org.jaudiotagger.tag.id3.ID3v1Tag?)
+        AudioFileIO.write(audio)
+
+        val back = AudioFileIO.read(file)
+        for (k in listOf(FieldKey.TITLE, FieldKey.ARTIST, FieldKey.ALBUM)) {
+            val want = set[k]?.trim() ?: continue
+            if (k in failed) continue
+            check(runCatching { back.tag?.getFirst(k) }.getOrNull().orEmpty() == want) { (named.first { it.first == k }.second) + " didn't stick" }
+        }
+        if (cover != null) check(back.tag?.artworkList.orEmpty().size == 1) { "the cover didn't stick" }
+        val after = back.audioHeader?.trackLength ?: 0
+        val soundSame = bytesBefore != null && runCatching { soundKept(bytesBefore, file.readBytes()) }.getOrDefault(false)
+        check(soundSame || kotlin.math.abs(after - length) <= 1 || (knownSeconds > 0 && kotlin.math.abs(after - knownSeconds) <= 2)) { "the song's length changed" }
+        return failed.map { k -> named.firstOrNull { it.first == k }?.second ?: k.name }
+    }
+
+    /** Where an MP3's sound starts and ends: from its first frame to the end, with the details blocks round it left out. */
+    fun mp3Span(b: ByteArray): Pair<Int, Int> {
         var start = 0
         while (start + 10 <= b.size && b[start] == 'I'.code.toByte() && b[start + 1] == 'D'.code.toByte() && b[start + 2] == '3'.code.toByte()) {
             val size = ((b[start + 6].toInt() and 0x7F) shl 21) or ((b[start + 7].toInt() and 0x7F) shl 14) or
@@ -147,10 +220,86 @@ object Tagger {
                 if (size != null) { end -= size + 15; changed = true }
             }
         }
+        return start to maxOf(start, end)
+    }
+
+    /** A fingerprint of an MP3's sound alone. Two files with the same answer hold exactly the same sound. */
+    fun mp3Sound(file: File): ByteArray {
+        val b = file.readBytes()
+        val (start, end) = mp3Span(b)
         if (end <= start) return ByteArray(0)
         val md = java.security.MessageDigest.getInstance("SHA-256")
         md.update(b, start, end - start)
         return md.digest()
+    }
+
+    /**
+     * True when the MP3 [after] still holds all the sound of [before] (27 November 2026). The sound must be the same
+     * bytes through to the end; the tag library may only have cleared away bytes in front that are not sound: stray
+     * bytes between the details and the first frame, or the end of a picture whose size was written wrong. Proved on
+     * test files of both kinds made with the tag library itself; a file with real frames cut off is caught.
+     */
+    fun soundKept(before: ByteArray, after: ByteArray): Boolean {
+        val (os, oe) = mp3Span(before)
+        val (ns, ne) = mp3Span(after)
+        val oLen = oe - os
+        val nLen = ne - ns
+        if (nLen <= 0 || nLen > oLen) return false
+        val drop = oLen - nLen
+        if (java.nio.ByteBuffer.wrap(before, os + drop, nLen) != java.nio.ByteBuffer.wrap(after, ns, nLen)) return false
+        return drop == 0 || !hasFrames(before, os, os + drop)
+    }
+
+    /** Three MPEG sound frames in a row starting between [from] and [to], each where the one before ends: real sound. */
+    private fun hasFrames(b: ByteArray, from: Int, to: Int): Boolean {
+        for (i in from until to) {
+            val (len, kind) = frame(b, i)
+            if (len <= 0) continue
+            var j = i + len
+            var run = 1
+            while (run < 3) {
+                val (n, k) = frame(b, j)
+                if (n <= 0 || k != kind) break
+                j += n
+                run++
+            }
+            if (run >= 3) return true
+        }
+        return false
+    }
+
+    private val rates1 = intArrayOf(44100, 48000, 32000)
+    private val rates2 = intArrayOf(22050, 24000, 16000)
+    private val rates25 = intArrayOf(11025, 12000, 8000)
+    private val kbps = mapOf(
+        "1-1" to intArrayOf(0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448),
+        "1-2" to intArrayOf(0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384),
+        "1-3" to intArrayOf(0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320),
+        "2-1" to intArrayOf(0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256),
+        "2-2" to intArrayOf(0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+    )
+
+    /** The length of the MPEG frame starting at [i] (0 when none) and its kind (version, layer, sample rate). */
+    private fun frame(b: ByteArray, i: Int): Pair<Int, Int> {
+        if (i < 0 || i + 4 > b.size) return 0 to 0
+        val h = ((b[i].toInt() and 0xFF) shl 24) or ((b[i + 1].toInt() and 0xFF) shl 16) or ((b[i + 2].toInt() and 0xFF) shl 8) or (b[i + 3].toInt() and 0xFF)
+        if ((h ushr 21) and 0x7FF != 0x7FF) return 0 to 0
+        val ver = (h ushr 19) and 3
+        val layerBits = (h ushr 17) and 3
+        val br = (h ushr 12) and 0xF
+        val sr = (h ushr 10) and 3
+        val pad = (h ushr 9) and 1
+        if (ver == 1 || layerBits == 0 || br == 0 || br == 15 || sr == 3) return 0 to 0
+        val layer = 4 - layerBits
+        val table = if (ver == 3) "1-$layer" else if (layer == 1) "2-1" else "2-2"
+        val bitrate = kbps.getValue(table)[br] * 1000
+        val rate = (if (ver == 3) rates1 else if (ver == 2) rates2 else rates25)[sr]
+        val len = when {
+            layer == 1 -> (12 * bitrate / rate + pad) * 4
+            layer == 3 && ver != 3 -> 72 * bitrate / rate + pad
+            else -> 144 * bitrate / rate + pad
+        }
+        return len to (h and 0xFFFE0C00.toInt())
     }
 
     /**

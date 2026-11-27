@@ -39,4 +39,25 @@ class CoversTest {
         assertTrue(Covers.same("A Mothers Son", "A Mother's Son"))
         assertFalse(Covers.same("Steam", "Stay Another Day"))
     }
+
+    // Fix it by hand, 27 November 2026: whole finds, names, album, year and cover, from live answers saved that day.
+    @Test fun appleSongsForFixByHand() {
+        val got = Covers.parseItunesLookups(text("itunes_song_fureys.json"))
+        assertEquals(3, got.size)
+        val first = got.first()
+        assertEquals("A Drop of Irish Rain (feat. Ronnie Drew and Finbar Furey)", first.title)
+        assertEquals("Francie Conway", first.artist)
+        assertEquals("The Green Album", first.album)
+        assertEquals("2010", first.year)
+        assertEquals(2, first.trackNo)
+        assertTrue(first.big.endsWith("1000x1000bb.jpg"))
+    }
+
+    @Test fun deezerSongsForFixByHand() {
+        val got = Covers.parseDeezerLookups(text("deezer_track_haunted.json"))
+        assertEquals("Haunted", got.first().title)
+        assertEquals("Shane MacGowan", got.first().artist)
+        assertEquals("Haunted", got.first().album)
+        assertTrue(got.first().big.isNotEmpty())
+    }
 }

@@ -316,6 +316,100 @@ object Fixer {
         }
     }
 
+    /** What a file holds, read from the Drive for Fix it by hand. Call off the main thread. */
+    suspend fun readFile(context: Context, t: Track): Tagger.All {
+        val work = File(context.cacheDir, "look").apply { mkdirs() }
+        val file = File(work, t.id + "." + Library.ending(Library.realName(t)).ifEmpty { "audio" })
+        try {
+            val token = Google.token() ?: throw Drive.SignedOut()
+            Drive.downloadWhole(t.id, file, token)
+            return Tagger.readAll(file)
+        } finally {
+            file.delete()
+        }
+    }
+
+    /**
+     * Fix it by hand (Kevin, 27 November 2026): the details set by hand written into each of [tracks] in the Drive,
+     * leaving everything else in the files as it is; [cover] (when given) becomes each file's one picture and its album's
+     * cover in KueSounds. A file whose song name or artist changed is named after the song. The answer is what to say.
+     */
+    suspend fun saveByHand(context: Context, tracks: List<Track>, set: Map<org.jaudiotagger.tag.FieldKey, String>, remove: Set<String>, cover: ByteArray?): String {
+        val work = File(context.cacheDir, "fix").apply { mkdirs() }
+        val coverFile = cover?.let { b -> File(work, "hand-cover.jpg").apply { writeBytes(b) } }
+        var done = 0
+        val problems = ArrayList<String>()
+        val couldNotHold = LinkedHashSet<String>()
+        try {
+            for (t in tracks) {
+                if (!Tagger.canFix(Library.realName(t))) { problems += t.title + ": KueSounds can't write into this kind of file"; continue }
+                val file = File(work, t.id + "." + Library.ending(Library.realName(t)))
+                try {
+                    val token = Google.editToken() ?: throw Drive.SignedOut()
+                    Drive.downloadWhole(t.id, file, token)
+                    if (t.size > 0 && file.length() != t.size) throw java.io.IOException("the download was cut short")
+                    val seconds = (t.durationMs / 1000).toInt()
+                    couldNotHold += try {
+                        Tagger.edit(file, set, remove, coverFile, seconds)
+                    } catch (first: Exception) {
+                        if (Library.ending(file.name) !in setOf("m4a", "m4b", "mp4")) throw first
+                        // An M4A the tag library can't change: its sound copied into a fresh file first, as when fixing.
+                        Drive.downloadWhole(t.id, file, token)
+                        val fresh = File(work, t.id + ".rebuilt.m4a")
+                        try {
+                            if (!rebuildMp4(file, fresh)) throw first
+                            fresh.copyTo(file, overwrite = true)
+                        } finally { fresh.delete() }
+                        Tagger.edit(file, set, remove, coverFile, 0)
+                    }
+                    fun v(key: org.jaudiotagger.tag.FieldKey) = set[key]?.trim()
+                    val title = v(org.jaudiotagger.tag.FieldKey.TITLE) ?: t.title
+                    val artist = v(org.jaudiotagger.tag.FieldKey.ARTIST) ?: t.artist
+                    val newName = if (title != t.title || artist != t.artist) fileNameFor(t, title, artist) else null
+                    val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
+                    Scanner.changeTracks(setOf(t.id)) {
+                        it.copy(
+                            size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = artist,
+                            album = v(org.jaudiotagger.tag.FieldKey.ALBUM) ?: it.album,
+                            albumArtist = v(org.jaudiotagger.tag.FieldKey.ALBUM_ARTIST) ?: it.albumArtist,
+                            year = v(org.jaudiotagger.tag.FieldKey.YEAR)?.take(4)?.toIntOrNull() ?: if (v(org.jaudiotagger.tag.FieldKey.YEAR) == "") 0 else it.year,
+                            trackNo = v(org.jaudiotagger.tag.FieldKey.TRACK)?.substringBefore('/')?.toIntOrNull() ?: it.trackNo,
+                            discNo = v(org.jaudiotagger.tag.FieldKey.DISC_NO)?.substringBefore('/')?.toIntOrNull() ?: it.discNo,
+                            genre = v(org.jaudiotagger.tag.FieldKey.GENRE) ?: it.genre,
+                            composer = v(org.jaudiotagger.tag.FieldKey.COMPOSER) ?: it.composer,
+                            fileName = newName ?: it.fileName,
+                            // Set by hand: KueSounds keeps these names and doesn't look the album up again.
+                            named = true, ownLook = true, checked = true,
+                            fixed = true, fixedFully = cover != null || it.fixedFully,
+                        )
+                    }
+                    Scanner.fixTried(t.id, null)
+                    Scanner.note("fixed by hand: " + t.fileName + " → " + artist + " / " + title)
+                    done++
+                } catch (x: Drive.SignedOut) {
+                    return "Not saved: Google needs the edit permission. Press Write to the files once, then try again."
+                } catch (x: Exception) {
+                    Scanner.note("not fixed by hand: " + t.fileName + ": " + x.javaClass.simpleName + " " + x.message)
+                    problems += t.title + ": " + (x.message ?: x.javaClass.simpleName)
+                } finally {
+                    file.delete()
+                }
+            }
+            // The cover becomes the album's in KueSounds too, under the album's name as now saved.
+            if (cover != null && done > 0) Scanner.data.tracks.firstOrNull { it.id == tracks.first().id }?.let { t ->
+                Scanner.albumOf(t)?.let { Scanner.setCover(it, cover) }
+            }
+        } finally {
+            coverFile?.delete()
+        }
+        return buildString {
+            append(if (done == tracks.size) (if (done == 1) "Saved into the file in your Drive." else "Saved into all $done files in your Drive.")
+                else "Saved into $done of ${tracks.size} files.")
+            if (couldNotHold.isNotEmpty()) append(" This kind of file can't hold: " + couldNotHold.joinToString(", ") + ".")
+            if (problems.isNotEmpty()) append(" Not saved: " + problems.joinToString("; ") + ".")
+        }
+    }
+
     /**
      * Writes [d] into [file]. An M4A that can't be written even after its sound is copied into a fresh file (Gordon
      * Lightfoot's "Live in Concert", 25-26 November 2026) has its sound made again as AAC at the same quality, once,

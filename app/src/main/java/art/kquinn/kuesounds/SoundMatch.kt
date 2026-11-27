@@ -63,6 +63,38 @@ object SoundMatch {
         return ask(Fingerprint.encode(fp), duration.toInt())
     }
 
+    /**
+     * Fix it by hand (Kevin, 27 November 2026: "play the song to Shazam"): Shazam is asked at up to four places in the
+     * song (a third in, near the start, half way, two thirds in) until one is named, then AcoustID if a key is set.
+     * [trying] says which place is being listened to. Call off the main thread.
+     */
+    fun identifyAnywhere(t: Track, trying: (String) -> Unit = {}): List<Found> {
+        val seconds = if (t.durationMs > 0) t.durationMs / 1000 else 0L
+        val places = if (seconds > 40) listOf(minOf(maxOf(20L, seconds / 3), seconds - 15), 8L, seconds / 2, seconds * 2 / 3).distinct()
+        else listOf(0L)
+        var last: Throwable? = null
+        places.forEachIndexed { i, from ->
+            trying("Listening at " + Library.clock(from * 1000) + " (" + (i + 1) + " of " + places.size + ")")
+            val got = runCatching {
+                val (pcm, have, rate, channels) = decode(t, from.toInt(), ShazamSig.SECONDS)
+                val mono = Fingerprint.toRate(pcm, have, rate, channels, ShazamSig.RATE)
+                if (mono.size < ShazamSig.RATE * 3) throw IOException("There wasn't enough sound to go on.")
+                Shazam.name(mono)
+            }
+            got.getOrNull()?.let { return listOf(it) }
+            last = got.exceptionOrNull() ?: last
+        }
+        if (key.isNotBlank()) {
+            trying("Asking AcoustID")
+            runCatching {
+                val (fp, secs) = listen(t)
+                if (fp.size >= 20) return ask(Fingerprint.encode(fp), (if (seconds > 0) seconds else secs.toLong()).coerceAtLeast(1).toInt())
+            }
+        }
+        last?.let { if (it is Drive.SignedOut) throw it }
+        return emptyList()
+    }
+
     /** AcoustID's fingerprint of the song's first two minutes. */
     private fun listen(t: Track): Pair<IntArray, Int> {
         val (pcm, have, rate, channels) = decode(t, 0, Fingerprint.SECONDS)

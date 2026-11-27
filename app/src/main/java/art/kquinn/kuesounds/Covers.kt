@@ -148,6 +148,66 @@ object Covers {
         }.getOrNull()?.takeIf { it.isNotBlank() }
     }
 
+    /**
+     * A find for Fix it by hand (Kevin, 27 November 2026: "find out what the best name and artwork to attach"): a song
+     * or album with everything the shop knows of it, to put into the file in one tap.
+     */
+    data class Lookup(
+        val title: String, val artist: String, val album: String, val albumArtist: String, val year: String,
+        val trackNo: Int, val discNo: Int, val genre: String, val small: String, val big: String, val from: String,
+    )
+
+    fun parseItunesLookups(json: String?): List<Lookup> = runCatching {
+        JsonParser.parseString(json ?: return emptyList()).asJsonObject.getAsJsonArray("results").mapNotNull { e ->
+            val o = e.asJsonObject
+            fun t(k: String) = o.get(k)?.takeIf { !it.isJsonNull }?.asString.orEmpty()
+            fun n(k: String) = o.get(k)?.takeIf { !it.isJsonNull }?.asInt ?: 0
+            val art = t("artworkUrl100").ifEmpty { return@mapNotNull null }
+            val song = o.get("wrapperType")?.asString == "track"
+            Lookup(
+                title = if (song) t("trackName") else "", artist = t("artistName"),
+                album = t("collectionName").removeSuffix(" - Single").removeSuffix(" - EP"),
+                albumArtist = t("collectionArtistName").ifEmpty { t("artistName") }, year = t("releaseDate").take(4),
+                trackNo = if (song) n("trackNumber") else 0, discNo = if (song) n("discNumber") else 0,
+                genre = t("primaryGenreName").takeIf { it != "Music" }.orEmpty(),
+                small = art.replace("100x100bb", "300x300bb"), big = art.replace("100x100bb", "1000x1000bb"), from = "Apple Music",
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    fun parseDeezerLookups(json: String?): List<Lookup> = runCatching {
+        JsonParser.parseString(json ?: return emptyList()).asJsonObject.getAsJsonArray("data").mapNotNull { e ->
+            val o = e.asJsonObject
+            val song = o.get("type")?.asString == "track"
+            val al = if (song) o.getAsJsonObject("album") else o
+            val big = al?.get("cover_xl")?.takeIf { !it.isJsonNull }?.asString ?: return@mapNotNull null
+            val artist = o.getAsJsonObject("artist")?.get("name")?.asString.orEmpty()
+            Lookup(
+                title = if (song) o.get("title")?.asString.orEmpty() else "", artist = artist, album = al.get("title")?.asString.orEmpty(),
+                albumArtist = artist, year = "", trackNo = 0, discNo = 0, genre = "",
+                small = al.get("cover_medium")?.takeIf { !it.isJsonNull }?.asString ?: big, big = big, from = "Deezer",
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    /** Songs (or albums) for [words] from Apple and Deezer, one of each in turn, the same record only once. Off the main thread. */
+    fun lookUp(words: String, songs: Boolean): List<Lookup> {
+        val apple = get("https://itunes.apple.com/search".toHttpUrl().newBuilder().addQueryParameter("term", words)
+            .addQueryParameter("entity", if (songs) "song" else "album").addQueryParameter("limit", "15").addQueryParameter("country", "gb").build())
+            .let { parseItunesLookups(it) }
+        val deezer = get(("https://api.deezer.com/search" + if (songs) "" else "/album").toHttpUrl().newBuilder().addQueryParameter("q", words).addQueryParameter("limit", "15").build())
+            .let { parseDeezerLookups(it) }
+        val out = ArrayList<Lookup>()
+        val seen = HashSet<String>()
+        for (i in 0 until maxOf(apple.size, deezer.size)) {
+            for (x in listOfNotNull(apple.getOrNull(i), deezer.getOrNull(i))) {
+                val key = Library.sortName(x.artist) + "|" + Library.sortName(x.album) + "|" + Library.sortName(x.title)
+                if (seen.add(key)) out += x
+            }
+        }
+        return out
+    }
+
     /** A cover's picture. Off the main thread. */
     fun download(url: String): ByteArray? = Smart.download(url)
 }
