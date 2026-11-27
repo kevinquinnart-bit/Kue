@@ -134,6 +134,8 @@ data class LibraryData(
     val kindFromWeb: Set<String> = emptySet(),
     /** Songs whose kind of music is now written in their file (Kevin, 27 November 2026), so each is written once. */
     val kindWritten: Set<String> = emptySet(),
+    /** Songs whose genre was looked for online for the genre check, found or not, so each is asked once. */
+    val kindTried: Set<String> = emptySet(),
 )
 
 object Library {
@@ -508,7 +510,7 @@ object Library {
             ownSingles = d.ownSingles ?: emptySet(), fixFailures = d.fixFailures ?: emptyMap(), fixProblems = d.fixProblems ?: emptyMap(),
             soundChecked = d.soundChecked ?: emptySet(), facts = d.facts ?: emptyMap(), soundMatched = d.soundMatched ?: emptySet(),
             artistPictures = d.artistPictures ?: emptyMap(), fixFailedAt = d.fixFailedAt ?: emptyMap(), artistSwept = d.artistSwept ?: emptySet(), coverTried = d.coverTried ?: emptySet(),
-            kindFromWeb = d.kindFromWeb ?: emptySet(), kindWritten = d.kindWritten ?: emptySet(),
+            kindFromWeb = d.kindFromWeb ?: emptySet(), kindWritten = d.kindWritten ?: emptySet(), kindTried = d.kindTried ?: emptySet(),
         )
     }
 

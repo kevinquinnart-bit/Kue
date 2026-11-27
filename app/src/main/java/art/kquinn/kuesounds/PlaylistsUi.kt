@@ -321,7 +321,7 @@ object ListUi {
                     item(key = "ideas") {
                         Column(Modifier.padding(start = 8.dp, top = 18.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Ui.Words("Suggested for this playlist", 19, bold = true)
-                            Ui.Words("From your music: the same artists and kinds of music.", 13, K.Soft)
+                            Ui.Words("From your music: the same artists and genres.", 13, K.Soft)
                         }
                     }
                     items(ideas.size, key = { "idea:" + ideas[it].id }) { n ->

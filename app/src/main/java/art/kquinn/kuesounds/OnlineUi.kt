@@ -136,7 +136,7 @@ object OnlineUi {
         }
         val shown = if (showing == "FAV") favs else list
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            item { Field("A station's name, or a kind of music", words, onDone = find) { words = it } }
+            item { Field("A station's name, or a genre", words, onDone = find) { words = it } }
             item {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     item { Chip("UK", showing == "GB") { showing = "GB" } }
@@ -161,7 +161,7 @@ object OnlineUi {
             }
             val g = groups
             when {
-                showing == "MUSIC" -> item { Ui.Words("Pick a kind of music.", 16, K.Soft) }
+                showing == "MUSIC" -> item { Ui.Words("Pick a genre.", 16, K.Soft) }
                 showing == "PLACES" || showing == "LANGUAGES" -> when {
                     g == null && problem.isEmpty() -> item { CircularProgressIndicator(color = K.Accent) }
                     g != null -> items(g, key = { "g:" + it.code }) { x ->

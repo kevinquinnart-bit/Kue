@@ -72,7 +72,7 @@ object ReviewUi {
             val title = best?.title ?: Library.withoutBrackets(now[FieldKey.TITLE].orEmpty().ifBlank { t.title })
             val who = best?.artist ?: artist
             trying("Looking up its album and cover")
-            val found = runCatching { Covers.lookUp((who + " " + title).trim(), true) }.getOrDefault(emptyList())
+            val found = runCatching { Covers.lookUp((who + " " + title).trim(), true, title) }.getOrDefault(emptyList())
             val match = found.firstOrNull { !it.coverOnly && Covers.same(Library.withoutBrackets(it.title), Library.withoutBrackets(title)) && (who.isBlank() || Covers.sameArtist(it.artist, who)) }
             best = when {
                 best == null -> match
@@ -110,12 +110,8 @@ object ReviewUi {
         var left by remember { mutableIntStateOf(0) }
         var skipped by remember { mutableIntStateOf(0) }
         Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Ui.PullBar(onClose)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Ui.Words(if (at < items.size) "Check " + (at + 1) + " of " + items.size else "All checked", 20, bold = true, modifier = Modifier.weight(1f))
-                    KueSettings.CloseButton(Ui.look, onClick = onClose)
-                }
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                KueSettings.PanelHeader(if (at < items.size) "Check " + (at + 1) + " of " + items.size else "All checked", Ui.look, onClose = onClose)
                 androidx.compose.material3.LinearProgressIndicator(
                     progress = { if (items.isEmpty()) 1f else at.toFloat() / items.size }, color = K.Accent, trackColor = K.Raised,
                     modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
@@ -153,15 +149,6 @@ object ReviewUi {
         // After a save: what is in the file now, read back from the Drive, to check before moving on (Kevin, 27 November
         // 2026: "needs to be a final check that all is ok before moving on").
         var savedTimes by remember { mutableIntStateOf(0) }
-        var after by remember { mutableStateOf<Tagger.All?>(null) }
-        var afterProblem by remember { mutableStateOf("") }
-        LaunchedEffect(savedTimes) {
-            if (savedTimes == 0) return@LaunchedEffect
-            after = null
-            afterProblem = ""
-            withContext(Dispatchers.IO) { runCatching { Fixer.readFile(context.applicationContext, t) } }
-                .onSuccess { after = it }.onFailure { afterProblem = "The file couldn't be read back: " + (it.message ?: it.javaClass.simpleName) }
-        }
 
         DisposableEffect(t.id) { onDispose { Fixer.dropCopy(context.applicationContext, t) } }
         LaunchedEffect(t.id) {
@@ -176,8 +163,8 @@ object ReviewUi {
         // An album of one song opens as that song, with every detail (Kevin, 27 November 2026: "only a short list").
         if (byHand) FixByHandUi.Page(item.songs, if (item.songs.size == 1) null else item.album, item.why) {
             byHand = false
-            // Saved in there: show what is in the file now, to check; otherwise it stays here to decide.
-            if (item.songs.all { s -> Scanner.data.tracks.firstOrNull { it.id == s.id }?.settled == true }) savedTimes++
+            // Saved in there: that page ended on the final check of the file, so this one is done.
+            if (item.songs.all { s -> Scanner.data.tracks.firstOrNull { it.id == s.id }?.settled == true }) onDone("saved")
         }
         if (sure) Confirm(
             "It's right as it is?",
@@ -186,79 +173,53 @@ object ReviewUi {
         )
 
         if (savedTimes > 0) {
-            Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Ui.Words("Saved. This is in the file now:", 17, bold = true)
-                val got = after
-                when {
-                    afterProblem.isNotEmpty() -> Ui.Words(afterProblem, 14, K.Accent)
-                    got == null -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
-                        Ui.Words("Reading the file back…", 15, K.Accent)
-                    }
-                    else -> {
-                        // The picture as it is inside the file itself, not the one found online.
-                        Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                            Box(Modifier.size(240.dp).clip(RoundedCornerShape(16.dp)).background(K.Panel).border(2.dp, K.Accent, RoundedCornerShape(16.dp))) {
-                                if (got.picture != null) AsyncImage(model = got.picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                                else Ui.Words("No picture in the file", 14, K.Soft, centre = true, modifier = Modifier.align(Alignment.Center))
-                                Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))) { Hear(t) }
-                            }
-                        }
-                        Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            for ((k, label) in Tagger.named) {
-                                val v = got.known[k].orEmpty()
-                                if (v.isBlank() || k == FieldKey.LYRICS) continue
-                                Row {
-                                    Ui.Words(label, 14, K.Soft, modifier = Modifier.width(124.dp))
-                                    Ui.Words(v, 15, modifier = Modifier.weight(1f))
-                                }
-                            }
-                            if (item.songs.size > 1) Ui.Words("Shown: its first song. All " + item.songs.size + " were saved.", 13, K.Soft)
-                        }
-                    }
-                }
+            // Saved: the file itself, read back, with its picture, before moving on.
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                key(savedTimes) { FileNow(t, item.songs.size, Modifier.weight(1f)) }
                 Ui.Button("All good, next", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) { onDone("saved") }
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    Ui.Words("Change it again", 15, K.Accent, bold = true, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { byHand = true }.padding(10.dp))
+                    Ui.Words("Change it again", 15, K.Accent, bold = true, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { byHand = true }.padding(8.dp))
                 }
             }
             return
         }
 
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // One screen, no scrolling (Kevin, 27 November 2026): the picture takes whatever room is left.
+        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             val title = item.album ?: now?.get(FieldKey.TITLE).orEmpty().ifBlank { t.title }
             val who = now?.get(FieldKey.ARTIST).orEmpty().ifBlank { t.artist }
-            Ui.Words(title + " · " + who, 17, bold = true)
-            Ui.Words(item.why, 14, K.Accent)
-
+            Ui.Words(title + " · " + who, 16, bold = true)
+            Ui.Words(item.why, 13, K.Accent)
             val a = answer
-            if (a == null) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel)) { Hear(t) }
             when {
                 finding.isNotEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
-                    Ui.Words(finding, 15, K.Accent, modifier = Modifier.weight(1f))
+                    Ui.Words(finding, 14, K.Accent, modifier = Modifier.weight(1f))
                 }
-                a != null -> {
-                    Ui.Words("KueSounds suggests, from " + a.from + ":", 15, K.Soft)
-                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Box(Modifier.size(240.dp).clip(RoundedCornerShape(16.dp)).background(K.Panel).border(2.dp, K.Accent, RoundedCornerShape(16.dp))) {
-                            AsyncImage(model = a.big.ifBlank { null }, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                            // Hear it before deciding (Kevin, 27 November 2026): play, pause and a slider over the cover.
-                            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))) { Hear(t) }
+                a != null -> Ui.Words("KueSounds suggests, from " + a.from + ":", 13, K.Soft)
+                nothing -> Ui.Words("Nothing knows it, by its sound or by its name. Change it yourself, or keep it as it is.", 14)
+            }
+            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                val side = if (maxWidth < maxHeight) maxWidth else maxHeight
+                Box(Modifier.size(side).clip(RoundedCornerShape(16.dp)).background(K.Panel).border(2.dp, if (a?.big?.isNotBlank() == true) K.Accent else K.Edge, RoundedCornerShape(16.dp))) {
+                    if (a?.big?.isNotBlank() == true) AsyncImage(model = a.big, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    // Hear it before deciding: play, pause and a slider over the picture.
+                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))) { Hear(t) }
+                }
+            }
+            if (a != null) {
+                val rows = changesOf(item, a, now.orEmpty())
+                if (rows.isEmpty()) Ui.Words("Just the cover changes.", 13, K.Soft)
+                // One line each: what changes, old in grey then new in yellow.
+                else Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    for ((k, label, v) in rows) {
+                        val old = now?.get(k).orEmpty()
+                        Row {
+                            Ui.Words(label, 13, K.Soft, modifier = Modifier.width(96.dp))
+                            Ui.Words(if (old.isNotBlank() && old != v) "$old → $v" else v, 13, if (old != v) K.Accent else K.Ink, modifier = Modifier.weight(1f))
                         }
                     }
-                    val rows = changesOf(item, a, now.orEmpty())
-                    if (rows.isEmpty()) Ui.Words("Just the cover changes.", 14, K.Soft)
-                    else Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((k, label, v) in rows) {
-                            val old = now?.get(k).orEmpty()
-                            Ui.Words(label, 13, K.Soft)
-                            if (old.isNotBlank() && old != v) Ui.Words(old, 14, K.Soft)
-                            Ui.Words(v, 16, if (old != v) K.Accent else K.Ink, bold = old != v)
-                        }
-                    }
                 }
-                nothing -> Ui.Words("Nothing knows it, by its sound or by its name. Change it yourself, or keep it as it is.", 15)
             }
             if (problem.isNotEmpty()) Ui.Words(problem, 14, K.Accent)
 
@@ -267,32 +228,33 @@ object ReviewUi {
                     androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
                     Ui.Words("Saving into " + (if (item.songs.size == 1) "the file" else "its " + item.songs.size + " files") + "…", 15, K.Accent)
                 } else {
-                    if (a != null) Ui.Button("Accept and save", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) {
-                        saving = true
-                        problem = ""
-                        val go = {
-                            // In the app's own scope: closing this never stops a save halfway.
-                            Fixer.saves.launch {
-                                val set = changesOf(item, a, now.orEmpty()).filter { (k, _, v) -> now?.get(k).orEmpty() != v }.associate { (k, _, v) -> k to v }
-                                val cover = withContext(Dispatchers.IO) { a.big.takeIf { it.isNotBlank() }?.let { Covers.download(it) }?.let { FixByHandUi.asJpeg(it) } }
-                                val said = withContext(Dispatchers.IO) { Fixer.saveByHand(context.applicationContext, item.songs, set, emptySet(), cover) }
-                                saving = false
-                                if (said.startsWith("Saved into the file") || said.startsWith("Saved into all")) savedTimes++
-                                else problem = said
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        if (a != null) Ui.Button("Accept and save", icon = KueSettings.Icons.TICK, modifier = Modifier.weight(1.3f)) {
+                            saving = true
+                            problem = ""
+                            val go = {
+                                // In the app's own scope: closing this never stops a save halfway.
+                                Fixer.saves.launch {
+                                    val set = changesOf(item, a, now.orEmpty()).filter { (k, _, v) -> now?.get(k).orEmpty() != v }.associate { (k, _, v) -> k to v }
+                                    val cover = withContext(Dispatchers.IO) { a.big.takeIf { it.isNotBlank() }?.let { Covers.download(it) }?.let { FixByHandUi.asJpeg(it) } }
+                                    val said = withContext(Dispatchers.IO) { Fixer.saveByHand(context.applicationContext, item.songs, set, emptySet(), cover) }
+                                    saving = false
+                                    if (said.startsWith("Saved into the file") || said.startsWith("Saved into all")) savedTimes++
+                                    else problem = said
+                                }
+                                Unit
                             }
-                            Unit
+                            if (Google.canEdit) go() else Fixer.askPermission { go() }
                         }
-                        if (Google.canEdit) go() else Fixer.askPermission { go() }
+                        Ui.Button(if (a != null) "Change" else "Change it myself", main = a == null, icon = KueSettings.Icons.EDIT, modifier = Modifier.weight(1f)) { byHand = true }
                     }
-                    Ui.Button("Change it myself", main = a == null, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { byHand = true }
-                    // Not the same thing (Kevin, 27 November 2026, "the same thing?"): one stops it being asked about, the other
-                    // brings it back next time. Plain words, no block buttons.
+                    // Not the same thing: one stops it being asked about, the other brings it back next time.
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { sure = true }.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { sure = true }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Ui.Words("It's right as it is", 15, K.Accent, bold = true, centre = true)
                             Ui.Words("Don't ask again", 12, K.Soft, centre = true)
                         }
-                        Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onDone("skipped") }.padding(10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onDone("skipped") }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                             Ui.Words("Not now", 15, K.Accent, bold = true, centre = true)
                             Ui.Words("Ask me next time", 12, K.Soft, centre = true)
                         }
@@ -303,11 +265,74 @@ object ReviewUi {
     }
 
     /**
+     * What is in a song's file now, read back from the Drive: its own picture (with a small player over it) and its
+     * details, for the check after a save (Kevin, 27 November 2026: "show what the final file is like with the album art").
+     */
+    @Composable
+    fun FileNow(t: Track, songs: Int, modifier: Modifier = Modifier) {
+        val context = LocalContext.current
+        var got by remember { mutableStateOf<Tagger.All?>(null) }
+        var problem by remember { mutableStateOf("") }
+        LaunchedEffect(t.id) {
+            withContext(Dispatchers.IO) { runCatching { Fixer.readFile(context.applicationContext, t) } }
+                .onSuccess { got = it }.onFailure { problem = "The file couldn't be read back: " + (it.message ?: it.javaClass.simpleName) }
+        }
+        DisposableEffect(t.id) { onDispose { Fixer.dropCopy(context.applicationContext, t) } }
+        Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Ui.Words("Saved. This is in the file now:", 16, bold = true)
+            val g = got
+            when {
+                problem.isNotEmpty() -> Ui.Words(problem, 14, K.Accent)
+                g == null -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
+                    Ui.Words("Reading the file back…", 15, K.Accent)
+                }
+                else -> {
+                    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        val side = if (maxWidth < maxHeight) maxWidth else maxHeight
+                        Box(Modifier.size(side).clip(RoundedCornerShape(16.dp)).background(K.Panel).border(2.dp, K.Accent, RoundedCornerShape(16.dp))) {
+                            if (g.picture != null) AsyncImage(model = g.picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            else Ui.Words("No picture in the file", 14, K.Soft, centre = true, modifier = Modifier.align(Alignment.Center))
+                            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))) { Hear(t) }
+                        }
+                    }
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        for ((k, label) in Tagger.named) {
+                            val v = g.known[k].orEmpty()
+                            if (v.isBlank() || k == FieldKey.LYRICS || k == FieldKey.COMMENT) continue
+                            Row {
+                                Ui.Words(label, 13, K.Soft, modifier = Modifier.width(110.dp))
+                                Ui.Words(v, 13, modifier = Modifier.weight(1f))
+                            }
+                        }
+                        if (songs > 1) Ui.Words("Shown: its first song. All $songs were saved.", 12, K.Soft)
+                    }
+                }
+            }
+        }
+    }
+
+    /** The final check as its own pop-up, after a save from Fix it by hand: the file as it is now, then All good closes. */
+    @Composable
+    fun FinalCheck(t: Track, songs: Int, onChangeAgain: () -> Unit, onDone: () -> Unit) {
+        Dialog(onDismissRequest = onDone, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                KueSettings.PanelHeader("Saved", Ui.look, onClose = onDone)
+                FileNow(t, songs, Modifier.weight(1f))
+                Ui.Button("All good", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth(), onClick = onDone)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
+                    Ui.Words("Change it again", 15, K.Accent, bold = true, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onChangeAgain).padding(8.dp))
+                }
+            }
+        }
+    }
+
+    /**
      * Play, pause and a slider for one song, as thin as the player's own (no big buttons). Plays through the normal
      * player; moving on to the next one stops it.
      */
     @Composable
-    private fun Hear(t: Track) {
+    fun Hear(t: Track) {
         val mine = Playing.currentId == t.id
         var position by remember { mutableStateOf(0L) }
         var dragging by remember { mutableStateOf(false) }
@@ -350,10 +375,10 @@ object ReviewUi {
             add(FieldKey.ALBUM, "Album", a.album)
             add(FieldKey.ALBUM_ARTIST, "Album artist", a.albumArtist.ifBlank { a.artist })
             add(FieldKey.YEAR, "Year", a.year)
-            add(FieldKey.GENRE, "Kind of music", a.genre)
+            add(FieldKey.GENRE, "Genre", a.genre)
         } else if (item.album != null && !a.coverOnly) {
             add(FieldKey.YEAR, "Year", a.year)
-            if (now[FieldKey.GENRE].isNullOrBlank()) add(FieldKey.GENRE, "Kind of music", a.genre)
+            if (now[FieldKey.GENRE].isNullOrBlank()) add(FieldKey.GENRE, "Genre", a.genre)
         }
         return out
     }
@@ -377,12 +402,8 @@ object ReviewUi {
         var open by remember { mutableStateOf<Track?>(null) }
         open?.let { t -> Ui.SongInfo(t) { open = null } }
         Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Ui.PullBar(onClose)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Ui.Words(title, 19, bold = true, modifier = Modifier.weight(1f))
-                    KueSettings.CloseButton(Ui.look, onClick = onClose)
-                }
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                KueSettings.PanelHeader(title, Ui.look, onClose = onClose)
                 if (songs.isEmpty()) Ui.Words(empty, 15, K.Soft)
                 androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(songs.size) { i ->

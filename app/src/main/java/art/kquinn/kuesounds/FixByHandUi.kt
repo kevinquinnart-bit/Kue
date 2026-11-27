@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -103,6 +104,7 @@ object FixByHandUi {
         var listening by remember { mutableStateOf("") }
         var heardSaying by remember { mutableStateOf("") }
         var pictureMenu by remember { mutableStateOf(false) }
+        var finalCheck by remember { mutableStateOf(false) }
         var pictureSaying by remember { mutableStateOf("") }
         val scroll = rememberScrollState()
 
@@ -190,7 +192,9 @@ object FixByHandUi {
                         cover = null
                         editing = null
                         fixed = true
-                        runCatching { scroll.animateScrollTo(0) }
+                        // Saved: straight on to the final check of the file itself (Kevin, 27 November 2026: "close on
+                        // save and final check and submit page and then close again").
+                        if (pageOpen) finalCheck = true
                     }
                     saying = said
                     saving = false
@@ -206,40 +210,21 @@ object FixByHandUi {
             if (saving) android.widget.Toast.makeText(context.applicationContext, "Still saving. It finishes by itself.", android.widget.Toast.LENGTH_SHORT).show()
             onClose()
         }
+        if (finalCheck) ReviewUi.FinalCheck(first, songs.size, onChangeAgain = { finalCheck = false }) { finalCheck = false; onClose() }
+        val pullClose = KueSettings.rememberPullToClose(leave)
         Dialog(onDismissRequest = leave, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-          // The pull bar, back and close stay at the top while the page scrolls under them.
-          Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, top = 8.dp)) {
-                Ui.PullBar(leave)
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-                    Ui.RoundButton(Glyph.BACK, "Back", onClick = leave)
-                    Spacer(Modifier.width(12.dp))
-                    Ui.Words("Fix it by hand", 20, bold = true, modifier = Modifier.weight(1f))
-                    KueSettings.CloseButton(Ui.look, onClick = leave)
-                }
+          // The header stays at the top and rolls up as the page scrolls; Save and the song's play strip stay at the foot.
+          Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(horizontal = 18.dp)) {
+            KueSettings.PanelHeader("Fix it by hand", Ui.look, scrolled = scroll.value > 0, onClose = leave)
             Column(
-                Modifier.weight(1f).fillMaxWidth().verticalScroll(scroll).padding(bottom = 18.dp),
+                Modifier.weight(1f).fillMaxWidth().nestedScroll(pullClose).verticalScroll(scroll).padding(bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 // The names as they are now in the file, not as they were when the list was made.
                 val title = if (isAlbum) was[FieldKey.ALBUM].orEmpty().ifBlank { albumTitle.orEmpty() } else was[FieldKey.TITLE].orEmpty().ifBlank { first.title }
                 val who = if (isAlbum) was[FieldKey.ALBUM_ARTIST].orEmpty().ifBlank { first.albumArtist.ifBlank { first.artist } } else was[FieldKey.ARTIST].orEmpty().ifBlank { first.artist }
                 Ui.Words("$title · $who", 15, bold = true)
-
-                // Done: says so plainly, and goes on to the next one.
-                if (fixed) {
-                    Column(
-                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Raised).border(2.dp, K.Accent, RoundedCornerShape(14.dp)).padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            KueSettings.Icon(KueSettings.Icons.TICK, 22.dp, K.Accent, 2.6f)
-                            Spacer(Modifier.width(10.dp))
-                            Ui.Words("Fixed. " + saying, 16, bold = true, modifier = Modifier.weight(1f))
-                        }
-                        if (onNext != null) Ui.Button("Next not fixed ($left left)", icon = KueSettings.Icons.CHEVRON, modifier = Modifier.fillMaxWidth()) { onNext() }
-                        Ui.Button("Back to the list", main = onNext == null, modifier = Modifier.fillMaxWidth()) { onClose() }
-                    }
-                } else if (why.isNotBlank()) Ui.Words(why, 14, K.Accent)
+                if (why.isNotBlank() && !fixed) Ui.Words(why, 14, K.Accent)
 
                 // The cover: as it is, or the one chosen here. Tap or hold it for the ways to change it (Kevin, 27 November 2026).
                 if (pictureMenu) PictureMenu(
@@ -255,17 +240,12 @@ object FixByHandUi {
                     val m = Modifier.size(220.dp).clip(shape).background(K.Panel)
                     when {
                         cover != null -> AsyncImage(model = cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = m.border(3.dp, K.Accent, shape))
+                        // The picture saved in the file itself (Kevin, 27 November 2026: "currently saved pic not shown").
+                        read?.picture != null -> AsyncImage(model = read?.picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = m)
                         else -> Ui.Cover(Scanner.artForTrack(Scanner.data.tracks.firstOrNull { it.id == first.id } ?: first) ?: Scanner.singleArtFor(first), m, corner = 16.dp, glyphSize = 64.dp)
                     }
                 }
                 Ui.Words(if (pictureSaying.isNotEmpty()) pictureSaying else "Tap the cover to change it.", 13, if (pictureSaying.isNotEmpty()) K.Accent else K.Soft, centre = true, modifier = Modifier.fillMaxWidth())
-                if (changed && !saving) SaveRow(isAlbum, songs.size, onSave = { save() }) {
-                    was.forEach { (k, v) -> now[k] = v }
-                    removed.clear(); cover = null; editing = null; pictureSaying = ""
-                }
-                if (saving) Busy(if (isAlbum) "Saving into " + songs.size + " files…" else "Saving into the file…")
-                if (saying.isNotEmpty() && !fixed) Ui.Words(saying, 14, K.Accent)
-
                 // 1. Listen.
                 Ui.Words("1. Listen to it", 17, bold = true)
                 Line(if (listening.isNotEmpty()) listening else "Name it by its sound (Shazam)", KueSettings.Icons.MIC) {
@@ -293,7 +273,7 @@ object FixByHandUi {
                 Search(
                     start = listOf(was[FieldKey.ARTIST].orEmpty().ifBlank { first.artist }.takeIf { it != Library.UNKNOWN_ARTIST }.orEmpty(), if (isAlbum) albumTitle.orEmpty() else Library.withoutBrackets(first.title))
                         .filter { it.isNotBlank() }.joinToString(" "),
-                    songs = !isAlbum, onUse = { f -> use(f); pictureSaying = if (f.coverOnly) "Fetching the picture…" else "Put in from " + f.from + ". Check below, then Save." },
+                    songs = !isAlbum, song = if (isAlbum) null else Library.withoutBrackets(was[FieldKey.TITLE].orEmpty().ifBlank { first.title }), onUse = { f -> use(f); pictureSaying = if (f.coverOnly) "Fetching the picture…" else "Put in from " + f.from + ". Check below, then Save." },
                     onPicture = takePicture,
                 )
 
@@ -350,11 +330,6 @@ object FixByHandUi {
                         }
                     }
                 }
-                if (changed && !saving) SaveRow(isAlbum, songs.size, onSave = { save() }) {
-                    was.forEach { (k, v) -> now[k] = v }
-                    removed.clear(); cover = null; editing = null; pictureSaying = ""
-                }
-
                 if (isAlbum) {
                     Ui.Words("Its songs: tap one to fix it on its own", 17, bold = true)
                     for (t in songs.sortedWith(compareBy({ it.discNo }, { it.trackNo }, { it.title }))) {
@@ -370,7 +345,17 @@ object FixByHandUi {
                         }
                     }
                 }
-                Ui.Button("Play it", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(songs, 0) }
+            }
+            // The foot of the page, always there: Save and Undo once (not at the top and the bottom, Kevin 27 November
+            // 2026), what saving is doing, and a small player for the song instead of a big Play button.
+            Column(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (changed && !saving) SaveRow(isAlbum, songs.size, onSave = { save() }) {
+                    was.forEach { (k, v) -> now[k] = v }
+                    removed.clear(); cover = null; editing = null; pictureSaying = ""
+                }
+                if (saving) Busy(if (isAlbum) "Saving into " + songs.size + " files…" else "Saving into the file…")
+                if (saying.isNotEmpty() && !fixed && !saving) Ui.Words(saying, 14, K.Accent)
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(12.dp))) { ReviewUi.Hear(first) }
             }
           }
         }
@@ -396,12 +381,8 @@ object FixByHandUi {
             scope.launch { onPicture(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }, "the file") }
         }
         Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Ui.PullBar(onClose)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Ui.Words("Change the cover", 19, bold = true, modifier = Modifier.weight(1f))
-                    KueSettings.CloseButton(Ui.look, onClick = onClose)
-                }
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                KueSettings.PanelHeader("Change the cover", Ui.look, onClose = onClose)
                 Line("Use a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
                 Line("Use a picture from a link you copied", KueSettings.Icons.OPEN) {
                     val clip = (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager)
@@ -416,7 +397,7 @@ object FixByHandUi {
                 Ui.Words("Or tap one found for it:", 15, bold = true)
                 val list = found
                 when {
-                    list == null -> Busy("Looking in Apple Music, Deezer and Wikipedia…")
+                    list == null -> Busy("Looking in Apple Music, Deezer and Discogs…")
                     list.isEmpty() -> Ui.Words("None found. Use a file, a link or the web above.", 14, K.Soft)
                     else -> androidx.compose.foundation.lazy.grid.LazyVerticalGrid(
                         androidx.compose.foundation.lazy.grid.GridCells.Adaptive(104.dp), Modifier.weight(1f),
@@ -503,7 +484,7 @@ object FixByHandUi {
 
     /** The search: Apple, Deezer and Wikipedia in the app, each find with its cover; then the web, Spotify, the phone and a link. */
     @Composable
-    private fun Search(start: String, songs: Boolean, onUse: (Covers.Lookup) -> Unit, onPicture: (ByteArray?, String) -> Unit) {
+    private fun Search(start: String, songs: Boolean, song: String?, onUse: (Covers.Lookup) -> Unit, onPicture: (ByteArray?, String) -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         var words by remember { mutableStateOf(start) }
@@ -517,7 +498,7 @@ object FixByHandUi {
             found = null
             more = false
             scope.launch {
-                found = withContext(Dispatchers.IO) { Covers.lookUp(words, forSongs) }
+                found = withContext(Dispatchers.IO) { Covers.lookUp(words, forSongs, song) }
                 looking = false
             }
             Unit
@@ -535,10 +516,9 @@ object FixByHandUi {
             Box(Modifier.weight(1f)) { Field(words) { words = it } }
             Ui.Button("Search", modifier = Modifier.height(52.dp), onClick = search)
         }
-        KueSettings.Choices("Look for", listOf("Songs", "Albums"), if (forSongs) 0 else 1, Ui.look) { forSongs = it == 0; if (words.isNotBlank()) search() }
         // The three best, the rest only when asked for (Kevin, 27 November 2026: "don't need these, too much").
         when {
-            looking -> Busy("Looking in Apple Music, Deezer and Wikipedia…")
+            looking -> Busy("Looking in Apple Music, Deezer and Discogs…")
             found?.isEmpty() == true -> Ui.Words("Nothing found for that. Change the words and search again, or use the web below.", 14, K.Soft)
             else -> found?.let { all ->
                 val best = all.filter { !it.coverOnly }.ifEmpty { all }
@@ -549,6 +529,9 @@ object FixByHandUi {
             }
         }
         val q = android.net.Uri.encode(words)
+        // Discogs had most of the ones nothing else knew (Kevin, 27 November 2026). Share its page back to KueSounds,
+        // or copy its link and use Picture from a link, for the cover.
+        Line("Search Discogs", KueSettings.Icons.SEARCH) { open("https://www.discogs.com/search/?q=$q&type=all") }
         Line("Search the web", KueSettings.Icons.WEB) { open("https://www.google.com/search?q=$q") }
         Line("Find pictures on the web", KueSettings.Icons.DISC) { open("https://www.google.com/search?tbm=isch&q=$q") }
         Line("Look in Spotify", KueSettings.Icons.SEARCH) { SpotifyLink.openSearch(context, words) }

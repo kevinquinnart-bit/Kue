@@ -231,6 +231,14 @@ object Covers {
     /** The picture behind [link] (a picture or a page), ready to use. Off the main thread. */
     fun pictureFromLink(link: String): ByteArray? {
         val url = Regex("https?://\\S+").find(link)?.value?.trimEnd('.', ',', ')') ?: return null
+        // A Discogs page: its site turns phones' apps away, so the picture comes from its own API instead.
+        Regex("discogs\\.com/(?:[a-z]{2}/)?(release|master)/(\\d+)").find(url)?.let { m ->
+            val kind = m.groupValues[1]
+            val json = get(("https://api.discogs.com/" + kind + "s/" + m.groupValues[2]).toHttpUrl())
+            val address = if (kind == "release") parseDiscogsRelease(json)?.big
+            else runCatching { JsonParser.parseString(json ?: "").asJsonObject.getAsJsonArray("images")?.firstOrNull()?.asJsonObject?.get("uri")?.asString }.getOrNull()
+            return address?.let { download(it) }
+        }
         val (type, bytes) = runCatching {
             Drive.http.newCall(Request.Builder().url(url).header("User-Agent", Catalogue.WHO).build()).execute().use { r ->
                 if (!r.isSuccessful) return null
@@ -242,18 +250,78 @@ object Covers {
         return download(address)
     }
 
-    /** Songs (or albums) for [words] from Apple, Deezer and Wikipedia, one of each in turn, the same record only once. Off the main thread. */
-    fun lookUp(words: String, songs: Boolean): List<Lookup> {
+    /**
+     * Discogs (Kevin, 27 November 2026: "most of the songs which couldn't be found I could find via a search on
+     * discogs.com; it gave all the album details and artwork"). Its search and its releases need no key: checked live
+     * that day, A Drop of Irish by The Fureys (1999) came back with its cover. The search gives the release; the release
+     * gives its cover, year, styles and track list.
+     */
+    data class DiscogsFind(val id: Long, val artist: String, val album: String, val year: String, val genre: String)
+
+    private fun discogsName(n: String) = n.replace(Regex("\\s*\\(\\d+\\)$"), "").replace(Regex("\\*$"), "").trim()
+
+    fun parseDiscogsSearch(json: String?): List<DiscogsFind> = runCatching {
+        JsonParser.parseString(json ?: return emptyList()).asJsonObject.getAsJsonArray("results").mapNotNull { e ->
+            val o = e.asJsonObject
+            if (o.get("type")?.asString != "release") return@mapNotNull null
+            val whole = o.get("title")?.asString.orEmpty()
+            val artist = discogsName(whole.substringBefore(" - ", ""))
+            val album = whole.substringAfter(" - ", whole).trim()
+            fun first(k: String) = o.getAsJsonArray(k)?.firstOrNull()?.asString.orEmpty()
+            DiscogsFind(o.get("id")?.asLong ?: return@mapNotNull null, artist, album, o.get("year")?.asString.orEmpty(), first("style").ifBlank { first("genre") })
+        }
+    }.getOrDefault(emptyList())
+
+    /** A Discogs release as a find; [song] (when given) is looked for in its track list for the track number. */
+    fun parseDiscogsRelease(json: String?, song: String? = null): Lookup? = runCatching {
+        val o = JsonParser.parseString(json ?: return null).asJsonObject
+        val images = o.getAsJsonArray("images")?.map { it.asJsonObject }.orEmpty()
+        val img = images.firstOrNull { it.get("type")?.asString == "primary" } ?: images.firstOrNull() ?: return null
+        val big = img.get("uri")?.asString.orEmpty().ifBlank { return null }
+        val artist = o.getAsJsonArray("artists")?.firstOrNull()?.asJsonObject?.get("name")?.asString?.let { discogsName(it) }.orEmpty()
+        val styles = o.getAsJsonArray("styles")?.map { it.asString }.orEmpty()
+        val genres = o.getAsJsonArray("genres")?.map { it.asString }.orEmpty()
+        val tracks = o.getAsJsonArray("tracklist")?.map { it.asJsonObject }.orEmpty().filter { it.get("type_")?.asString != "heading" }
+        val at = if (song.isNullOrBlank()) -1 else tracks.indexOfFirst { same(Library.withoutBrackets(it.get("title")?.asString.orEmpty()), Library.withoutBrackets(song)) }
+        Lookup(
+            title = if (at >= 0) tracks[at].get("title")?.asString.orEmpty() else "", artist = artist,
+            album = o.get("title")?.asString.orEmpty(), albumArtist = artist,
+            year = o.get("year")?.asInt?.takeIf { it > 0 }?.toString().orEmpty(), trackNo = if (at >= 0) at + 1 else 0, discNo = 0,
+            genre = styles.firstOrNull() ?: genres.firstOrNull().orEmpty(),
+            small = img.get("uri150")?.asString ?: big, big = big, from = "Discogs",
+        )
+    }.getOrNull()
+
+    /** A song's genre from Discogs' search (its style, else its genre), for the genre check. Off the main thread. */
+    fun discogsGenre(artist: String, title: String): String? {
+        if (artist.isBlank() || artist == Library.UNKNOWN_ARTIST) return null
+        return parseDiscogsSearch(get("https://api.discogs.com/database/search".toHttpUrl().newBuilder()
+            .addQueryParameter("artist", artist).addQueryParameter("track", Library.withoutBrackets(title)).addQueryParameter("type", "release").addQueryParameter("per_page", "5").build()))
+            .firstOrNull { it.genre.isNotBlank() && sameArtist(it.artist, artist) }?.genre
+    }
+
+    /** Discogs' best releases for [words], each with its cover and details (three at most, as each is one more ask). */
+    fun discogs(words: String, song: String? = null): List<Lookup> {
+        val found = parseDiscogsSearch(get("https://api.discogs.com/database/search".toHttpUrl().newBuilder()
+            .addQueryParameter("q", words).addQueryParameter("type", "release").addQueryParameter("per_page", "8").build()))
+        return found.distinctBy { Library.sortName(it.artist) + "|" + Library.sortName(it.album) }.take(3).mapNotNull { f ->
+            parseDiscogsRelease(get(("https://api.discogs.com/releases/" + f.id).toHttpUrl()), song)
+        }
+    }
+
+    /** Songs (or albums) for [words] from Apple, Deezer and Discogs, one of each in turn, the same record only once. Off the main thread. */
+    fun lookUp(words: String, songs: Boolean, song: String? = null): List<Lookup> {
         val apple = get("https://itunes.apple.com/search".toHttpUrl().newBuilder().addQueryParameter("term", words)
             .addQueryParameter("entity", if (songs) "song" else "album").addQueryParameter("limit", "15").addQueryParameter("country", "gb").build())
             .let { parseItunesLookups(it) }
         val deezer = get(("https://api.deezer.com/search" + if (songs) "" else "/album").toHttpUrl().newBuilder().addQueryParameter("q", words).addQueryParameter("limit", "15").build())
             .let { parseDeezerLookups(it) }
-        val wiki = wikipedia(words, songs)
+        // Discogs in place of Wikipedia, whose pages were seldom the record (Kevin, 27 November 2026).
+        val dg = runCatching { discogs(words, if (songs) song else null) }.getOrDefault(emptyList())
         val out = ArrayList<Lookup>()
         val seen = HashSet<String>()
-        for (i in 0 until maxOf(apple.size, deezer.size, wiki.size)) {
-            for (x in listOfNotNull(apple.getOrNull(i), deezer.getOrNull(i), wiki.getOrNull(i))) {
+        for (i in 0 until maxOf(apple.size, deezer.size, dg.size)) {
+            for (x in listOfNotNull(apple.getOrNull(i), deezer.getOrNull(i), dg.getOrNull(i))) {
                 val key = Library.sortName(x.artist) + "|" + Library.sortName(x.album) + "|" + Library.sortName(x.title)
                 if (seen.add(key)) out += x
             }

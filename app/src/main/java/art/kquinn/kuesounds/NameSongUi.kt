@@ -165,7 +165,7 @@ object NameUi {
                 song.albums.firstOrNull()?.let { add("Album" to it) }
                 if (song.year.isNotBlank()) add("Released" to song.year)
                 if (song.label.isNotBlank()) add("Label" to song.label)
-                if (song.genre.isNotBlank()) add("Kind of music" to song.genre)
+                if (song.genre.isNotBlank()) add("Genre" to song.genre)
             }
             for ((label, value) in facts) Row {
                 Ui.Words(label, 14, K.Soft, modifier = Modifier.width(120.dp))

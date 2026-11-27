@@ -37,21 +37,37 @@ object Kinds {
         val work = File(context.cacheDir, "kinds").apply { mkdirs() }
         var done = 0
         var failed = 0
+        var notFound = 0
         try {
             while (true) {
                 if (!Net.unmetered(context)) {
                     status = "Waiting for Wi-Fi"
-                    show("Kinds of music: waiting for Wi-Fi")
+                    show("Genres: waiting for Wi-Fi")
                     Scanner.note("kinds of music into files: stopped, not on Wi-Fi; carries on at the next look")
                     synchronized(waiting) { waiting.clear() }
                     break
                 }
                 val id = next() ?: break
-                val t = Scanner.data.tracks.firstOrNull { it.id == id } ?: continue
-                val kind = Library.genreOf(t, Scanner.data)
-                if (kind.isBlank() || !Tagger.canFix(Library.realName(t))) continue
+                var t = Scanner.data.tracks.firstOrNull { it.id == id } ?: continue
+                if (!Tagger.canFix(Library.realName(t))) continue
+                var kind = Library.genreOf(t, Scanner.data)
+                // Not known at all: looked for online first, once (Kevin, 27 November 2026: "a genre check for all music").
+                if (kind.isBlank()) {
+                    if (t.id in Scanner.data.kindTried) continue
+                    status = "Finding the genre of " + t.title
+                    show(status)
+                    val found = runCatching { Covers.genre(t.artist, t.title) }.getOrNull()
+                        ?: runCatching { Covers.discogsGenre(t.artist, t.title) }.getOrNull()
+                    Scanner.markKind(t.id, tried = true)
+                    kotlinx.coroutines.delay(1500)
+                    if (found.isNullOrBlank()) { notFound++; continue }
+                    Scanner.changeTracks(setOf(t.id)) { it.copy(genre = found) }
+                    Scanner.markKind(t.id, fromWeb = true)
+                    t = Scanner.data.tracks.firstOrNull { it.id == id } ?: continue
+                    kind = found
+                }
                 val left = synchronized(waiting) { waiting.size }
-                status = "Kind of music into " + t.title + if (left > 0) " · $left more" else ""
+                status = "Genre into " + t.title + if (left > 0) " · $left more" else ""
                 show(status)
                 val file = File(work, t.id + "." + Library.ending(Library.realName(t)))
                 try {
@@ -79,9 +95,10 @@ object Kinds {
                 }
             }
         } finally {
-            if (done > 0 || failed > 0) {
-                lastResult = "Kind of music written into " + done + (if (done == 1) " file" else " files") + (if (failed > 0) ", $failed couldn't be" else "") + "."
-                Scanner.note("kinds of music into files: $done written, $failed not")
+            if (done > 0 || failed > 0 || notFound > 0) {
+                lastResult = "Genre written into " + done + (if (done == 1) " file" else " files") + (if (notFound > 0) ", $notFound with no genre found anywhere" else "") +
+                    (if (failed > 0) ", $failed couldn't be written" else "") + "."
+                Scanner.note("genres into files: $done written, $notFound not found, $failed not written")
             }
             status = ""
         }

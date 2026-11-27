@@ -130,7 +130,7 @@ object Tagger {
     val named: List<Pair<FieldKey, String>> = listOf(
         FieldKey.TITLE to "Song name", FieldKey.ARTIST to "Artist", FieldKey.ALBUM to "Album", FieldKey.ALBUM_ARTIST to "Album artist",
         FieldKey.YEAR to "Year", FieldKey.TRACK to "Track number", FieldKey.TRACK_TOTAL to "Tracks on the album", FieldKey.DISC_NO to "Disc",
-        FieldKey.DISC_TOTAL to "Discs", FieldKey.GENRE to "Kind of music", FieldKey.COMPOSER to "Written by", FieldKey.LYRICIST to "Words by",
+        FieldKey.DISC_TOTAL to "Discs", FieldKey.GENRE to "Genre", FieldKey.COMPOSER to "Written by", FieldKey.LYRICIST to "Words by",
         FieldKey.CONDUCTOR to "Conductor", FieldKey.RECORD_LABEL to "Record label", FieldKey.CATALOG_NO to "Catalogue number",
         FieldKey.ORIGINAL_YEAR to "First out", FieldKey.COMMENT to "Comment", FieldKey.LYRICS to "Lyrics", FieldKey.BPM to "Beats a minute",
         FieldKey.ISRC to "ISRC code", FieldKey.GROUPING to "Grouping", FieldKey.LANGUAGE to "Language", FieldKey.MOOD to "Mood",

@@ -523,7 +523,7 @@ object Scanner {
         var found = 0
         for ((al, group) in todo) {
             if (!scope.isActive) return
-            say("Finding each album's kind of music and date", done, todo.size)
+            say("Finding each album's genre and date", done, todo.size)
             lookup("facts for " + al.title) { Catalogue.groupFacts(group) }.onSuccess { f ->
                 synchronized(this) { data = data.copy(facts = data.facts + (al.key to f)) }
                 if (f.genres.isNotEmpty()) found++
@@ -1190,10 +1190,11 @@ object Scanner {
     }
 
     /** Notes that a song's kind of music came from online, or that it is now written in its file. */
-    fun markKind(id: String, fromWeb: Boolean = false, written: Boolean = false) = synchronized(this) {
+    fun markKind(id: String, fromWeb: Boolean = false, written: Boolean = false, tried: Boolean = false) = synchronized(this) {
         data = data.copy(
             kindFromWeb = if (fromWeb) data.kindFromWeb + id else data.kindFromWeb,
             kindWritten = if (written) data.kindWritten + id else data.kindWritten,
+            kindTried = if (tried) data.kindTried + id else data.kindTried,
         )
         save()
     }
@@ -1204,10 +1205,18 @@ object Scanner {
             Library.genreOf(t, d).isNotBlank()
     }
 
+    /** Songs with no genre known at all, not yet looked for online by the genre check. */
+    fun kindsUnknown(d: LibraryData = data): List<Track> = d.tracks.filter { t ->
+        t.id !in d.kindTried && t.id !in d.kindWritten && Tagger.canFix(Library.realName(t)) && Library.genreOf(t, d).isBlank()
+    }
+
     /** Albums whose songs are written but have no cover from anywhere yet, for the list in Settings. */
     fun noCover(d: LibraryData = data): List<Album> =
+        // Every album the list shows with no picture, once its songs have been written (or made singles), unless every
+        // song in it was settled by hand. Before, singles of their own and albums written with a cover the list
+        // couldn't show were left out, so "every song has its cover" was said over empty pictures (27 November 2026).
         Library.albums(d.tracks).filter { al ->
-            al.key !in d.catalogueCovers && al.key !in d.ownSingles && al.tracks.any { it.fixed && !it.fixedFully && !it.settled }
+            (al.tracks.any { it.fixed } || al.key in d.ownSingles) && al.tracks.any { !it.settled } && artFor(al) == null
         }
 
     /** Songs put right by Match by sound (Use these): their album leaves the not-found list. */
@@ -1245,7 +1254,10 @@ object Scanner {
     fun singleArtFor(t: Track): File? = data.singleArt[t.id]?.let { File(it) }?.takeIf { it.exists() }
 
     /** The cover picture kept for an album, if there is one. */
+    // An album that is a single of its own shows its single's cover (Kevin, 27 November 2026: albums in the list with no
+    // picture while Fix your music files said every song had its cover).
     fun artFor(album: Album): File? = data.art[album.key]?.let { File(it) }?.takeIf { it.exists() }
+        ?: album.tracks.firstNotNullOfOrNull { singleArtFor(it) }
 
     fun artForTrack(t: Track): File? = data.art[Library.albumKey(Library.albumArtistOf(t), t.album)]?.let { File(it) }?.takeIf { it.exists() }
 

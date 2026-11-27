@@ -82,4 +82,25 @@ class CoversTest {
         assertTrue(got[0].coverOnly)
         assertEquals("Wikipedia", got[0].from)
     }
+
+    // Discogs, saved live 27 November 2026 with no key: the album KueSounds had found no cover for anywhere.
+    @Test fun discogsSearch() {
+        val got = Covers.parseDiscogsSearch(text("discogs_search_fureys.json"))
+        assertEquals(15206773L, got.first().id)
+        assertEquals("The Fureys", got.first().artist)
+        assertEquals("A Drop Of Irish", got.first().album)
+        assertEquals("1999", got.first().year)
+        assertEquals("Celtic", got.first().genre)
+    }
+
+    @Test fun discogsReleaseWithItsCover() {
+        val got = Covers.parseDiscogsRelease(text("discogs_release_fureys.json"), "The Prickly Bush")!!
+        assertEquals("A Drop Of Irish", got.album)
+        assertEquals("The Fureys", got.artist)
+        assertEquals("1999", got.year)
+        assertEquals("Celtic", got.genre)
+        assertEquals("The Prickly Bush", got.title)
+        assertEquals(3, got.trackNo)
+        assertTrue(got.big.startsWith("https://i.discogs.com/"))
+    }
 }

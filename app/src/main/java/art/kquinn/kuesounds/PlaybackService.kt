@@ -140,7 +140,7 @@ class PlaybackService : MediaLibraryService() {
                 val chosen = Sound.forKind(p, genre)
                 Sound.following = when {
                     chosen !== p -> Sound.presets[chosen.preset].name + ", for " + genre
-                    genre.isBlank() -> "Finding this song's kind of music"
+                    genre.isBlank() -> "Finding this song's genre"
                     else -> genre + ": no setting for it, so yours"
                 }
                 if (chosen !== p) Sound.followingPreset = chosen.preset
@@ -155,7 +155,7 @@ class PlaybackService : MediaLibraryService() {
                         Scanner.markKind(t.id, fromWeb = true)
                         if (Google.canEdit && Net.unmetered(this@PlaybackService)) Kinds.queue(this@PlaybackService, listOf(t))
                         if (player.currentMediaItem?.mediaId == t.id) soundAgain?.invoke()
-                    } else if (player.currentMediaItem?.mediaId == t.id) Sound.following = "Kind of music not known, so your own setting"
+                    } else if (player.currentMediaItem?.mediaId == t.id) Sound.following = "Genre not known, so your own setting"
                 }
             }
             effects?.apply(p)
