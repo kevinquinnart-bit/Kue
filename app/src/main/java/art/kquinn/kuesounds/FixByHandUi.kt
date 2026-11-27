@@ -164,7 +164,10 @@ object FixByHandUi {
 
         val changes = now.filter { (k, v) -> v.trim() != was[k].orEmpty() }
         val changed = changes.isNotEmpty() || removed.any { it.value } || cover != null
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         val save = {
+            keyboard?.hide()
+            editing = null
             saving = true
             saying = ""
             val go = {

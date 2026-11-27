@@ -298,7 +298,8 @@ object Fixer {
                     albumArtist = e.albumArtist, year = e.year, trackNo = e.trackNo, discNo = e.discNo, named = true, fileName = newName,
                     // Kept on the album given by hand; looked up again for its cover when the album changed and has none.
                     ownLook = true, checked = if (albumChanged && cover == null) false else it.checked,
-                    fixed = true, fixedFully = cover != null,
+                    // Put right by hand: not flagged or rewritten by KueSounds again (27 November 2026).
+                    fixed = true, fixedFully = cover != null, settled = true,
                 )
             }
             Scanner.fixTried(t.id, null)

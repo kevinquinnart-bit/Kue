@@ -1049,7 +1049,7 @@ object Ui {
         }
         // The table as it is in the file now, and as edited.
         val was = remember(t.id) {
-            listOf(t.title, t.artist, t.album, Library.albumArtistOf(t), if (t.year > 0) t.year.toString() else "",
+            androidx.compose.runtime.mutableStateListOf(t.title, t.artist, t.album, Library.albumArtistOf(t), if (t.year > 0) t.year.toString() else "",
                 if (t.trackNo > 0) t.trackNo.toString() else "", if (t.discNo > 0) t.discNo.toString() else "")
         }
         val now = remember(t.id) { androidx.compose.runtime.mutableStateListOf(*was.toTypedArray()) }
@@ -1060,7 +1060,10 @@ object Ui {
         var choosing by remember { mutableStateOf(false) }
         if (choosing) album0?.let { al -> CoverPicker(al) { choosing = false } } ?: run { choosing = false }
         val changed = now.indices.any { now[it].trim() != was[it] }
+        val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
         val save = {
+            keyboard?.hide()
+            editing = -1
             busy = "Saving into the file…"
             saying = ""
             val e = Fixer.Edit(
@@ -1070,6 +1073,9 @@ object Ui {
             val go = {
                 scope.launch {
                     saying = withContext(Dispatchers.IO) { Fixer.saveDetails(context.applicationContext, t, e) }
+                    // Saved: the file now holds what was typed, so Save goes and the box being typed in closes (Kevin,
+                    // 27 November 2026: "says edit is saved but still gives option to save ... and is open").
+                    if (saying.startsWith("Saved into")) { now.indices.forEach { i -> was[i] = now[i].trim(); now[i] = now[i].trim() }; editing = -1 }
                     busy = ""
                 }
                 Unit
