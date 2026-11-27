@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
@@ -119,7 +120,7 @@ object KueSettings {
             Modifier.fillMaxWidth()
                 .graphicsLayer { translationY = pulled.coerceAtLeast(0f); alpha = 1f - (pulled / 900f).coerceIn(0f, 0.5f) }
                 .pointerInput(Unit) {
-                    androidx.compose.foundation.gestures.detectVerticalDragGestures(
+                    detectVerticalDragGestures(
                         onDragEnd = { if (pulled > 110f) onClose(); pulled = 0f },
                         onDragCancel = { pulled = 0f },
                     ) { change, dy -> change.consume(); pulled = (pulled + dy).coerceAtLeast(0f) }
