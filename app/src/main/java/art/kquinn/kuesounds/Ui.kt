@@ -1896,7 +1896,7 @@ object Ui {
         // One list for everything not fixed, each opening the same page (Kevin, 27 November 2026: "the options for the 54
         // and 2 not fixed should be the same as all are not fixed still").
         var fixing by remember { mutableStateOf<Triple<List<Track>, String?, String>?>(null) }
-        val items = notFixed.map { (t, why) -> Triple(listOf(t), null as String?, why) } + noCover.map { Triple(it.tracks, it.title as String?, "No cover found anywhere.") }
+        val items = notFixed.map { (t, why) -> Triple(listOf(t), null as String?, why) } + noCover.map { Triple(it.tracks, (if (it.tracks.size == 1) null else it.title) as String?, "No cover found anywhere.") }
         fixing?.let { cur ->
             val others = items.filter { it.first.first().id != cur.first.first().id }
             androidx.compose.runtime.key(cur.first.first().id) {
