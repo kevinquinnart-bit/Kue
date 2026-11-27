@@ -1872,16 +1872,12 @@ object Ui {
         if (Fixer.running) return
         val toWrite = remember(data, view) { view.matched.filter { Fixer.hasWork(it, data) }.sumOf { Fixer.toDo(it, data).size } }
         val names = remember(data) { Fixer.namesToTidy(data).size }
-        if (Fixer.lastResult.isNotEmpty()) Words(Fixer.lastResult, 14, K.Soft)
+        // Only what there is to do; "done" and the count are on the step itself (Kevin, 27 November 2026: out of line).
         when {
             toWrite > 0 -> FixFiles(view.matched, "Write " + count(toWrite, "song") + " to the files", main = true)
             names > 0 -> {
                 Words(if (names == 1) "1 file name doesn't match its song." else String.format("%,d", names) + " file names don't match their songs.", 14)
                 Button("Name the files after their songs", icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { Fixer.tidyNames(ctx) }
-            }
-            view.matched.isNotEmpty() && !Scanner.running -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                KueSettings.Icon(KueSettings.Icons.TICK, 20.dp, K.Accent, 2.6f)
-                Words("Everything found is written to the files.", 14)
             }
         }
         if (Fixer.permissionProblem.isNotEmpty()) Words(Fixer.permissionProblem, 14, K.Accent)
@@ -1894,8 +1890,6 @@ object Ui {
     @Composable
     private fun FinalList(view: Scanner.LibraryView, go: (Screen) -> Unit) {
         val data = Scanner.data
-        // Fixed means the right names AND a cover (Kevin, 26 November 2026: "fixed" was counting songs with no cover).
-        val fixed = remember(data) { data.tracks.count { it.fixed && it.fixedFully } }
         val left = remember(data, view, Scanner.running) { Scanner.left(view, data) }
         val noCover = left.albums
         val notFixed = left.songs
@@ -1909,26 +1903,8 @@ object Ui {
                 FixByHandUi.Page(cur.first, cur.second, cur.third, others.size, onNext = others.firstOrNull()?.let { n -> { fixing = n } }) { fixing = null }
             }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            KueSettings.Icon(KueSettings.Icons.TICK, 20.dp, K.Accent, 2.6f)
-            Words("Fixed, with names and cover: " + count(fixed, "song"), 16, bold = true)
-        }
         val total = noCover.size + notFixed.size
         if (total == 0) return
-        // Folded, numbered (Kevin, 27 November 2026): "Check them one at a time" above is the way through; the list is
-        // here to pick one out.
-        var shown by remember { mutableStateOf(false) }
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised).border(1.dp, K.Edge, RoundedCornerShape(12.dp))
-                .clickable { shown = !shown }.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Words("To check: $total", 16, K.Accent, bold = true, modifier = Modifier.weight(1f))
-            Words(if (shown) "Hide the list" else "Show the list", 14, K.Soft)
-            Spacer(Modifier.width(8.dp))
-            Box(Modifier.graphicsLayer { rotationZ = if (shown) 90f else 0f }) { KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f) }
-        }
-        if (!shown) return
         items.take(200).forEachIndexed { i, x ->
             val t = x.first.first()
             Row(
@@ -2634,6 +2610,7 @@ object Ui {
             // First, in one box: working or finished, and what (if anything) is left for you to do (Kevin, 26 November
             // 2026: "not knowing if the process is complete or what to do next").
             val leftNow = remember(data, view, running) { Scanner.left(view, data) }
+            var showList by remember { mutableStateOf(false) }
             val noCovers = leftNow.albums.size
             val notFixedNow = leftNow.songs
             val retrying = notFixedNow.count { (t, _) -> t.id in data.fixProblems && !Fixer.stuck(t, data) }
@@ -2664,10 +2641,20 @@ object Ui {
                             var checking by remember { mutableStateOf(false) }
                             if (checking) ReviewUi.Review(ReviewUi.items(leftNow)) { checking = false }
                             Button("Check the $left, one at a time", icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { checking = true }
+                            // The list, opened from here, not a second "to check" box below (Kevin, 27 November 2026: duplication).
+                            Row(
+                                Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { showList = !showList }.padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center,
+                            ) {
+                                Words(if (showList) "Hide the list" else "Or pick one from the list", 14, K.Soft)
+                                Spacer(Modifier.width(8.dp))
+                                Box(Modifier.graphicsLayer { rotationZ = if (showList) 90f else 0f }) { KueSettings.Icon(KueSettings.Icons.CHEVRON, 14.dp, K.Soft, 2.2f) }
+                            }
                         } else if (retrying == 0) Words("Every song has its right name and cover.", 14)
                     }
                 }
             }
+            if (showList && leftNow.total > 0 && !running && !Fixer.running) FinalList(view, go)
             if (running && stage in 1..2) Doing(Scanner.status.ifBlank { "Reading your Drive" }, Scanner.progress)
             else Words(n(songs) + " songs in your Drive" + (if (read < songs) " · " + n(read) + " read" else ""), 14, K.Soft)
 
@@ -2709,11 +2696,10 @@ object Ui {
             val leftToWrite = view.leftToFix
             Step(
                 4, "Write to the files", state = if (Fixer.running) NOW else if (view.matched.isNotEmpty() && leftToWrite == 0) DONE else WAITING, onTap = { listing = 4 },
-                progress = "", working = Fixer.running, doing = Fixer.status, fraction = Fixer.progress,
+                progress = n(remember(data) { data.tracks.count { (it.fixed && it.fixedFully) || it.settled } }) + " written, with names and cover",
+                working = Fixer.running, doing = Fixer.status, fraction = Fixer.progress,
             )
             Column(Modifier.padding(start = 40.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) { FixPanel(view) }
-
-            FinalList(view, go)
 
             // Extra details, after the steps.
             val withFacts = view.albums.count { it.key in data.facts }
