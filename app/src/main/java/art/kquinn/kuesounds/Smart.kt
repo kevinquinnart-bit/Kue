@@ -173,7 +173,9 @@ object Smart {
             apple.getOrNull(i)?.let { out += it }
             deezer.getOrNull(i)?.let { out += it }
         }
-        return out
+        // The same picture can come back twice (Deezer gives one cover for several releases): once only, as the list
+        // keys on it and closed KueSounds on 27 November 2026.
+        return out.distinctBy { it.big }
     }
 
     /** Downloads a picked cover. Call off the main thread. */

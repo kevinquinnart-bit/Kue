@@ -1662,7 +1662,7 @@ object Ui {
                     list == null -> Working("Looking for covers…")
                     list.isEmpty() -> Words("No covers found for that. Change the words and search again.", 15, K.Soft, lines = 2)
                     else -> LazyVerticalGrid(GridCells.Adaptive(110.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        items(list, key = { it.big }) { c ->
+                        items(list.distinctBy { it.big }, key = { it.big }) { c ->
                             Column(
                                 Modifier.clip(RoundedCornerShape(10.dp)).clickable {
                                     if (busy) return@clickable
