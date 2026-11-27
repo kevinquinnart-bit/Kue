@@ -52,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -2084,6 +2085,10 @@ object Ui {
                 Box(
                     (if (karaoke) Modifier.fillMaxSize() else Modifier.size(side))
                         .graphicsLayer { translationX = slide.value; alpha = 1f - (kotlin.math.abs(slide.value) / (size.width * 1.4f)).coerceIn(0f, 0.6f) }
+                        // A soft shadow and the thin Kue edge set the cover and the rolling words apart from the song's
+                        // name below (Kevin, 27 November 2026).
+                        .shadow(10.dp, RoundedCornerShape(20.dp), ambientColor = androidx.compose.ui.graphics.Color.Black, spotColor = androidx.compose.ui.graphics.Color.Black)
+                        .border(1.dp, K.Edge, RoundedCornerShape(20.dp))
                         .clip(RoundedCornerShape(20.dp)).background(K.Panel)
                         .then(
                             if (!swipes) Modifier else Modifier.pointerInput(Unit) {
@@ -2322,7 +2327,8 @@ object Ui {
         }
         val timed = w.timed
         // The cover almost black behind the words, the words bright (Kevin, 26 November 2026).
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.86f)).padding(horizontal = 16.dp)) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.86f))) {
+          Box(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
             if (timed.isNotEmpty()) {
                 val now = Lyrics.lineAt(timed, position + 300)
                 val list = androidx.compose.foundation.lazy.rememberLazyListState()
@@ -2347,10 +2353,15 @@ object Ui {
                     Text(noEmoji(w.plain), color = Color.White, fontSize = 21.sp, fontFamily = K.Poppins, textAlign = TextAlign.Center, lineHeight = 30.sp, modifier = Modifier.fillMaxWidth())
                 }
             }
+          }
+            // The words fade out at the top and bottom instead of running into the box's edge (Kevin, 27 November 2026).
+            val dark = Color.Black.copy(alpha = 0.92f)
+            Box(Modifier.align(Alignment.TopCenter).fillMaxWidth().height(40.dp).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(dark, Color.Transparent))))
+            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(40.dp).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, dark))))
             // Sing along (the singer turned down) belongs to karaoke, so it is here, not on a button of its own.
             var singAlong by remember { mutableStateOf(SingAlong.on) }
             Row(
-                Modifier.align(Alignment.TopEnd).padding(top = 10.dp).clip(RoundedCornerShape(50)).background(if (singAlong) K.Accent else K.Raised)
+                Modifier.align(Alignment.TopEnd).padding(top = 10.dp, end = 16.dp).clip(RoundedCornerShape(50)).background(if (singAlong) K.Accent else K.Raised)
                     .clickable(onClickLabel = "Turn the singer down") { singAlong = !singAlong; SingAlong.on = singAlong }.padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
