@@ -155,6 +155,8 @@ object Covers {
     data class Lookup(
         val title: String, val artist: String, val album: String, val albumArtist: String, val year: String,
         val trackNo: Int, val discNo: Int, val genre: String, val small: String, val big: String, val from: String,
+        /** True for a find that only gives a picture (Wikipedia): using it changes the cover, not the names. */
+        val coverOnly: Boolean = false,
     )
 
     fun parseItunesLookups(json: String?): List<Lookup> = runCatching {
@@ -190,17 +192,68 @@ object Covers {
         }
     }.getOrDefault(emptyList())
 
-    /** Songs (or albums) for [words] from Apple and Deezer, one of each in turn, the same record only once. Off the main thread. */
+    /**
+     * Wikipedia's pages for [words], each with its main picture (Kevin, 27 November 2026: "Wikipedia has the correct
+     * details and artwork"). The page's name and one-line description show; using one takes only its picture.
+     */
+    fun parseWikipedia(json: String?): List<Lookup> = runCatching {
+        val pages = JsonParser.parseString(json ?: return emptyList()).asJsonObject.getAsJsonObject("query")?.getAsJsonArray("pages") ?: return emptyList()
+        pages.map { it.asJsonObject }.sortedBy { it.get("index")?.asInt ?: 99 }.mapNotNull { o ->
+            val src = o.getAsJsonObject("original")?.get("source")?.asString ?: return@mapNotNull null
+            if (!Regex("\\.(jpe?g|png|webp)$", RegexOption.IGNORE_CASE).containsMatchIn(src.substringBefore('?'))) return@mapNotNull null
+            Lookup(
+                title = o.get("title")?.asString.orEmpty(), artist = o.get("description")?.asString.orEmpty(), album = "", albumArtist = "",
+                year = "", trackNo = 0, discNo = 0, genre = "", small = src, big = src, from = "Wikipedia", coverOnly = true,
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    private fun wikipedia(words: String, songs: Boolean): List<Lookup> = parseWikipedia(
+        get("https://en.wikipedia.org/w/api.php".toHttpUrl().newBuilder().addQueryParameter("action", "query").addQueryParameter("format", "json")
+            .addQueryParameter("formatversion", "2").addQueryParameter("generator", "search").addQueryParameter("gsrsearch", words + if (songs) " song" else " album")
+            .addQueryParameter("gsrlimit", "5").addQueryParameter("prop", "pageimages|description").addQueryParameter("piprop", "original").build()),
+    )
+
+    /**
+     * The picture a link points to (Kevin, 27 November 2026: the right cover was on Wikipedia): a picture's own address,
+     * or a web page, whose main picture is taken (its og:image, which Wikipedia, shops and most music sites give, else
+     * the first full-size Wikimedia picture on it). The answer is the picture's address.
+     */
+    fun pictureAddress(html: String, page: String): String? {
+        fun clean(u: String) = u.replace("&amp;", "&").let { if (it.startsWith("//")) "https:$it" else it }
+        val og = Regex("<meta[^>]+property=[\"']og:image[\"'][^>]*content=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
+            ?: Regex("<meta[^>]+content=[\"']([^\"']+)[\"'][^>]*property=[\"']og:image[\"']", RegexOption.IGNORE_CASE).find(html)?.groupValues?.get(1)
+        if (og != null) return clean(og)
+        Regex("(?:https:)?//upload\\.wikimedia\\.org/wikipedia/[^\"'<> ]+\\.(?:jpe?g|png)", RegexOption.IGNORE_CASE).find(html)?.value?.let { return clean(it) }
+        return null
+    }
+
+    /** The picture behind [link] (a picture or a page), ready to use. Off the main thread. */
+    fun pictureFromLink(link: String): ByteArray? {
+        val url = Regex("https?://\\S+").find(link)?.value?.trimEnd('.', ',', ')') ?: return null
+        val (type, bytes) = runCatching {
+            Drive.http.newCall(Request.Builder().url(url).header("User-Agent", Catalogue.WHO).build()).execute().use { r ->
+                if (!r.isSuccessful) return null
+                r.header("Content-Type").orEmpty() to r.body.bytes()
+            }
+        }.getOrNull() ?: return null
+        if (type.startsWith("image/")) return bytes
+        val address = pictureAddress(bytes.decodeToString(), url) ?: return null
+        return download(address)
+    }
+
+    /** Songs (or albums) for [words] from Apple and Deezer    /** Songs (or albums) for [words] from Apple, Deezer and Wikipedia, one of each in turn, the same record only once. Off the main thread. */
     fun lookUp(words: String, songs: Boolean): List<Lookup> {
         val apple = get("https://itunes.apple.com/search".toHttpUrl().newBuilder().addQueryParameter("term", words)
             .addQueryParameter("entity", if (songs) "song" else "album").addQueryParameter("limit", "15").addQueryParameter("country", "gb").build())
             .let { parseItunesLookups(it) }
         val deezer = get(("https://api.deezer.com/search" + if (songs) "" else "/album").toHttpUrl().newBuilder().addQueryParameter("q", words).addQueryParameter("limit", "15").build())
             .let { parseDeezerLookups(it) }
+        val wiki = wikipedia(words, songs)
         val out = ArrayList<Lookup>()
         val seen = HashSet<String>()
-        for (i in 0 until maxOf(apple.size, deezer.size)) {
-            for (x in listOfNotNull(apple.getOrNull(i), deezer.getOrNull(i))) {
+        for (i in 0 until maxOf(apple.size, deezer.size, wiki.size)) {
+            for (x in listOfNotNull(apple.getOrNull(i), deezer.getOrNull(i), wiki.getOrNull(i))) {
                 val key = Library.sortName(x.artist) + "|" + Library.sortName(x.album) + "|" + Library.sortName(x.title)
                 if (seen.add(key)) out += x
             }

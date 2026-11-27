@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
         Google.init(this)
         KueSettings.init(this)
         Scanner.init(this)
+        CrashLog.install(this)
         Offline.init(this)
         Sync.init(this)
         Podcasts.init(this)
@@ -128,6 +129,16 @@ class MainActivity : ComponentActivity() {
 
     /** A link shared to KueSounds (YouTube, YouTube Music or Spotify's Share button). */
     private fun takeShared(intent: android.content.Intent?) {
+        // A picture or a link shared while Fix it by hand is open becomes that song's cover (Kevin, 27 November 2026).
+        if (intent?.action == android.content.Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+            @Suppress("DEPRECATION") val uri = intent.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM) ?: return
+            if (FixByHandUi.isOpen) FixByHandUi.sharedPicture = uri
+            else android.widget.Toast.makeText(this, "Open a song in Fix it by hand first, then share the picture to KueSounds.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+        if (intent?.action == android.content.Intent.ACTION_SEND && FixByHandUi.isOpen) {
+            intent.getStringExtra(android.content.Intent.EXTRA_TEXT)?.let { FixByHandUi.sharedLink = it; return }
+        }
         val text = when (intent?.action) {
             android.content.Intent.ACTION_SEND -> intent.getStringExtra(android.content.Intent.EXTRA_TEXT)
             android.content.Intent.ACTION_VIEW -> intent.dataString

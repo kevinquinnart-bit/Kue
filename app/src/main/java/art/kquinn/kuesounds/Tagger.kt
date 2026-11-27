@@ -159,6 +159,8 @@ object Tagger {
      * can't show the old names. Checked the same way as [fix]; throws when the check fails. The answer is the details
      * this kind of file can't hold, by name (none, mostly).
      */
+    private fun nfc(v: String) = java.text.Normalizer.normalize(v.trim(), java.text.Normalizer.Form.NFC)
+
     fun edit(file: File, set: Map<FieldKey, String>, remove: Set<String>, cover: File?, knownSeconds: Int = 0): List<String> {
         val length = runCatching { AudioFileIO.read(file).audioHeader?.trackLength ?: 0 }.getOrDefault(0)
         val bytesBefore = if (Library.ending(file.name) == "mp3") runCatching { file.readBytes() }.getOrNull() else null
@@ -166,7 +168,8 @@ object Tagger {
         val tag = audio.tagOrCreateAndSetDefault
         val failed = HashSet<FieldKey>()
         for ((k, v) in set) {
-            runCatching { if (v.isBlank()) tag.deleteField(k) else tag.setField(k, v.trim()) }.onFailure { failed += k }
+            // Letters with accents (Sinéad's fada) are kept in their one-letter form, as every player expects.
+            runCatching { if (v.isBlank()) tag.deleteField(k) else tag.setField(k, nfc(v)) }.onFailure { failed += k }
         }
         for (id in remove) runCatching { tag.deleteField(id) }
         if (cover != null) {
@@ -181,7 +184,7 @@ object Tagger {
 
         val back = AudioFileIO.read(file)
         for (k in listOf(FieldKey.TITLE, FieldKey.ARTIST, FieldKey.ALBUM)) {
-            val want = set[k]?.trim() ?: continue
+            val want = set[k]?.let { nfc(it) } ?: continue
             if (k in failed) continue
             check(runCatching { back.tag?.getFirst(k) }.getOrNull().orEmpty() == want) { (named.first { it.first == k }.second) + " didn't stick" }
         }

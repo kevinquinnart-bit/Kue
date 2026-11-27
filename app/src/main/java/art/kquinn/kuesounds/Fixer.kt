@@ -315,17 +315,29 @@ object Fixer {
         }
     }
 
+    /**
+     * The copy of a song downloaded when Fix it by hand opens: read for its details, listened to by Shazam and written
+     * from, so the song is fetched from the Drive once, not three times (Kevin, 27 November 2026: "extremely slow").
+     */
+    fun lookCopy(context: Context, t: Track): File =
+        File(File(context.cacheDir, "look").apply { mkdirs() }, t.id + "." + Library.ending(Library.realName(t)).ifEmpty { "audio" })
+
+    /** The copy, while Fix it by hand is open for this song; null otherwise. */
+    @Volatile var openCopy: Pair<String, File>? = null
+
     /** What a file holds, read from the Drive for Fix it by hand. Call off the main thread. */
     suspend fun readFile(context: Context, t: Track): Tagger.All {
-        val work = File(context.cacheDir, "look").apply { mkdirs() }
-        val file = File(work, t.id + "." + Library.ending(Library.realName(t)).ifEmpty { "audio" })
-        try {
-            val token = Google.token() ?: throw Drive.SignedOut()
-            Drive.downloadChecked(t.id, file, token, t.size)
-            return Tagger.readAll(file)
-        } finally {
-            file.delete()
-        }
+        val file = lookCopy(context, t)
+        val token = Google.token() ?: throw Drive.SignedOut()
+        Drive.downloadChecked(t.id, file, token, t.size)
+        openCopy = t.id to file
+        return Tagger.readAll(file)
+    }
+
+    /** Fix it by hand closed: its copy goes. */
+    fun dropCopy(context: Context, t: Track) {
+        if (openCopy?.first == t.id) openCopy = null
+        lookCopy(context, t).delete()
     }
 
     /**
@@ -346,7 +358,10 @@ object Fixer {
                 val file = File(work, t.id + "." + Library.ending(Library.realName(t)))
                 try {
                     val token = Google.editToken() ?: throw Drive.SignedOut()
-                    Drive.downloadChecked(t.id, file, token, t.size)
+                    // The copy fetched when the page opened, when the Drive's file is still that size; else fetched now.
+                    val copy = openCopy?.takeIf { it.first == t.id }?.second?.takeIf { it.exists() }
+                    if (copy != null && copy.length() == Drive.sizeNow(t.id, token)) copy.copyTo(file, overwrite = true)
+                    else Drive.downloadChecked(t.id, file, token, t.size)
                     val seconds = (t.durationMs / 1000).toInt()
                     couldNotHold += try {
                         Tagger.edit(file, set, remove, coverFile, seconds)
@@ -361,11 +376,12 @@ object Fixer {
                         } finally { fresh.delete() }
                         Tagger.edit(file, set, remove, coverFile, 0)
                     }
-                    fun v(key: org.jaudiotagger.tag.FieldKey) = set[key]?.trim()
+                    fun v(key: org.jaudiotagger.tag.FieldKey) = set[key]?.let { java.text.Normalizer.normalize(it.trim(), java.text.Normalizer.Form.NFC) }
                     val title = v(org.jaudiotagger.tag.FieldKey.TITLE) ?: t.title
                     val artist = v(org.jaudiotagger.tag.FieldKey.ARTIST) ?: t.artist
                     val newName = if (title != t.title || artist != t.artist) fileNameFor(t, title, artist) else null
                     val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
+                    if (copy != null) file.copyTo(copy, overwrite = true)
                     Scanner.changeTracks(setOf(t.id)) {
                         it.copy(
                             size = size, modified = modified.ifEmpty { it.modified }, title = title, artist = artist,

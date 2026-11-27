@@ -60,4 +60,26 @@ class CoversTest {
         assertEquals("Haunted", got.first().album)
         assertTrue(got.first().big.isNotEmpty())
     }
+
+    // A link to Wikipedia's page for the cover Kevin wanted (saved by him from his phone, 27 November 2026).
+    @Test fun pictureFromAWikipediaPage() {
+        val got = Covers.pictureAddress(text("wikipedia_file_haunted.html"), "https://en.wikipedia.org/wiki/File:Haunted_(The_Pogues_single_-_cover_art).jpg")
+        assertEquals(
+            "https://upload.wikimedia.org/wikipedia/en/f/fc/Haunted_%28The_Pogues_single_-_cover_art%29.jpg?utm_source=en.wikipedia.org&utm_campaign=index&utm_content=thumbnail_unscaled",
+            got,
+        )
+    }
+
+    // Wikipedia's answer in the shape its search gives (written here from its documented form, not saved live).
+    @Test fun wikipediaPagesWithPictures() {
+        val json = """{"batchcomplete":true,"query":{"pages":[
+            {"pageid":2,"ns":0,"title":"Haunted (Poe song)","index":2,"description":"song","original":{"source":"https://upload.wikimedia.org/wikipedia/en/a/ab/Poe.png","width":300,"height":300}},
+            {"pageid":1,"ns":0,"title":"Haunted (The Pogues song)","index":1,"description":"1986 single by the Pogues","original":{"source":"https://upload.wikimedia.org/wikipedia/en/f/fc/Haunted_%28The_Pogues_single_-_cover_art%29.jpg","width":316,"height":316}},
+            {"pageid":3,"ns":0,"title":"Haunted","index":3,"description":"Topics referred to by the same term"}]}}"""
+        val got = Covers.parseWikipedia(json)
+        assertEquals(2, got.size)
+        assertEquals("Haunted (The Pogues song)", got[0].title)
+        assertTrue(got[0].coverOnly)
+        assertEquals("Wikipedia", got[0].from)
+    }
 }

@@ -106,7 +106,8 @@ object SoundMatch {
     /** [seconds] of the song from [fromSec] in, from the phone if it is saved there, otherwise straight from the Drive. */
     private fun decode(t: Track, fromSec: Int, seconds: Int): Pcm {
         val ex = MediaExtractor()
-        val local = Offline.fileFor(t)
+        // Saved on the phone, or the copy Fix it by hand fetched: read here, far quicker than from the Drive.
+        val local = Offline.fileFor(t) ?: Fixer.openCopy?.takeIf { it.first == t.id }?.second?.takeIf { it.exists() }
         if (local != null) ex.setDataSource(local.path)
         else ex.setDataSource(Scanner.DriveSource(t.id, t.size, Google.tokenBlocking() ?: throw Drive.SignedOut()))
         try {

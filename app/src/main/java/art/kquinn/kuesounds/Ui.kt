@@ -1889,12 +1889,19 @@ object Ui {
         val data = Scanner.data
         // Fixed means the right names AND a cover (Kevin, 26 November 2026: "fixed" was counting songs with no cover).
         val fixed = remember(data) { data.tracks.count { it.fixed && it.fixedFully } }
-        val noCover = remember(data) { Scanner.noCover(data) }
-        val notFixed = remember(data, view, Scanner.running) { Scanner.notFixed(view, data) }
+        val left = remember(data, view, Scanner.running) { Scanner.left(view, data) }
+        val noCover = left.albums
+        val notFixed = left.songs
         // One list for everything not fixed, each opening the same page (Kevin, 27 November 2026: "the options for the 54
         // and 2 not fixed should be the same as all are not fixed still").
         var fixing by remember { mutableStateOf<Triple<List<Track>, String?, String>?>(null) }
-        fixing?.let { (songs, album, why) -> FixByHandUi.Page(songs, album, why) { fixing = null } }
+        val items = notFixed.map { (t, why) -> Triple(listOf(t), null as String?, why) } + noCover.map { Triple(it.tracks, it.title as String?, "No cover found anywhere.") }
+        fixing?.let { cur ->
+            val others = items.filter { it.first.first().id != cur.first.first().id }
+            androidx.compose.runtime.key(cur.first.first().id) {
+                FixByHandUi.Page(cur.first, cur.second, cur.third, others.size, onNext = others.firstOrNull()?.let { n -> { fixing = n } }) { fixing = null }
+            }
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             KueSettings.Icon(KueSettings.Icons.TICK, 20.dp, K.Accent, 2.6f)
             Words("Fixed, with names and cover: " + count(fixed, "song"), 16, bold = true)
@@ -1916,10 +1923,10 @@ object Ui {
                 KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
             }
         }
-        for ((t, why) in notFixed.take(100)) Item(t.title, t.artist + " · " + t.fileName, why) { fixing = Triple(listOf(t), null, why) }
-        for (al in noCover.take(100)) {
-            val why = "No cover found anywhere."
-            Item(al.title, al.artist + " · " + count(al.tracks.size, "song"), why) { fixing = Triple(al.tracks, al.title, why) }
+        for (x in items.take(200)) {
+            val t = x.first.first()
+            if (x.second == null) Item(t.title, t.artist + " · " + t.fileName, x.third) { fixing = x }
+            else Item(x.second!!, (t.albumArtist.ifBlank { t.artist }) + " · " + count(x.first.size, "song"), x.third) { fixing = x }
         }
         if (total > 200) Words("And " + String.format("%,d", total - 200) + " more.", 14, K.Soft)
     }
@@ -2610,8 +2617,9 @@ object Ui {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // First, in one box: working or finished, and what (if anything) is left for you to do (Kevin, 26 November
             // 2026: "not knowing if the process is complete or what to do next").
-            val noCovers = remember(data) { Scanner.noCover(data).size }
-            val notFixedNow = remember(data, view, running) { Scanner.notFixed(view, data) }
+            val leftNow = remember(data, view, running) { Scanner.left(view, data) }
+            val noCovers = leftNow.albums.size
+            val notFixedNow = leftNow.songs
             val retrying = notFixedNow.count { (t, _) -> t.id in data.fixProblems && !Fixer.stuck(t, data) }
             val stuckNow = notFixedNow.size - retrying
             Column(
@@ -2878,7 +2886,7 @@ object Ui {
                 open == "app", look, { toggle("app") },
             ) {
                 // What is happening shows on the closed section (Kevin, 26 November 2026: steps 1 to 4).
-                val notFixedCount = remember(data, view, Scanner.running) { Scanner.notFixed(view, data).size + Scanner.noCover(data).size }
+                val notFixedCount = remember(data, view, Scanner.running) { Scanner.left(view, data).total }
                 val fixNote = when {
                     Scanner.running -> when (Scanner.stage) { 1, 2 -> "Reading your Drive"; 3 -> "Step 1 of 4"; 4 -> "Step 2 of 4"; 5 -> "Step 3 of 4"; 7 -> "Step 4 of 4"; else -> "Extra details" }
                     Fixer.running -> "Step 4 of 4"

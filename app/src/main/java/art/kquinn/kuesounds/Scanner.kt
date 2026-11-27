@@ -1174,6 +1174,21 @@ object Scanner {
         }
     }
 
+    /**
+     * Everything not fixed, worked out once for each state of the library and kept (Kevin, 27 November 2026: Fix your
+     * music files slow to respond; the lists were worked out three times over on every change).
+     */
+    data class Left(val songs: List<Pair<Track, String>>, val albums: List<Album>) { val total get() = songs.size + albums.size }
+
+    @Volatile private var leftCache: Triple<LibraryView, LibraryData, Boolean>? = null
+    @Volatile private var leftValue: Left? = null
+
+    fun left(view: LibraryView = this.view, d: LibraryData = data): Left {
+        val key = Triple(view, d, running)
+        leftValue?.let { v -> leftCache?.let { c -> if (c.first === view && c.second === d && c.third == running) return v } }
+        return Left(notFixed(view, d), noCover(d)).also { leftCache = key; leftValue = it }
+    }
+
     /** Albums whose songs are written but have no cover from anywhere yet, for the list in Settings. */
     fun noCover(d: LibraryData = data): List<Album> =
         Library.albums(d.tracks).filter { al ->
