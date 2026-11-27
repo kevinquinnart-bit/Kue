@@ -266,7 +266,7 @@ object Fixer {
     }
 
     /** A song's details as edited by hand in Song info (Kevin, 26 November 2026: one table that writes to the file). */
-    data class Edit(val title: String, val artist: String, val album: String, val albumArtist: String, val year: Int, val trackNo: Int, val discNo: Int)
+    data class Edit(val title: String, val artist: String, val album: String, val albumArtist: String, val year: Int, val trackNo: Int, val discNo: Int, val genre: String = "")
 
     /** A song's name and artist put right by hand; the rest as it is. */
     suspend fun rename(context: Context, t: Track, title: String, artist: String): String =
@@ -288,7 +288,7 @@ object Fixer {
         return try {
             val token = Google.editToken() ?: throw Drive.SignedOut()
             Drive.downloadChecked(t.id, file, token, t.size)
-            writeDetails(file, t, Tagger.Details(e.title, e.artist, e.album, e.albumArtist, e.year, e.trackNo, e.discNo, cover), token)
+            writeDetails(file, t, Tagger.Details(e.title, e.artist, e.album, e.albumArtist, e.year, e.trackNo, e.discNo, cover, e.genre.ifBlank { Library.genreOf(t, Scanner.data) }), token)
             val named = t.copy(title = e.title, artist = e.artist)
             val newName = fileNameFor(named, e.title, e.artist)
             val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
@@ -296,6 +296,7 @@ object Fixer {
                 it.copy(
                     size = size, modified = modified.ifEmpty { it.modified }, title = e.title, artist = e.artist, album = e.album,
                     albumArtist = e.albumArtist, year = e.year, trackNo = e.trackNo, discNo = e.discNo, named = true, fileName = newName,
+                    genre = e.genre.ifBlank { Library.genreOf(t, Scanner.data) },
                     // Kept on the album given by hand; looked up again for its cover when the album changed and has none.
                     ownLook = true, checked = if (albumChanged && cover == null) false else it.checked,
                     // Put right by hand: not flagged or rewritten by KueSounds again (27 November 2026).
@@ -303,6 +304,7 @@ object Fixer {
                 )
             }
             Scanner.fixTried(t.id, null)
+            if (e.genre.isNotBlank() || Library.genreOf(t, Scanner.data).isNotBlank()) Scanner.markKind(t.id, written = true)
             Scanner.note("saved by hand: " + t.fileName + " → " + e.artist + " / " + e.title + " / " + e.album)
             "Saved into the file in your Drive."
         } catch (x: Drive.SignedOut) {
@@ -401,6 +403,7 @@ object Fixer {
                         )
                     }
                     Scanner.fixTried(t.id, null)
+                    if (!set[org.jaudiotagger.tag.FieldKey.GENRE].isNullOrBlank()) Scanner.markKind(t.id, written = true)
                     Scanner.note("fixed by hand: " + t.fileName + " → " + artist + " / " + title)
                     done++
                 } catch (x: Drive.SignedOut) {
@@ -461,7 +464,7 @@ object Fixer {
                     org.jaudiotagger.tag.FieldKey.TRACK to (if (d.trackNo > 0) d.trackNo.toString() else ""),
                     org.jaudiotagger.tag.FieldKey.DISC_NO to (if (d.discNo > 0) d.discNo.toString() else ""),
                     org.jaudiotagger.tag.FieldKey.COMMENT to "",
-                )
+                ).apply { if (d.genre.isNotBlank()) put(org.jaudiotagger.tag.FieldKey.GENRE, d.genre) }
                 Tagger.edit(file, set, other, d.cover, seconds)
                 Scanner.note("written in place, as taking everything out first upset it: " + t.fileName)
                 return
@@ -554,7 +557,7 @@ object Fixer {
             val singer = if (t.named) t.artist else song?.artist?.ifBlank { null } ?: t.artist
             val trackNo = song?.position?.takeIf { it > 0 } ?: t.trackNo
             val discNo = song?.disc?.takeIf { it > 0 } ?: t.discNo
-            writeDetails(file, t, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover), token)
+            writeDetails(file, t, Tagger.Details(title, singer, al.title, artist, al.year, trackNo, discNo, cover, Library.genreOf(t, Scanner.data)), token)
             val newName = fileNameFor(t, title, singer)
             val (size, modified) = Drive.uploadNewVersion(t.id, file, t.mime, Google.editToken() ?: token, newName)
             Scanner.changeTracks(setOf(t.id)) {
@@ -564,6 +567,7 @@ object Fixer {
                 )
             }
             Scanner.fixTried(t.id, null)
+            if (Library.genreOf(t, Scanner.data).isNotBlank()) Scanner.markKind(t.id, written = true)
             true
         } catch (e: Drive.SignedOut) {
             throw e
@@ -655,7 +659,8 @@ class WorkService : Service() {
                         }
                         if (Offline.hasWork) Offline.run(show)
                         if (Fixer.hasWork) Fixer.run(this@WorkService, show)
-                    } while (Scanner.running || Offline.hasWork || Fixer.hasWork)
+                        if (Kinds.hasWork) Kinds.run(this@WorkService, show)
+                    } while (Scanner.running || Offline.hasWork || Fixer.hasWork || Kinds.hasWork)
                 } finally {
                     if (awake.isHeld) awake.release()
                     runCatching { if (wifi?.isHeld == true) wifi.release() }

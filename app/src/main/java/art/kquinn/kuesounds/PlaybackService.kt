@@ -133,6 +133,7 @@ class PlaybackService : MediaLibraryService() {
             var p = Sound.profile(kind)
             // Following the kind of music: the song's own kind picks its setting as it comes on (26 November 2026).
             Sound.following = ""
+            Sound.followingPreset = -1
             if (kind == Sound.Kind.MUSIC && p.followKind) {
                 val t = Scanner.data.tracks.firstOrNull { it.id == id }
                 val genre = t?.let { Library.genreOf(it, Scanner.data) }.orEmpty()
@@ -142,6 +143,7 @@ class PlaybackService : MediaLibraryService() {
                     genre.isBlank() -> "Finding this song's kind of music"
                     else -> genre + ": no setting for it, so yours"
                 }
+                if (chosen !== p) Sound.followingPreset = chosen.preset
                 p = chosen
                 // Kind not known yet: asked now, kept with the song, and the sound changed as soon as it is known.
                 if (t != null && genre.isBlank() && asked.add(t.id)) scope.launch {
@@ -149,6 +151,9 @@ class PlaybackService : MediaLibraryService() {
                     Scanner.note("kind of music for " + t.artist + " / " + t.title + ": " + (found ?: "not found"))
                     if (found != null) {
                         Scanner.changeTracks(setOf(t.id)) { it.copy(genre = found) }
+                        // And into the song's file, on Wi-Fi, so it shows in the file's own details (27 November 2026).
+                        Scanner.markKind(t.id, fromWeb = true)
+                        if (Google.canEdit && Net.unmetered(this@PlaybackService)) Kinds.queue(this@PlaybackService, listOf(t))
                         if (player.currentMediaItem?.mediaId == t.id) soundAgain?.invoke()
                     } else if (player.currentMediaItem?.mediaId == t.id) Sound.following = "Kind of music not known, so your own setting"
                 }

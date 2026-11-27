@@ -34,6 +34,8 @@ object Tagger {
         val trackNo: Int,
         val discNo: Int,
         val cover: File?,
+        /** The kind of music, written in too when known (Kevin, 27 November 2026: readable in the file's info). */
+        val genre: String = "",
     )
 
     /** What a file holds, read back after a change to check it. */
@@ -94,6 +96,7 @@ object Tagger {
         if (d.year > 0) tag.setField(FieldKey.YEAR, d.year.toString())
         if (d.trackNo > 0) tag.setField(FieldKey.TRACK, d.trackNo.toString())
         if (d.discNo > 0) tag.setField(FieldKey.DISC_NO, d.discNo.toString())
+        if (d.genre.isNotBlank()) runCatching { tag.setField(FieldKey.GENRE, d.genre) }
         if (d.cover != null) {
             val art = CoverArt().apply { setFromFile(d.cover) }
             art.pictureType = PictureTypes.DEFAULT_ID

@@ -1067,10 +1067,10 @@ object Ui {
         // The table as it is in the file now, and as edited.
         val was = remember(t.id) {
             androidx.compose.runtime.mutableStateListOf(t.title, t.artist, t.album, Library.albumArtistOf(t), if (t.year > 0) t.year.toString() else "",
-                if (t.trackNo > 0) t.trackNo.toString() else "", if (t.discNo > 0) t.discNo.toString() else "")
+                if (t.trackNo > 0) t.trackNo.toString() else "", if (t.discNo > 0) t.discNo.toString() else "", Library.genreOf(t, Scanner.data))
         }
         val now = remember(t.id) { androidx.compose.runtime.mutableStateListOf(*was.toTypedArray()) }
-        val labels = listOf("Song name", "Artist", "Album", "Album artist", "Year", "Track number", "Disc")
+        val labels = listOf("Song name", "Artist", "Album", "Album artist", "Year", "Track number", "Disc", "Kind of music")
         var editing by remember { mutableStateOf(-1) }
         var saying by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf("") }
@@ -1085,7 +1085,7 @@ object Ui {
             saying = ""
             val e = Fixer.Edit(
                 now[0].trim(), now[1].trim(), now[2].trim(), now[3].trim().ifBlank { now[1].trim() },
-                now[4].trim().toIntOrNull() ?: 0, now[5].trim().toIntOrNull() ?: 0, now[6].trim().toIntOrNull() ?: 0,
+                now[4].trim().toIntOrNull() ?: 0, now[5].trim().toIntOrNull() ?: 0, now[6].trim().toIntOrNull() ?: 0, now[7].trim(),
             )
             val go = {
                 scope.launch {
@@ -1904,6 +1904,16 @@ object Ui {
             }
         }
         if (Fixer.permissionProblem.isNotEmpty()) Words(Fixer.permissionProblem, 14, K.Accent)
+        // The kind of music into the files that don't hold it (Kevin, 27 November 2026).
+        val kinds = remember(data) { Scanner.kindsToWrite(data).size }
+        when {
+            Kinds.status.isNotEmpty() -> Words(Kinds.status, 14, K.Accent)
+            kinds > 0 && !Scanner.running -> {
+                Words(String.format("%,d", kinds) + (if (kinds == 1) " song's kind of music isn't" else " songs' kind of music isn't") + " in the file yet.", 14)
+                Button("Write it in, on Wi-Fi", main = false, icon = KueSettings.Icons.EDIT, modifier = Modifier.fillMaxWidth()) { Kinds.queue(ctx, Scanner.kindsToWrite()) }
+            }
+        }
+        if (Kinds.lastResult.isNotEmpty() && Kinds.status.isEmpty()) Words(Kinds.lastResult, 14, K.Soft)
     }
 
     /**
@@ -2496,14 +2506,23 @@ object Ui {
             ) { on -> Sound.change(kind) { it.copy(followKind = on, eqOn = it.eqOn || on) } }
             if (p.followKind && Sound.following.isNotEmpty()) Words("Playing now: " + Sound.following, 14, K.Accent)
         }
-        KueSettings.FanOut("Setting", Sound.presets.map { it.name }, p.preset, presetsOpen, look, { presetsOpen = it }) { i ->
+        // While following the kind of music, the setting and bars shown are the ones playing now, not the one kept for
+        // other songs (Kevin, 27 November 2026: "Playing now: Country and folk" above a setting reading Flat). Choosing
+        // a setting or moving a bar by hand takes over from following.
+        val followed = kind == Sound.Kind.MUSIC && p.followKind && Sound.followingPreset >= 0
+        val shown = if (followed) p.copy(eqOn = true, preset = Sound.followingPreset) else p
+        val ctxEq = LocalContext.current
+        val tookOver = { if (followed) android.widget.Toast.makeText(ctxEq, "Your choice now: Follow the kind of music is off.", android.widget.Toast.LENGTH_LONG).show() }
+        KueSettings.FanOut("Setting", Sound.presets.map { it.name }, shown.preset, presetsOpen, look, { presetsOpen = it }) { i ->
             presetsOpen = false
+            tookOver()
             // Picking your own starts from the setting in use, so it can be changed a little.
-            Sound.change(kind) { it.copy(eqOn = true, preset = i, own = if (i == Sound.OWN && it.preset != Sound.OWN) it.levels else it.own) }
+            Sound.change(kind) { it.copy(eqOn = true, followKind = false, preset = i, own = if (i == Sound.OWN && shown.preset != Sound.OWN) shown.levels else it.own) }
         }
         // Ten bands as a graphic equaliser: drag each bar up or down (Kevin, 25 November 2026).
-        GraphicEq(p.levels) { band, v ->
-            Sound.change(kind) { it.copy(eqOn = true, preset = Sound.OWN, own = (if (it.preset == Sound.OWN) it.own else it.levels).toMutableList().also { l -> l[band] = v }) }
+        GraphicEq(shown.levels) { band, v ->
+            tookOver()
+            Sound.change(kind) { it.copy(eqOn = true, followKind = false, preset = Sound.OWN, own = (if (shown.preset == Sound.OWN) it.own else shown.levels).toMutableList().also { l -> l[band] = v }) }
         }
         val extra: @Composable (String, Int, (Int) -> Sound.Profile) -> Unit = { label, value, set ->
             Column {

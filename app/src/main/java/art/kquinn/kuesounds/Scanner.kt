@@ -1189,6 +1189,21 @@ object Scanner {
         return Left(notFixed(view, d), noCover(d)).also { leftCache = key; leftValue = it }
     }
 
+    /** Notes that a song's kind of music came from online, or that it is now written in its file. */
+    fun markKind(id: String, fromWeb: Boolean = false, written: Boolean = false) = synchronized(this) {
+        data = data.copy(
+            kindFromWeb = if (fromWeb) data.kindFromWeb + id else data.kindFromWeb,
+            kindWritten = if (written) data.kindWritten + id else data.kindWritten,
+        )
+        save()
+    }
+
+    /** Songs whose kind of music KueSounds knows but their file doesn't hold yet (Kevin, 27 November 2026). */
+    fun kindsToWrite(d: LibraryData = data): List<Track> = d.tracks.filter { t ->
+        t.id !in d.kindWritten && Tagger.canFix(Library.realName(t)) && (t.genre.isBlank() || t.id in d.kindFromWeb) &&
+            Library.genreOf(t, d).isNotBlank()
+    }
+
     /** Albums whose songs are written but have no cover from anywhere yet, for the list in Settings. */
     fun noCover(d: LibraryData = data): List<Album> =
         Library.albums(d.tracks).filter { al ->

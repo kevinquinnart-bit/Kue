@@ -92,6 +92,9 @@ object Sound {
     /** The setting the playing song took by its kind, for the screen ("Soul and R&B, for Soul"); "" when none. */
     var following by mutableStateOf("")
 
+    /** The setting the playing song took by its kind (-1: none), so the screen shows what is really playing. */
+    var followingPreset by mutableStateOf(-1)
+
     /** One profile: whether the equaliser is on, which setting, your own bands, and the three extras (0 to 100). */
     data class Profile(
         val eqOn: Boolean = false,
