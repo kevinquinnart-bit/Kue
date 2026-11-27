@@ -1212,7 +1212,7 @@ object Ui {
 
                 Button("Play it", glyph = Glyph.PLAY, modifier = Modifier.fillMaxWidth()) { Playing.play(listOf(t), 0); onClose() }
                 OpenSong.Choices(t.artist, t.title)
-                Button("Look it up on the web", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://www.google.com/search?q=$words") }
+                Button("Look it up on the web", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://www.google.com/search?q=$words" + java.net.URLEncoder.encode(" album and year", "UTF-8")) }
                 Scanner.releaseFor(t)?.let { release ->
                     Button("Its record in the catalogue", main = false, icon = KueSettings.Icons.OPEN, modifier = Modifier.fillMaxWidth()) { open("https://musicbrainz.org/release/" + release.first) }
                 }

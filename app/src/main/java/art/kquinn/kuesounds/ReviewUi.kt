@@ -65,9 +65,9 @@ object ReviewUi {
         val t = item.songs.first()
         val artist = now[FieldKey.ARTIST].orEmpty().ifBlank { t.artist }.takeIf { it.isNotBlank() && it != Library.UNKNOWN_ARTIST }.orEmpty()
         if (item.album == null) {
-            val heard = runCatching { SoundMatch.identifyAnywhere(t) { trying(it + " · Shazam") }.firstOrNull() }.getOrNull()
+            val heard = runCatching { SoundMatch.identifyAnywhere(t) { trying(it) }.firstOrNull() }.getOrNull()
             var best = heard?.let { f ->
-                Covers.Lookup(f.title, f.artist, f.albums.firstOrNull().orEmpty(), f.artist, f.year.take(4), 0, 0, f.genre, f.cover.orEmpty(), f.cover.orEmpty(), "Shazam")
+                Covers.Lookup(f.title, f.artist, f.albums.firstOrNull().orEmpty(), f.artist, f.year.take(4), 0, 0, f.genre, f.cover.orEmpty(), f.cover.orEmpty(), f.from)
             }
             val title = best?.title ?: Library.withoutBrackets(now[FieldKey.TITLE].orEmpty().ifBlank { t.title })
             val who = best?.artist ?: artist
@@ -93,9 +93,9 @@ object ReviewUi {
         trying("Looking up the album")
         val found = runCatching { Covers.lookUp((artist + " " + item.album).trim(), false) }.getOrDefault(emptyList())
         found.firstOrNull { !it.coverOnly && Covers.same(it.album, item.album) && (artist.isBlank() || Covers.sameArtist(it.artist, artist)) }?.let { return it.copy(title = "") }
-        val heard = runCatching { SoundMatch.identifyAnywhere(t) { trying(it + " · Shazam, its first song") }.firstOrNull() }.getOrNull()
+        val heard = runCatching { SoundMatch.identifyAnywhere(t) { trying(it + " · its first song") }.firstOrNull() }.getOrNull()
         if (heard?.cover?.isNotBlank() == true) {
-            return Covers.Lookup("", heard.artist, item.album, "", heard.year.take(4), 0, 0, heard.genre, heard.cover, heard.cover, "Shazam (the cover of its first song)", coverOnly = true)
+            return Covers.Lookup("", heard.artist, item.album, "", heard.year.take(4), 0, 0, heard.genre, heard.cover, heard.cover, heard.from + " (the cover of its first song)", coverOnly = true)
         }
         return found.firstOrNull { it.coverOnly }
     }

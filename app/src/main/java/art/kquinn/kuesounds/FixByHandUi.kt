@@ -248,7 +248,7 @@ object FixByHandUi {
                 Ui.Words(if (pictureSaying.isNotEmpty()) pictureSaying else "Tap the cover to change it.", 13, if (pictureSaying.isNotEmpty()) K.Accent else K.Soft, centre = true, modifier = Modifier.fillMaxWidth())
                 // 1. Listen.
                 Ui.Words("1. Listen to it", 17, bold = true)
-                Line(if (listening.isNotEmpty()) listening else "Name it by its sound (Shazam)", KueSettings.Icons.MIC) {
+                Line(if (listening.isNotEmpty()) listening else "Name it by its sound", KueSettings.Icons.MIC) {
                     if (listening.isNotEmpty()) return@Line
                     listening = "Listening…"
                     heard = null
@@ -265,11 +265,12 @@ object FixByHandUi {
                     }
                 }
                 if (listening.isNotEmpty()) Busy(listening)
-                heard?.let { f -> Found(f, "Shazam says") { use(f); heard = null; pictureSaying = "Put in from Shazam. Check below, then Save." } }
+                // Said as it is: Shazam's answer, or AcoustID's when Shazam didn't know it (Kevin, 27 November 2026).
+                heard?.let { f -> Found(f, f.from + " says") { use(f); heard = null; pictureSaying = "Put in from " + f.from + ". Check below, then Save." + if (f.big.isBlank()) " " + f.from + " gives no picture: tap the cover for one." else "" } }
                 if (heardSaying.isNotEmpty()) Ui.Words(heardSaying, 14, K.Accent)
 
                 // 2. Look it up.
-                Ui.Words("2. Look it up", 17, bold = true)
+                Ui.Words("2. Search the web", 17, bold = true)
                 Search(
                     start = listOf(was[FieldKey.ARTIST].orEmpty().ifBlank { first.artist }.takeIf { it != Library.UNKNOWN_ARTIST }.orEmpty(), if (isAlbum) albumTitle.orEmpty() else Library.withoutBrackets(first.title))
                         .filter { it.isNotBlank() }.joinToString(" "),
@@ -487,22 +488,10 @@ object FixByHandUi {
     private fun Search(start: String, songs: Boolean, song: String?, onUse: (Covers.Lookup) -> Unit, onPicture: (ByteArray?, String) -> Unit) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
-        var words by remember { mutableStateOf(start) }
-        var found by remember { mutableStateOf<List<Covers.Lookup>?>(null) }
-        var looking by remember { mutableStateOf(false) }
-        var forSongs by remember { mutableStateOf(songs) }
+        // The in-app look-up is gone (Kevin, 27 November 2026: "remove look it up"): the web, Discogs and Spotify are
+        // searched for the song's artist and name.
+        val words = start
         var link by remember { mutableStateOf<String?>(null) }
-        var more by remember { mutableStateOf(false) }
-        val search = {
-            looking = true
-            found = null
-            more = false
-            scope.launch {
-                found = withContext(Dispatchers.IO) { Covers.lookUp(words, forSongs, song) }
-                looking = false
-            }
-            Unit
-        }
         val open = { url: String ->
             runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
             Unit
@@ -512,27 +501,12 @@ object FixByHandUi {
             if (uri == null) return@rememberLauncherForActivityResult
             scope.launch { onPicture(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }, "the file") }
         }
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Box(Modifier.weight(1f)) { Field(words) { words = it } }
-            Ui.Button("Search", modifier = Modifier.height(52.dp), onClick = search)
-        }
-        // The three best, the rest only when asked for (Kevin, 27 November 2026: "don't need these, too much").
-        when {
-            looking -> Busy("Looking in Apple Music, Deezer and Discogs…")
-            found?.isEmpty() == true -> Ui.Words("Nothing found for that. Change the words and search again, or use the web below.", 14, K.Soft)
-            else -> found?.let { all ->
-                val best = all.filter { !it.coverOnly }.ifEmpty { all }
-                best.take(if (more) 20 else 3).forEach { f -> Found(f, null) { onUse(f) } }
-                if (!more && best.size > 3) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-                    Ui.Words("Show " + (minOf(best.size, 20) - 3) + " more", 14, K.Accent, bold = true, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { more = true }.padding(8.dp))
-                }
-            }
-        }
         val q = android.net.Uri.encode(words)
         // Discogs had most of the ones nothing else knew (Kevin, 27 November 2026). Share its page back to KueSounds,
         // or copy its link and use Picture from a link, for the cover.
         Line("Search Discogs", KueSettings.Icons.SEARCH) { open("https://www.discogs.com/search/?q=$q&type=all") }
-        Line("Search the web", KueSettings.Icons.WEB) { open("https://www.google.com/search?q=$q") }
+        // With "album and year", so the answer at the top is the song's album and when it came out (Kevin, 27 November 2026).
+        Line("Search the web", KueSettings.Icons.WEB) { open("https://www.google.com/search?q=" + android.net.Uri.encode("$words album and year")) }
         Line("Find pictures on the web", KueSettings.Icons.DISC) { open("https://www.google.com/search?tbm=isch&q=$q") }
         Line("Look in Spotify", KueSettings.Icons.SEARCH) { SpotifyLink.openSearch(context, words) }
         Line("Use a picture file on your phone", KueSettings.Icons.PHONE) { fromFile.launch(arrayOf("image/*")) }
