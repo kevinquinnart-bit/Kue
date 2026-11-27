@@ -184,82 +184,49 @@ object ReviewUi {
             return
         }
 
-        // One screen, no scrolling (Kevin, 27 November 2026): the picture takes whatever room is left.
-        Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            val title = item.album ?: now?.get(FieldKey.TITLE).orEmpty().ifBlank { t.title }
-            val who = now?.get(FieldKey.ARTIST).orEmpty().ifBlank { t.artist }
-            Ui.Words(title + " · " + who, 16, bold = true)
-            Ui.Words(item.why, 13, K.Accent)
-            val a = answer
-            when {
-                finding.isNotEmpty() -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // One page (Kevin, 27 November 2026: "combine this with the following page"): KueSounds' answer put straight into
+        // the editor, every detail and the cover shown as changes to keep or alter, Save at the foot, then the check.
+        if (finding.isNotEmpty()) {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                val title = item.album ?: t.title
+                Ui.Words(title + " · " + t.artist, 16, bold = true)
+                Ui.Words(item.why, 13, K.Accent)
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
                     Ui.Words(finding, 14, K.Accent, modifier = Modifier.weight(1f))
                 }
-                a != null -> Ui.Words("KueSounds suggests, from " + a.from + ":", 13, K.Soft)
-                nothing -> Ui.Words("Nothing knows it, by its sound or by its name. Change it yourself, or keep it as it is.", 14)
+                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel)) { Hear(t) }
             }
-            androidx.compose.foundation.layout.BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                val side = if (maxWidth < maxHeight) maxWidth else maxHeight
-                Box(Modifier.size(side).clip(RoundedCornerShape(16.dp)).background(K.Panel).border(2.dp, if (a?.big?.isNotBlank() == true) K.Accent else K.Edge, RoundedCornerShape(16.dp))) {
-                    if (a?.big?.isNotBlank() == true) AsyncImage(model = a.big, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
-                    // Hear it before deciding: play, pause and a slider over the picture.
-                    Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))) { Hear(t) }
-                }
-            }
-            if (a != null) {
-                val rows = changesOf(item, a, now.orEmpty())
-                if (rows.isEmpty()) Ui.Words("Just the cover changes.", 13, K.Soft)
-                // One line each: what changes, old in grey then new in yellow.
-                else Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    for ((k, label, v) in rows) {
-                        val old = now?.get(k).orEmpty()
-                        Row {
-                            Ui.Words(label, 13, K.Soft, modifier = Modifier.width(96.dp))
-                            Ui.Words(if (old.isNotBlank() && old != v) "$old → $v" else v, 13, if (old != v) K.Accent else K.Ink, modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-            if (problem.isNotEmpty()) Ui.Words(problem, 14, K.Accent)
-
-            if (finding.isEmpty()) {
-                if (saving) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    androidx.compose.material3.CircularProgressIndicator(color = K.Accent, strokeWidth = 3.dp, modifier = Modifier.size(22.dp))
-                    Ui.Words("Saving into " + (if (item.songs.size == 1) "the file" else "its " + item.songs.size + " files") + "…", 15, K.Accent)
-                } else {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        if (a != null) Ui.Button("Accept and save", icon = KueSettings.Icons.TICK, modifier = Modifier.weight(1.3f)) {
-                            saving = true
-                            problem = ""
-                            val go = {
-                                // In the app's own scope: closing this never stops a save halfway.
-                                Fixer.saves.launch {
-                                    val set = changesOf(item, a, now.orEmpty()).filter { (k, _, v) -> now?.get(k).orEmpty() != v }.associate { (k, _, v) -> k to v }
-                                    val cover = withContext(Dispatchers.IO) { a.big.takeIf { it.isNotBlank() }?.let { Covers.download(it) }?.let { FixByHandUi.asJpeg(it) } }
-                                    val said = withContext(Dispatchers.IO) { Fixer.saveByHand(context.applicationContext, item.songs, set, emptySet(), cover) }
-                                    saving = false
-                                    if (said.startsWith("Saved into the file") || said.startsWith("Saved into all")) savedTimes++
-                                    else problem = said
-                                }
-                                Unit
+            return
+        }
+        val a = answer
+        val scroll = androidx.compose.foundation.rememberScrollState()
+        Column(Modifier.fillMaxSize()) {
+            with(FixByHandUi) {
+                Editor(
+                    item.songs, if (item.songs.size == 1) null else item.album, item.why, scroll,
+                    suggest = a,
+                    note = when {
+                        a == null -> "Nothing knows it by its sound or its name: search the web below, or keep it as it is."
+                        a.coverOnly -> "KueSounds suggests the cover from " + a.from + "."
+                        else -> "KueSounds suggests these from " + a.from + ": the changes are in yellow. Keep, change, then Save."
+                    },
+                    extra = {
+                        // Not the same thing: one stops it being asked about, the other brings it back next time.
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                            Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { sure = true }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Ui.Words("It's right as it is", 14, K.Accent, bold = true, centre = true)
+                                Ui.Words("Don't ask again", 11, K.Soft, centre = true)
                             }
-                            if (Google.canEdit) go() else Fixer.askPermission { go() }
+                            Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onDone("skipped") }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                Ui.Words("Not now", 14, K.Accent, bold = true, centre = true)
+                                Ui.Words("Ask me next time", 11, K.Soft, centre = true)
+                            }
                         }
-                        Ui.Button(if (a != null) "Change" else "Change it myself", main = a == null, icon = KueSettings.Icons.EDIT, modifier = Modifier.weight(1f)) { byHand = true }
-                    }
-                    // Not the same thing: one stops it being asked about, the other brings it back next time.
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-                        Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { sure = true }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Ui.Words("It's right as it is", 15, K.Accent, bold = true, centre = true)
-                            Ui.Words("Don't ask again", 12, K.Soft, centre = true)
-                        }
-                        Column(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).clickable { onDone("skipped") }.padding(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                            Ui.Words("Not now", 15, K.Accent, bold = true, centre = true)
-                            Ui.Words("Ask me next time", 12, K.Soft, centre = true)
-                        }
-                    }
-                }
+                    },
+                    onSaved = { savedTimes++ },
+                    onClose = {},
+                )
             }
         }
     }

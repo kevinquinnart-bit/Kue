@@ -7,6 +7,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -78,9 +79,33 @@ object FixByHandUi {
         out.toByteArray()
     }.getOrNull()
 
-    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    /** Fix it by hand as its own pop-up: the editor under the one Kue header; saved, it shows the final check, then closes. */
     @Composable
     fun Page(songs: List<Track>, albumTitle: String?, why: String, left: Int = 0, onNext: (() -> Unit)? = null, onClose: () -> Unit) {
+        val scroll = rememberScrollState()
+        var finalCheck by remember { mutableStateOf(false) }
+        if (finalCheck) ReviewUi.FinalCheck(songs.first(), songs.size, onChangeAgain = { finalCheck = false }) { finalCheck = false; onClose() }
+        Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(horizontal = 18.dp)) {
+                KueSettings.PanelHeader("Fix it by hand", Ui.look, scrolled = scroll.value > 0, onClose = onClose)
+                Editor(songs, albumTitle, why, scroll, onSaved = { finalCheck = true }, onClose = onClose)
+            }
+        }
+    }
+
+    /**
+     * Everything for putting one song (or album) right, in one page (Kevin, 27 November 2026: "combine this with the
+     * following page"): the cover, its sound, the web, and every detail in the file, with Save at the foot. [suggest] is
+     * put in to start with (Check one at a time's answer), shown as changes to keep or alter before saving; [extra] goes
+     * under Save (Check one at a time's "right as it is" and "not now").
+     */
+    @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+    @Composable
+    fun ColumnScope.Editor(
+        songs: List<Track>, albumTitle: String?, why: String, scroll: androidx.compose.foundation.ScrollState,
+        suggest: Covers.Lookup? = null, note: String = "", extra: (@Composable () -> Unit)? = null,
+        onSaved: () -> Unit, onClose: () -> Unit,
+    ) {
         val context = LocalContext.current
         val scope = rememberCoroutineScope()
         val first = songs.first()
@@ -104,9 +129,7 @@ object FixByHandUi {
         var listening by remember { mutableStateOf("") }
         var heardSaying by remember { mutableStateOf("") }
         var pictureMenu by remember { mutableStateOf(false) }
-        var finalCheck by remember { mutableStateOf(false) }
         var pictureSaying by remember { mutableStateOf("") }
-        val scroll = rememberScrollState()
 
         var pageOpen by remember { mutableStateOf(true) }
         androidx.compose.runtime.DisposableEffect(first.id) {
@@ -194,7 +217,7 @@ object FixByHandUi {
                         fixed = true
                         // Saved: straight on to the final check of the file itself (Kevin, 27 November 2026: "close on
                         // save and final check and submit page and then close again").
-                        if (pageOpen) finalCheck = true
+                        if (pageOpen) onSaved()
                     }
                     saying = said
                     saving = false
@@ -205,17 +228,17 @@ object FixByHandUi {
             if (Google.canEdit) go() else Fixer.askPermission { go() }
         }
 
-        // Closes at any time, saving or not: a save carries on and says when it's done (Kevin, 27 November 2026).
-        val leave = {
-            if (saving) android.widget.Toast.makeText(context.applicationContext, "Still saving. It finishes by itself.", android.widget.Toast.LENGTH_SHORT).show()
-            onClose()
+        // A suggestion (Check one at a time) is put in as soon as the file has been read, to keep or change.
+        var suggested by remember { mutableStateOf(false) }
+        LaunchedEffect(read != null) {
+            if (read != null && suggest != null && !suggested) {
+                suggested = true
+                use(suggest)
+                pictureSaying = if (suggest.big.isNotBlank()) "The cover from " + suggest.from + ". Tap it to choose another." else ""
+            }
         }
-        if (finalCheck) ReviewUi.FinalCheck(first, songs.size, onChangeAgain = { finalCheck = false }) { finalCheck = false; onClose() }
-        val pullClose = KueSettings.rememberPullToClose(leave)
-        Dialog(onDismissRequest = leave, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-          // The header stays at the top and rolls up as the page scrolls; Save and the song's play strip stay at the foot.
-          Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(horizontal = 18.dp)) {
-            KueSettings.PanelHeader("Fix it by hand", Ui.look, scrolled = scroll.value > 0, onClose = leave)
+        // Closes at any time, saving or not: a save carries on and says when it's done (Kevin, 27 November 2026).
+        val pullClose = KueSettings.rememberPullToClose(onClose)
             Column(
                 Modifier.weight(1f).fillMaxWidth().nestedScroll(pullClose).verticalScroll(scroll).padding(bottom = 12.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -225,6 +248,7 @@ object FixByHandUi {
                 val who = if (isAlbum) was[FieldKey.ALBUM_ARTIST].orEmpty().ifBlank { first.albumArtist.ifBlank { first.artist } } else was[FieldKey.ARTIST].orEmpty().ifBlank { first.artist }
                 Ui.Words("$title · $who", 15, bold = true)
                 if (why.isNotBlank() && !fixed) Ui.Words(why, 14, K.Accent)
+                if (note.isNotBlank()) Ui.Words(note, 14, K.Soft)
 
                 // The cover: as it is, or the one chosen here. Tap or hold it for the ways to change it (Kevin, 27 November 2026).
                 if (pictureMenu) PictureMenu(
@@ -356,10 +380,9 @@ object FixByHandUi {
                 }
                 if (saving) Busy(if (isAlbum) "Saving into " + songs.size + " files…" else "Saving into the file…")
                 if (saying.isNotEmpty() && !fixed && !saving) Ui.Words(saying, 14, K.Accent)
+                extra?.invoke()
                 Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(12.dp))) { ReviewUi.Hear(first) }
             }
-          }
-        }
     }
 
     /**
