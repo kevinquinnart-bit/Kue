@@ -39,6 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -99,6 +101,66 @@ object KueSettings {
                 .clickable(role = Role.Button, onClickLabel = label, onClick = onClick),
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.CROSS, size * 0.42f, look.ink, 2.2f) }
+    }
+
+    /**
+     * The one header for every pop-up page in the Kue apps (Kevin, 27 November 2026: headers the same everywhere, kept
+     * minimal, with motion): a grab handle, the title in the middle, one close cross on the right (no second back
+     * arrow). Pull the header down to close. When the page under it is scrolled, the header rolls up: the title gets
+     * smaller and the space round it closes up.
+     */
+    @Composable
+    fun PanelHeader(title: String, look: Look, scrolled: Boolean = false, onClose: () -> Unit) {
+        var pulled by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        val textSize by animateFloatAsState(if (scrolled) 16f else 20f, tween(220), label = "headerText")
+        val gap by animateFloatAsState(if (scrolled) 2f else 10f, tween(220), label = "headerGap")
+        val closeSize by animateFloatAsState(if (scrolled) 36f else 44f, tween(220), label = "headerClose")
+        Column(
+            Modifier.fillMaxWidth()
+                .graphicsLayer { translationY = pulled.coerceAtLeast(0f); alpha = 1f - (pulled / 900f).coerceIn(0f, 0.5f) }
+                .pointerInput(Unit) {
+                    androidx.compose.foundation.gestures.detectVerticalDragGestures(
+                        onDragEnd = { if (pulled > 110f) onClose(); pulled = 0f },
+                        onDragCancel = { pulled = 0f },
+                    ) { change, dy -> change.consume(); pulled = (pulled + dy).coerceAtLeast(0f) }
+                },
+        ) {
+            Box(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(width = 44.dp, height = 5.dp).clip(RoundedCornerShape(3.dp)).background(look.soft().copy(alpha = 0.6f)))
+            }
+            Box(Modifier.fillMaxWidth().padding(vertical = gap.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    title, color = look.ink, fontSize = textSize.sp, fontFamily = look.font, fontWeight = FontWeight.SemiBold,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center, modifier = Modifier.padding(horizontal = 56.dp),
+                )
+                Box(Modifier.align(Alignment.CenterEnd)) { CloseButton(look, size = closeSize.dp, onClick = onClose) }
+            }
+        }
+    }
+
+    /**
+     * Pull a page down from its top to close it, as with the header (for the page's scrolling part): once the page is
+     * at its top, a pull down far enough closes it.
+     */
+    @Composable
+    fun rememberPullToClose(onClose: () -> Unit): androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+        val close = androidx.compose.runtime.rememberUpdatedState(onClose)
+        return androidx.compose.runtime.remember {
+            object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+                var pulled = 0f
+                override fun onPostScroll(consumed: Offset, available: Offset, source: androidx.compose.ui.input.nestedscroll.NestedScrollSource): Offset {
+                    if (source == androidx.compose.ui.input.nestedscroll.NestedScrollSource.UserInput) {
+                        if (available.y > 0f) pulled += available.y else if (consumed.y < 0f) pulled = 0f
+                    }
+                    return Offset.Zero
+                }
+                override suspend fun onPreFling(available: androidx.compose.ui.unit.Velocity): androidx.compose.ui.unit.Velocity {
+                    if (pulled > 220f) close.value()
+                    pulled = 0f
+                    return androidx.compose.ui.unit.Velocity.Zero
+                }
+            }
+        }
     }
 
     /** The Kue apps, for "Your Kue apps". */
