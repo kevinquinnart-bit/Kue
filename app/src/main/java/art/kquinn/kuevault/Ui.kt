@@ -707,7 +707,8 @@ object Ui {
         // One open section a line. Not "|" between them: a section's own id has a "|" in it ("app|Fix the files"),
         // so split on "|" no section ever counted as open and none could be opened (Kevin, 25 November 2026).
         val sectionOpen = { id: String -> id in sections.split("\n") }
-        val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("\n").filter { it != id }.joinToString("\n") else sections + "\n" + id }
+        // One section open at a time, as in every Kue app (Kevin, 27 November 2026).
+        val flip = { id: String -> sections = if (sectionOpen(id)) "" else "\n" + id }
         var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
             Title("Settings", onBack)
