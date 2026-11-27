@@ -1643,22 +1643,59 @@ object Ui {
         var found by remember { mutableStateOf<List<Smart.CoverChoice>?>(null) }
         var saying by remember { mutableStateOf("") }
         var busy by remember { mutableStateOf(false) }
+        var link by remember { mutableStateOf<String?>(null) }
         val search = {
             found = null
-            scope.launch { found = withContext(Dispatchers.IO) { Smart.findCovers(words) } }
+            // The same cover from two shops shows once (Kevin, 27 November 2026: three of the same picture).
+            scope.launch { found = withContext(Dispatchers.IO) { Smart.findCovers(words) }.distinctBy { Library.sortName(it.artist) + "|" + Library.sortName(it.title) } }
             Unit
         }
         LaunchedEffect(Unit) { search() }
         val keep = { bytes: ByteArray? ->
-            if (bytes != null && Scanner.setCover(al, bytes)) { android.widget.Toast.makeText(context, "Cover changed.", android.widget.Toast.LENGTH_SHORT).show(); onClose() }
+            val jpeg = bytes?.let { FixByHandUi.asJpeg(it) }
+            if (jpeg != null && Scanner.setCover(al, jpeg)) {
+                // Into the files straight away, the picture only, everything else in them as it is (Kevin, 27 November
+                // 2026: the picture must be saved in the file). Carries on after this closes.
+                val app = context.applicationContext
+                val songs = al.tracks.filter { Tagger.canFix(Library.realName(it)) }
+                val write = {
+                    android.widget.Toast.makeText(app, "Cover changed. Writing it into " + count(songs.size, "file") + "…", android.widget.Toast.LENGTH_SHORT).show()
+                    kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                        val said = Fixer.saveByHand(app, songs, emptyMap(), emptySet(), jpeg)
+                        withContext(Dispatchers.Main) { android.widget.Toast.makeText(app, if (said.startsWith("Saved into")) "Cover written into " + count(songs.size, "file") + "." else said, android.widget.Toast.LENGTH_LONG).show() }
+                    }
+                    Unit
+                }
+                if (songs.isEmpty()) Unit else if (Google.canEdit) write() else Fixer.askPermission { write() }
+                onClose()
+            }
             else saying = "That picture couldn't be used. Try another."
         }
-        val fromPhone = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()) { uri ->
+        val fetch = { address: String ->
+            busy = true
+            scope.launch { val b = withContext(Dispatchers.IO) { Covers.pictureFromLink(address) }; busy = false; keep(b) }
+            Unit
+        }
+        // A picture or a page shared from the browser comes straight here while this is open.
+        androidx.compose.runtime.DisposableEffect(Unit) { FixByHandUi.opened(); onDispose { FixByHandUi.closed() } }
+        LaunchedEffect(FixByHandUi.sharedPicture) {
+            val uri = FixByHandUi.sharedPicture ?: return@LaunchedEffect
+            FixByHandUi.sharedPicture = null
+            keep(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() })
+        }
+        LaunchedEffect(FixByHandUi.sharedLink) {
+            val l = FixByHandUi.sharedLink ?: return@LaunchedEffect
+            FixByHandUi.sharedLink = null
+            fetch(l)
+        }
+        // Any picture file: Downloads, Files and Photos (Kevin, 27 November 2026: "use file").
+        val fromFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
             if (uri == null) return@rememberLauncherForActivityResult
             scope.launch { keep(withContext(Dispatchers.IO) { runCatching { context.contentResolver.openInputStream(uri)?.use { it.readBytes() } }.getOrNull() }) }
         }
         Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
             Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                PullBar(onClose)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RoundButton(Glyph.BACK, "Back", onClick = onClose)
                     Spacer(Modifier.width(12.dp))
@@ -1669,15 +1706,29 @@ object Ui {
                     Box(Modifier.weight(1f)) { EditField(words) { words = it } }
                     Button("Search", modifier = Modifier.height(52.dp), onClick = search)
                 }
-                Button("A picture from your phone", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.fillMaxWidth()) {
-                    fromPhone.launch(androidx.activity.result.PickVisualMediaRequest(androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly))
+                // A picture's address, or a page with it (Kevin, 27 November 2026: "can't add an image URL"). What was
+                // copied is put in to start with.
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button("Picture link", main = false, icon = KueSettings.Icons.OPEN, modifier = Modifier.weight(1f)) {
+                        val clip = (context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager)
+                            ?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(context)?.toString().orEmpty()
+                        link = if (clip.contains("http")) clip.trim() else ""
+                    }
+                    Button("Picture file", main = false, icon = KueSettings.Icons.PHONE, modifier = Modifier.weight(1f)) { fromFile.launch(arrayOf("image/*")) }
+                }
+                link?.let { l ->
+                    Words("Paste the link to the picture, or to a page with it:", 13, K.Soft)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.weight(1f)) { EditField(l) { link = it } }
+                        Button("Use", modifier = Modifier.height(52.dp)) { val got = l; link = null; if (got.contains("http")) fetch(got) else saying = "That isn't a link." }
+                    }
                 }
                 if (saying.isNotEmpty()) Words(saying, 14, K.Accent, lines = 2)
-                if (busy) Working("Keeping it…")
+                if (busy) Working("Fetching the picture…")
                 val list = found
                 when {
                     list == null -> Working("Looking for covers…")
-                    list.isEmpty() -> Words("No covers found for that. Change the words and search again.", 15, K.Soft, lines = 2)
+                    list.isEmpty() -> Words("No covers found for that. Change the words and search again, or use a link or a file.", 15, K.Soft, lines = 2)
                     else -> LazyVerticalGrid(GridCells.Adaptive(110.dp), Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         items(list.distinctBy { it.big }, key = { it.big }) { c ->
                             Column(
@@ -1695,6 +1746,7 @@ object Ui {
                         }
                     }
                 }
+                Words("Or in your browser: Share a picture or the page, then pick KueSounds. It comes straight here.", 12, K.Soft)
             }
         }
     }

@@ -133,7 +133,7 @@ class MainActivity : ComponentActivity() {
         if (intent?.action == android.content.Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
             @Suppress("DEPRECATION") val uri = intent.getParcelableExtra<android.net.Uri>(android.content.Intent.EXTRA_STREAM) ?: return
             if (FixByHandUi.isOpen) FixByHandUi.sharedPicture = uri
-            else android.widget.Toast.makeText(this, "Open a song in Fix it by hand first, then share the picture to KueSounds.", android.widget.Toast.LENGTH_LONG).show()
+            else android.widget.Toast.makeText(this, "Open Choose the cover or Fix it by hand first, then share the picture to KueSounds.", android.widget.Toast.LENGTH_LONG).show()
             return
         }
         if (intent?.action == android.content.Intent.ACTION_SEND && FixByHandUi.isOpen) {

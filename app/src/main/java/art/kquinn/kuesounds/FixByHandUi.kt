@@ -56,6 +56,10 @@ object FixByHandUi {
     /** True while the page is open: a picture or link shared to KueSounds from the browser comes here. */
     private var openCount by mutableStateOf(0)
     val isOpen: Boolean get() = openCount > 0
+
+    /** Any page that takes a picture shared from the browser (Fix it by hand, Choose the cover) says it is open. */
+    fun opened() { openCount++ }
+    fun closed() { openCount-- }
     var sharedPicture by mutableStateOf<android.net.Uri?>(null)
     var sharedLink by mutableStateOf<String?>(null)
 
