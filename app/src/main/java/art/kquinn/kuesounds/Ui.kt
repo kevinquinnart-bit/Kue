@@ -360,6 +360,22 @@ object Ui {
         // Opens on the part chosen in Settings (CloudPlayer's "default screen").
         var tab by rememberSaveable { mutableStateOf(Tab.entries.firstOrNull { it.name == PlayPrefs.startPart } ?: Tab.ALBUMS) }
         var query by rememberSaveable { mutableStateOf("") }
+        // The phone's Back goes back one step (Kevin, 27 November 2026): clears a search, then returns to the part shown
+        // before (Songs back to Albums, Radio back to Music), and only then leaves KueSounds.
+        val trail = remember { androidx.compose.runtime.mutableStateListOf<Tab>() }
+        var shownTab by remember { mutableStateOf(tab) }
+        var stepping by remember { mutableStateOf(false) }
+        LaunchedEffect(tab) {
+            if (tab != shownTab) {
+                if (!stepping) { trail.remove(shownTab); trail.add(shownTab) }
+                stepping = false
+                shownTab = tab
+            }
+        }
+        BackHandler(enabled = query.isNotBlank() || trail.isNotEmpty()) {
+            if (query.isNotBlank()) query = ""
+            else { stepping = true; tab = trail.removeAt(trail.lastIndex) }
+        }
         Column(Modifier.fillMaxSize()) {
             Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -2044,7 +2060,7 @@ object Ui {
                 ) { change, dy -> change.consume(); pull = (pull + dy).coerceAtLeast(0f) }
             },
         ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+        Column(Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 RoundButton(Glyph.DOWN, "Close", onClick = close)
                 Words(if (Playing.album.isNotEmpty()) "Playing from " + Playing.album else "", 14, K.Soft, modifier = Modifier.weight(1f).padding(horizontal = 12.dp), centre = true)
@@ -2096,44 +2112,48 @@ object Ui {
                     }
                 }
             }
-            // The song's name across the full width, its buttons on their own line under it (Kevin, 26 November 2026:
-            // a long name was squeezed into a narrow column beside the buttons).
-            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Words(Playing.title, 24, bold = true)
-                Words(Playing.artist, 17, K.Soft)
-                if (Playing.problem.isNotEmpty()) Words(Playing.problem, 15, K.Accent, lines = 2)
+            // Smaller, so the cover and karaoke get the room (Kevin, 27 November 2026: "takes up too much space"): the name
+            // and artist, then one row of small icons with no words (sound, up next, sleep, playlist, karaoke,
+            // favourite), the slider, and the play controls.
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+                Words(Playing.title, 19, bold = true)
+                Words(Playing.artist, 14, K.Soft)
+                if (Playing.problem.isNotEmpty()) Words(Playing.problem, 14, K.Accent, lines = 2)
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+            var tool by remember { mutableStateOf("") }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 val fav = Sync.isFavourite(Playing.currentId)
                 var adding by remember { mutableStateOf(false) }
                 val songNow = !Playing.isPodcast && !Playing.isRadio
-                if (songNow) Box(
-                    Modifier.size(52.dp).clip(CircleShape).background(K.Panel).clickable(onClickLabel = "Add to a playlist") { adding = true },
-                    contentAlignment = Alignment.Center,
-                ) { KueSettings.Icon(KueSettings.Icons.PLAYLIST, 26.dp, K.Soft, 2f) }
                 if (adding) ListUi.AddBox("this song", listOf(Playing.currentId), onAdded = { say("Added to " + it) }) { adding = false }
-                // Karaoke on and off, beside the playlist and favourite buttons (Kevin, 26 November 2026).
+                SmallIcon(KueSettings.Icons.EQUALISER, "Sound", Sound.profile(Sound.kindOf(Playing.currentId)).let { it.eqOn || it.bass > 0 || it.surround > 0 || it.louder > 0 }) { tool = "sound" }
+                if (!Playing.isRadio) SmallIcon(KueSettings.Icons.QUEUE, "Up next", false) { tool = "queue" }
                 if (songNow) {
-                    Spacer(Modifier.width(10.dp))
+                    val sleeping = Playing.sleepAt > 0 || Playing.sleepAtEnd
+                    SmallIcon(KueSettings.Icons.SLEEP, "Sleep", sleeping) {
+                        Playing.nextMusicSleep()
+                        say(when {
+                            Playing.sleepAtEnd -> "Sleep: at the end of this song"
+                            Playing.sleepAt > 0 -> "Sleep in " + ((Playing.sleepAt - System.currentTimeMillis()) / 60_000 + 1) + " minutes"
+                            else -> "Sleep off"
+                        })
+                    }
+                    SmallIcon(KueSettings.Icons.PLAYLIST, "Add to a playlist", false) { adding = true }
                     @Suppress("UNUSED_VARIABLE") val seenKaraokeButton = PlayPrefs.changes
                     val on = PlayPrefs.lyricsOnCover
+                    SmallIcon(KueSettings.Icons.MIC, "Karaoke", on) {
+                        PlayPrefs.lyricsOnCover = !on
+                        say(if (!on) "Karaoke on" else "Karaoke off")
+                    }
                     Box(
-                        Modifier.size(52.dp).clip(CircleShape).background(if (on) K.Accent else K.Panel).clickable(onClickLabel = "Karaoke") {
-                            PlayPrefs.lyricsOnCover = !on
-                            say(if (!on) "Karaoke on" else "Karaoke off")
-                        },
+                        Modifier.size(44.dp).clip(CircleShape).background(K.Panel)
+                            .clickable(onClickLabel = if (fav) "Take out of favourites" else "Add to favourites") {
+                                Sync.flipFavourite(Playing.currentId)
+                                say(if (fav) "Taken out of favourites" else "Added to favourites")
+                            },
                         contentAlignment = Alignment.Center,
-                    ) { KueSettings.Icon(KueSettings.Icons.MIC, 26.dp, if (on) K.Page else K.Soft, 2f) }
+                    ) { Sign(if (fav) Glyph.HEART_FULL else Glyph.HEART, 22.dp, if (fav) K.Accent else K.Soft) }
                 }
-                if (songNow) Spacer(Modifier.width(10.dp))
-                if (songNow) Box(
-                    Modifier.size(52.dp).clip(CircleShape).background(K.Panel)
-                        .clickable(onClickLabel = if (fav) "Take out of favourites" else "Add to favourites") {
-                            Sync.flipFavourite(Playing.currentId)
-                            say(if (fav) "Taken out of favourites" else "Added to favourites")
-                        },
-                    contentAlignment = Alignment.Center,
-                ) { Sign(if (fav) Glyph.HEART_FULL else Glyph.HEART, 26.dp, if (fav) K.Accent else K.Soft) }
             }
             Column {
                 Slider(
@@ -2147,25 +2167,8 @@ object Ui {
                     colors = SliderDefaults.colors(thumbColor = K.Ink, activeTrackColor = K.Accent, inactiveTrackColor = K.Raised),
                 )
                 Row {
-                    Words(Library.clock(if (dragging) (dragAt * duration).toLong() else position), 14, K.Soft, modifier = Modifier.weight(1f))
-                    Words(Library.clock(duration), 14, K.Soft)
-                }
-            }
-            // The tools under the song (Kevin, 25 November 2026): its sound, what plays next, the sleep timer, its details.
-            var tool by remember { mutableStateOf("") }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ToolChip(KueSettings.Icons.EQUALISER, "Sound", Sound.profile(Sound.kindOf(Playing.currentId)).let { it.eqOn || it.bass > 0 || it.surround > 0 || it.louder > 0 }, Modifier.weight(1f)) { tool = "sound" }
-                if (!Playing.isRadio) ToolChip(KueSettings.Icons.QUEUE, "Up next", false, Modifier.weight(1f)) { tool = "queue" }
-                if (!Playing.isRadio && !Playing.isPodcast) {
-                    val sleeping = Playing.sleepAt > 0 || Playing.sleepAtEnd
-                    val sleepWords = when {
-                        Playing.sleepAtEnd -> "End of song"
-                        Playing.sleepAt > 0 -> ((Playing.sleepAt - System.currentTimeMillis()) / 60_000 + 1).toString() + " min"
-                        else -> "Sleep"
-                    }
-                    ToolChip(KueSettings.Icons.SLEEP, sleepWords, sleeping, Modifier.weight(1f)) { Playing.nextMusicSleep() }
-                    // Karaoke is the button beside the song's name; Song info is in the ⋯ menu (Kevin, 26 November 2026:
-                    // the row was too squashed, and Lyrics and Karaoke did the same thing).
+                    Words(Library.clock(if (dragging) (dragAt * duration).toLong() else position), 12, K.Soft, modifier = Modifier.weight(1f))
+                    Words(Library.clock(duration), 12, K.Soft)
                 }
             }
             when (tool) {
@@ -2176,23 +2179,23 @@ object Ui {
             }
             if (Playing.isRadio) OnlineUi.RadioControls() else
             if (Playing.isPodcast) PodUi.Controls() else
-            Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Control(Glyph.SHUFFLE, "Shuffle", 48.dp, if (Playing.shuffle) K.Accent else K.Soft) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Control(Glyph.SHUFFLE, "Shuffle", 44.dp, if (Playing.shuffle) K.Accent else K.Soft) {
                     say(if (Playing.shuffle) "Shuffle off: in order" else "Shuffle on: mixed up")
                     Playing.flipShuffle()
                 }
-                Control(Glyph.PREVIOUS, "Previous", 56.dp, K.Ink) { Playing.previous() }
+                Control(Glyph.PREVIOUS, "Previous", 48.dp, K.Ink) { Playing.previous() }
                 Box(
-                    Modifier.size(80.dp).clip(CircleShape).background(K.Accent).clickable(onClickLabel = if (Playing.isPlaying) "Pause" else "Play") { Playing.toggle() },
+                    Modifier.size(64.dp).clip(CircleShape).background(K.Accent).clickable(onClickLabel = if (Playing.isPlaying) "Pause" else "Play") { Playing.toggle() },
                     contentAlignment = Alignment.Center,
                 ) {
-                    if (Playing.buffering) CircularProgressIndicator(color = K.Page, strokeWidth = 3.dp, modifier = Modifier.size(34.dp))
-                    else Sign(if (Playing.isPlaying) Glyph.PAUSE else Glyph.PLAY, 34.dp, K.Page)
+                    if (Playing.buffering) CircularProgressIndicator(color = K.Page, strokeWidth = 3.dp, modifier = Modifier.size(28.dp))
+                    else Sign(if (Playing.isPlaying) Glyph.PAUSE else Glyph.PLAY, 28.dp, K.Page)
                 }
-                Control(Glyph.NEXT, "Next", 56.dp, K.Ink) { Playing.next() }
+                Control(Glyph.NEXT, "Next", 48.dp, K.Ink) { Playing.next() }
                 Control(
                     if (Playing.repeat == androidx.media3.common.Player.REPEAT_MODE_ONE) Glyph.REPEAT_ONE else Glyph.REPEAT,
-                    "Repeat", 48.dp, if (Playing.repeat != androidx.media3.common.Player.REPEAT_MODE_OFF) K.Accent else K.Soft,
+                    "Repeat", 44.dp, if (Playing.repeat != androidx.media3.common.Player.REPEAT_MODE_OFF) K.Accent else K.Soft,
                 ) {
                     say(
                         when (Playing.repeat) {
@@ -2357,6 +2360,16 @@ object Ui {
     }
 
     /** A small button under the song: a drawn icon and a word, yellow when it is on. */
+    @Composable
+    /** A small round icon with no words (its name is read out by the phone's screen reader); yellow when on. */
+    @Composable
+    private fun SmallIcon(icon: String, label: String, on: Boolean, onClick: () -> Unit) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape).background(if (on) K.Accent else K.Panel).clickable(onClickLabel = label, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) { KueSettings.Icon(icon, 22.dp, if (on) K.Page else K.Soft, 2f) }
+    }
+
     @Composable
     private fun ToolChip(icon: String, label: String, on: Boolean, modifier: Modifier, onClick: () -> Unit) {
         Column(
@@ -2868,6 +2881,15 @@ object Ui {
         val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("\n").filter { it != id }.joinToString("\n") else sections + "\n" + id }
         var query by rememberSaveable { mutableStateOf("") }
         val scroll = androidx.compose.foundation.rememberScrollState()
+        // The phone's Back goes back one step (Kevin, 27 November 2026): the search, then the last section opened, then
+        // the open group, then out of Settings.
+        BackHandler(enabled = query.isNotBlank() || sections.isNotBlank() || open.isNotEmpty()) {
+            when {
+                query.isNotBlank() -> query = ""
+                sections.isNotBlank() -> sections = sections.split("\n").filter { it.isNotBlank() }.dropLast(1).joinToString("\n") { it }.let { if (it.isEmpty()) "" else "\n" + it }
+                else -> open = ""
+            }
+        }
         Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 6.dp)) {
                 RoundButton(Glyph.BACK, "Back", onClick = back)
