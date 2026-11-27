@@ -83,7 +83,7 @@ object FixByHandUi {
         }
 
         // A find (by sound or by search) put into the table and as the cover; nothing is written until Save.
-        val use = { f: Covers.Lookup ->
+        val use: (Covers.Lookup) -> Unit = { f ->
             if (!isAlbum) {
                 if (f.title.isNotBlank()) now[FieldKey.TITLE] = f.title
                 if (f.artist.isNotBlank()) now[FieldKey.ARTIST] = f.artist
@@ -103,6 +103,7 @@ object FixByHandUi {
                     saying = "Put in below from " + f.from + ". Check it, then Save into the file."
                 }
             } else saying = "Put in below. Check it, then Save into the file."
+            Unit
         }
 
         val changes = now.filter { (k, v) -> v.trim() != was[k].orEmpty() }
