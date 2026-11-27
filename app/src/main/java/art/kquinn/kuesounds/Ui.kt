@@ -1791,6 +1791,8 @@ object Ui {
                                 val folder = Scanner.data.folders.firstOrNull { it.id == t.folderId }?.name.orEmpty()
                                 val kbps = if (t.size > 0 && t.durationMs > 0) ((t.size * 8 / (t.durationMs / 1000.0)) / 1000).toInt().toString() + " kbps" else ""
                                 Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(K.Raised).clickable { held = t }.padding(10.dp)) {
+                                    // Hear each copy before choosing which to keep (Kevin, 27 November 2026: "preview sound").
+                                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(K.Panel)) { ReviewUi.Hear(t) }
                                     Words(t.album.ifBlank { "No album" } + (if (folder.isNotEmpty()) " · folder " + folder else ""), 14, lines = 2)
                                     Words(listOf(Library.ending(Library.realName(t)).uppercase(), kbps, if (t.durationMs > 0) Library.clock(t.durationMs) else "", if (t.id in Offline.saved) "on phone" else "").filter { it.isNotEmpty() }.joinToString(" · "), 12, K.Soft)
                                     val key = g.joinToString { it.id } + "|" + t.id
@@ -1967,6 +1969,13 @@ object Ui {
         }
         if (Fixer.permissionProblem.isNotEmpty()) Words(Fixer.permissionProblem, 14, K.Accent)
         // The kind of music into the files that don't hold it (Kevin, 27 November 2026).
+    }
+
+    /** The genre check for all the music, in Library tools (Kevin, 27 November 2026). */
+    @Composable
+    private fun GenreTool() {
+        val data = Scanner.data
+        val ctx = LocalContext.current
         // The genre check for all the music (Kevin, 27 November 2026): known genres written in, unknown ones looked for
         // online (Apple, then Discogs) and written in when found.
         val known = remember(data) { Scanner.kindsToWrite(data) }
@@ -2785,7 +2794,10 @@ object Ui {
                                 ". " + n(fixedSongs) + " fixed" + (if (left > 0) " · $left to check" else ""),
                             16, bold = true,
                         )
-                        if (retrying > 0) Words(count(retrying, "song") + " to try again: press Look for new music below.", 14, K.Accent)
+                        if (retrying > 0) {
+                            Words(count(retrying, "song") + " to try again.", 14, K.Accent)
+                            Button("Try them again", main = false, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
+                        }
                         if (left > 0) {
                             var checking by remember { mutableStateOf(false) }
                             if (checking) ReviewUi.Review(ReviewUi.items(leftNow)) { checking = false }
@@ -2956,7 +2968,8 @@ object Ui {
         KueSettings.Place("app", "KueSounds", "Fix your music files", "Write to the files"),
         KueSettings.Place("app", "KueSounds", "Fix your music files", "Covers"),
         KueSettings.Place("app", "KueSounds", "Fix your music files", "Not fixed"),
-        KueSettings.Place("app", "KueSounds", "Fix your music files", "Look for new music"),
+        KueSettings.Place("app", "KueSounds", "Library tools", "Look for new music"),
+        KueSettings.Place("app", "KueSounds", "Library tools", "Find and write the genres"),
         KueSettings.Place("app", "KueSounds", "Library tools", "Find duplicate songs"),
         KueSettings.Place("app", "KueSounds", "Library tools", "Start the library again"),
         KueSettings.Place("app", "KueSounds", "Playback", "Play over mobile data"),
@@ -3012,7 +3025,8 @@ object Ui {
         // One open section a line. Not "|" between them: a section's own id has a "|" in it ("app|Fix your music files"),
         // so split on "|" no section ever counted as open and none could be opened (Kevin, 25 November 2026).
         val sectionOpen = { id: String -> id in sections.split("\n") }
-        val flip = { id: String -> sections = if (sectionOpen(id)) sections.split("\n").filter { it != id }.joinToString("\n") else sections + "\n" + id }
+        // One section open at a time: opening one closes the other (Kevin, 27 November 2026).
+        val flip = { id: String -> sections = if (sectionOpen(id)) "" else "\n" + id }
         var query by rememberSaveable { mutableStateOf("") }
         val scroll = androidx.compose.foundation.rememberScrollState()
         // The phone's Back goes back one step (Kevin, 27 November 2026): the search, then the last section opened, then
@@ -3079,9 +3093,11 @@ object Ui {
                 }
                 KueSettings.Section("Fix your music files", sectionOpen("app|Fix your music files"), look, { flip("app|Fix your music files") }, note = fixNote) {
                     MusicSteps(view, go)
-                    if (!Scanner.running) Button("Look for new music", main = false, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
                 }
+                // The tools apart from the fixing steps (Kevin, 27 November 2026: "separate library tools").
                 KueSettings.Section("Library tools", sectionOpen("app|Library tools"), look, { flip("app|Library tools") }) {
+                    if (!Scanner.running) Button("Look for new music", main = false, icon = KueSettings.Icons.SEARCH, modifier = Modifier.fillMaxWidth()) { Scanner.scan() }
+                    GenreTool()
                     var dupes by remember { mutableStateOf(false) }
                     Button("Find duplicate songs", main = false, icon = KueSettings.Icons.SEARCH, modifier = Modifier.fillMaxWidth()) { dupes = true }
                     if (dupes) DuplicatesBox(go) { dupes = false }

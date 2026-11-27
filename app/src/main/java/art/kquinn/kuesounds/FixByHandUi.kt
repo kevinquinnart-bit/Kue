@@ -261,12 +261,16 @@ object FixByHandUi {
                     contentAlignment = Alignment.Center,
                 ) {
                     val shape = RoundedCornerShape(16.dp)
-                    val m = Modifier.size(220.dp).clip(shape).background(K.Panel)
-                    when {
-                        cover != null -> AsyncImage(model = cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = m.border(3.dp, K.Accent, shape))
-                        // The picture saved in the file itself (Kevin, 27 November 2026: "currently saved pic not shown").
-                        read?.picture != null -> AsyncImage(model = read?.picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = m)
-                        else -> Ui.Cover(Scanner.artForTrack(Scanner.data.tracks.firstOrNull { it.id == first.id } ?: first) ?: Scanner.singleArtFor(first), m, corner = 16.dp, glyphSize = 64.dp)
+                    Box(Modifier.size(240.dp).clip(shape).background(K.Panel).then(if (cover != null) Modifier.border(3.dp, K.Accent, shape) else Modifier)) {
+                        val m = Modifier.fillMaxSize()
+                        when {
+                            cover != null -> AsyncImage(model = cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = m)
+                            // The picture saved in the file itself (Kevin, 27 November 2026: "currently saved pic not shown").
+                            read?.picture != null -> AsyncImage(model = read?.picture, contentDescription = null, contentScale = ContentScale.Crop, modifier = m)
+                            else -> Ui.Cover(Scanner.artForTrack(Scanner.data.tracks.firstOrNull { it.id == first.id } ?: first) ?: Scanner.singleArtFor(first), m, corner = 16.dp, glyphSize = 64.dp)
+                        }
+                        // The song's player on its picture, not a bar at the foot (Kevin, 27 November 2026: "player here").
+                        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.6f))) { ReviewUi.Hear(first) }
                     }
                 }
                 Ui.Words(if (pictureSaying.isNotEmpty()) pictureSaying else "Tap the cover to change it.", 13, if (pictureSaying.isNotEmpty()) K.Accent else K.Soft, centre = true, modifier = Modifier.fillMaxWidth())
@@ -381,7 +385,6 @@ object FixByHandUi {
                 if (saving) Busy(if (isAlbum) "Saving into " + songs.size + " files…" else "Saving into the file…")
                 if (saying.isNotEmpty() && !fixed && !saving) Ui.Words(saying, 14, K.Accent)
                 extra?.invoke()
-                Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(12.dp))) { ReviewUi.Hear(first) }
             }
     }
 
