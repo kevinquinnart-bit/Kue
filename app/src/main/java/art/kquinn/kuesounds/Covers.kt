@@ -242,7 +242,7 @@ object Covers {
         return download(address)
     }
 
-    /** Songs (or albums) for [words] from Apple and Deezer    /** Songs (or albums) for [words] from Apple, Deezer and Wikipedia, one of each in turn, the same record only once. Off the main thread. */
+    /** Songs (or albums) for [words] from Apple, Deezer and Wikipedia, one of each in turn, the same record only once. Off the main thread. */
     fun lookUp(words: String, songs: Boolean): List<Lookup> {
         val apple = get("https://itunes.apple.com/search".toHttpUrl().newBuilder().addQueryParameter("term", words)
             .addQueryParameter("entity", if (songs) "song" else "album").addQueryParameter("limit", "15").addQueryParameter("country", "gb").build())
