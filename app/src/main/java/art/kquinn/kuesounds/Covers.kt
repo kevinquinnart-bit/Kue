@@ -364,7 +364,8 @@ object Covers {
                 else -> "album"
             }
             val name = wikiPlain(field("name")).ifBlank { o.get("title")?.asString.orEmpty().replace(Regex("\\s*\\((album|song|single)[^)]*\\)$", RegexOption.IGNORE_CASE), "") }
-            val artist = wikiPlain(field("artist"))
+            // Without a name in brackets after it ("Yazoo (Yaz)", their American name).
+            val artist = wikiPlain(field("artist")).replace(Regex("\\s*\\([^)]*\\)$"), "")
             val year = Regex("(1[89]|20)\\d\\d").find(field("released"))?.value.orEmpty()
             val genreRaw = field("genre")
             val genre = Regex("\\[\\[(?:[^|\\]]*\\|)?([^\\]]+)]]").find(genreRaw)?.groupValues?.get(1)?.trim()
