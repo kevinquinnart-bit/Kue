@@ -353,7 +353,7 @@ object AiSort {
                 var said: Said? = null
                 try {
                     said = try { ask(item) } catch (x: RuntimeException) {
-                        if (x !is Stop && x.message == "busy") { kotlinx.coroutines.delay(60_000); ask(item) } else throw x
+                        if (x.message == "busy") { kotlinx.coroutines.delay(60_000); ask(item) } else throw x
                     }
                 } catch (x: Stop) {
                     synchronized(waiting) { waiting.clear() }
