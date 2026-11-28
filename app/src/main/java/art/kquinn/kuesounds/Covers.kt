@@ -353,7 +353,9 @@ object Covers {
             fun field(k: String) = Regex("\\n\\s*\\|\\s*$k\\s*=\\s*([^\\n]*)", RegexOption.IGNORE_CASE).find(box)?.groupValues?.get(1)?.trim().orEmpty()
             val isAlbum = at.groupValues[1].equals("album", true)
             val type = wikiPlain(field("type")).lowercase()
+            val fromAlbum = if (isAlbum) "" else wikiPlain(field("album"))
             val kind = when {
+                !isAlbum && fromAlbum.isNotBlank() -> "song page: it is from the album $fromAlbum"
                 !isAlbum -> "single"
                 Regex("compil|greatest|best|hits").containsMatchIn(type) -> "compilation"
                 "live" in type -> "live album"
@@ -367,7 +369,8 @@ object Covers {
             val genreRaw = field("genre")
             val genre = Regex("\\[\\[(?:[^|\\]]*\\|)?([^\\]]+)]]").find(genreRaw)?.groupValues?.get(1)?.trim()
                 ?: wikiPlain(genreRaw).split(',', '*', '•').map { it.trim() }.firstOrNull { it.isNotBlank() }.orEmpty()
-            val picture = o.getAsJsonObject("original")?.get("source")?.asString?.substringBefore("?").orEmpty()
+            // A song page's picture is its single's sleeve: not used when the song is from an album (its album's page has that cover).
+            val picture = if (fromAlbum.isNotBlank()) "" else o.getAsJsonObject("original")?.get("source")?.asString?.substringBefore("?").orEmpty()
             var title = ""
             var number = 0
             var album = if (isAlbum) name else wikiPlain(field("album"))
@@ -397,7 +400,7 @@ object Covers {
 
     /** A page's track list: (number on the record if it says, else 0, name), from "titleN = Name" or "# "Name"" lines. */
     fun wikiTracks(text: String): List<Pair<Int, String>> {
-        val numbered = Regex("\\|\\s*title(\\d+)\\s*=\\s*([^\\n|]+)").findAll(text).map { it.groupValues[1].toInt() to wikiPlain(it.groupValues[2]).trim('"', ' ') }.toList()
+        val numbered = Regex("\\|\\s*title(\\d+)\\s*=\\s*((?:\\[\\[[^\\]]*]]|[^\\n|\\[])+)").findAll(text).map { it.groupValues[1].toInt() to wikiPlain(it.groupValues[2]).trim('"', ' ') }.toList()
         if (numbered.isNotEmpty()) return numbered
         return Regex("(?m)^#\\s*\"?(\\[\\[[^\\]]+]]|[^\"\\n(]+)").findAll(text).map { 0 to wikiPlain(it.groupValues[1]).trim('"', ' ') }.filter { it.second.isNotBlank() }.toList()
     }

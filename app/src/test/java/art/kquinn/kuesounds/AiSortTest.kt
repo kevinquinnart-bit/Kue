@@ -96,4 +96,26 @@ class AiSortTest {
         assertEquals("The Dubliners", f.artist)
         assertEquals("Luke Kelly", f.credits)
     }
+
+    /** Wikipedia's real answer (saved 28 November 2026) for "Don't Go" Yazoo: the song page and Upstairs at Eric's. */
+    @Test fun findsDontGoOnUpstairsAtErics() {
+        val found = Covers.parseWikiRecords(text("wikipedia_dont_go.json"), "Don't Go", "Yazoo")
+        val album = found.first { it.kind == "studio album" }
+        assertEquals("Upstairs at Eric's", album.album)
+        assertEquals("Yazoo", album.artist)
+        assertEquals("1982", album.year)
+        assertEquals("Don't Go", album.title)
+        assertEquals(1, album.trackNo)
+        assertTrue(album.big.startsWith("https://upload.wikimedia.org/"))
+        val song = found.first { it.kind.startsWith("song page") }
+        assertEquals("Upstairs at Eric's", song.album)
+        assertTrue(song.big.isEmpty())
+    }
+
+    @Test fun searchesWithTheFirstArtist() {
+        assertEquals("Yazoo", AiSort.searchArtist("Yazoo - Alison Moyet"))
+        assertEquals("Kenny Rogers", AiSort.searchArtist("Kenny Rogers with Dolly Parton"))
+        assertEquals("The Killers", AiSort.searchArtist("The Killers feat. Lou Reed"))
+        assertEquals("Luke Kelly", AiSort.searchArtist("Luke Kelly"))
+    }
 }
