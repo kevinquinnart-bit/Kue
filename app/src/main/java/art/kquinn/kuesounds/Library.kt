@@ -511,7 +511,14 @@ object Library {
                 fileName = t.fileName ?: "", mime = t.mime ?: "", modified = t.modified ?: "",
                 title = t.title ?: (t.fileName ?: ""), artist = t.artist ?: UNKNOWN_ARTIST, album = t.album ?: UNKNOWN_ALBUM,
                 albumArtist = t.albumArtist ?: "", genre = t.genre ?: "",
-            )
+            ).let { c ->
+                // "Remastered" out of names KueSounds found (not ones Kevin set himself); written again at the next fix.
+                if (c.settled) c else {
+                    val title = withoutRemaster(c.title)
+                    val album = withoutRemaster(c.album)
+                    if (title == c.title && album == c.album) c else c.copy(title = title, album = album, fixed = false)
+                }
+            }
         }
         // Every kept part carried over (26 November 2026: kinds of music, dates, artist pictures and songs matched by
         // sound were left out here, so each time KueSounds started they were lost and step 4 began again from the start).
