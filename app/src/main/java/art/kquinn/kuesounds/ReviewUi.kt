@@ -62,6 +62,16 @@ object ReviewUi {
      * [now] is what is in the file. Off the main thread.
      */
     fun propose(item: Item, now: Map<FieldKey, String>, trying: (String) -> Unit): Covers.Lookup? {
+        // Sort with AI's answer when it has one; else asked now when a key is set (Kevin, 28 November 2026).
+        AiSort.answerFor(item)?.takeIf { it.artist.isNotBlank() || it.album.isNotBlank() }?.let { return it }
+        if (AiSort.whose(AiSort.key).isNotEmpty()) {
+            val s = runCatching { AiSort.ask(item, now, trying) }.getOrNull()
+            if (s != null && (s.look.artist.isNotBlank() || s.look.album.isNotBlank())) {
+                trying("Finding its cover")
+                val address = runCatching { AiSort.coverFor(s, item.album != null).second }.getOrDefault("")
+                return s.look.copy(small = address.ifBlank { s.look.small }, big = address.ifBlank { s.look.big })
+            }
+        }
         val t = item.songs.first()
         val artist = now[FieldKey.ARTIST].orEmpty().ifBlank { t.artist }.takeIf { it.isNotBlank() && it != Library.UNKNOWN_ARTIST }.orEmpty()
         if (item.album == null) {

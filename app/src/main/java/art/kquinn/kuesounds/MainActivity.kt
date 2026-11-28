@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
         PlayPrefs.init(this)
         Smart.init(this)
         SoundMatch.init(this)
+        AiSort.init(this)
         Listen.init(this)
         Backup.init(this)
         SpotifyLink.init(this)

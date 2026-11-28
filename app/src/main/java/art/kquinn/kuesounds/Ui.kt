@@ -1539,6 +1539,67 @@ object Ui {
         }
     }
 
+    /**
+     * Sort with AI (Kevin, 28 November 2026): get a free key, paste it, sort. The sure ones are written into the files,
+     * the rest wait in Check one at a time with the AI's answer filled in.
+     */
+    @Composable
+    private fun AiSortPanel(items: List<ReviewUi.Item>, onClose: () -> Unit) {
+        val ctx = LocalContext.current
+        val k = remember(AiSort.keyChanges) { AiSort.key }
+        var typed by remember { mutableStateOf("") }
+        var changing by remember { mutableStateOf(AiSort.whose(k).isEmpty()) }
+        val open = { url: String ->
+            runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            Unit
+        }
+        Dialog(onDismissRequest = onClose, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 18.dp)) {
+                KueSettings.PanelHeader("Sort with AI", look, onClose = onClose)
+                Column(Modifier.weight(1f).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Words("AI looks each one up on Google, Wikipedia and Discogs. The ones it is sure of are written into the files. The rest wait in Check one at a time, with its answer filled in.", 15)
+                    if (changing) {
+                        Words("1. Get a free key", 17, bold = true)
+                        Button("Get a free Google key", icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://aistudio.google.com/apikey") }
+                        Words("Sign in with your Google account, tap Create API key, then copy it. Free, no card needed. Google's AI searches Google for each one.", 13, K.Soft)
+                        Button("Or an OpenRouter key", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://openrouter.ai/keys") }
+                        Words("OpenRouter: only its free models are used, so it costs nothing. KueSounds does the searching.", 13, K.Soft)
+                        Words("2. Paste it here", 17, bold = true)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.weight(1f)) { EditField(typed) { typed = it.trim() } }
+                            Button("Paste", main = false, modifier = Modifier.height(52.dp)) {
+                                typed = (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager)
+                                    ?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty().trim()
+                            }
+                        }
+                        if (typed.isNotBlank() && AiSort.whose(typed).isEmpty()) Words("That isn't a Google or OpenRouter key. A Google key starts AIza, an OpenRouter key sk-or-.", 13, K.Accent)
+                        if (AiSort.whose(typed).isNotEmpty()) Button("Use this key", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) { AiSort.key = typed; changing = false }
+                    } else {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Words(AiSort.whose(k) + " key, ending " + k.takeLast(4), 14, K.Soft, modifier = Modifier.weight(1f))
+                            Words("Change", 14, K.Accent, bold = true, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { typed = ""; changing = true }.padding(8.dp))
+                        }
+                        if (AiSort.running) {
+                            Words(AiSort.status, 15, K.Accent)
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { if (AiSort.total == 0) 0f else AiSort.done.toFloat() / AiSort.total }, color = K.Accent, trackColor = K.Raised,
+                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                            )
+                            Words("It carries on with this closed and the screen off.", 13, K.Soft)
+                            Button("Stop", main = false, modifier = Modifier.fillMaxWidth()) { AiSort.stop() }
+                        } else {
+                            val n = remember(items, AiSort.lastResult) { AiSort.notAsked(items) }
+                            if (AiSort.lastResult.isNotEmpty()) Words(AiSort.lastResult, 15)
+                            if (n > 0) Button("Sort the $n", icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { AiSort.queue(ctx, items) }
+                            else Words("Every one has been sorted. The rest are in Check one at a time, with the AI's answer filled in.", 14, K.Soft)
+                        }
+                    }
+                    Words("The key stays on this phone. When the day's free allowance is used up it stops and says so; tap Sort again the next day and it carries on.", 13, K.Soft)
+                }
+            }
+        }
+    }
+
     @Composable
     private fun EditField(value: String, onChange: (String) -> Unit) {
         Box(Modifier.fillMaxWidth().heightIn(min = 52.dp).clip(RoundedCornerShape(14.dp)).background(K.Panel).border(1.dp, K.Edge, RoundedCornerShape(14.dp)).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
@@ -2811,6 +2872,15 @@ object Ui {
                             var checking by remember { mutableStateOf(false) }
                             if (checking) ReviewUi.Review(ReviewUi.items(leftNow)) { checking = false }
                             Button("Check the $left, one at a time", icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { checking = true }
+                            // Sort with AI, with the person's own free key (Kevin, 28 November 2026: "painfully slow ... a
+                            // one off search of a large batch like mine").
+                            var sorting by remember { mutableStateOf(false) }
+                            if (sorting) AiSortPanel(ReviewUi.items(leftNow)) { sorting = false }
+                            Button("Sort them with AI", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { sorting = true }
+                            when {
+                                AiSort.running -> Words(AiSort.status, 14, K.Accent)
+                                AiSort.lastResult.isNotEmpty() -> Words(AiSort.lastResult, 14, K.Soft)
+                            }
                             // The list, opened from here, not a second "to check" box below (Kevin, 27 November 2026: duplication).
                             Row(
                                 Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { showList = !showList }.padding(vertical = 8.dp),
@@ -2971,6 +3041,7 @@ object Ui {
         KueSettings.Place("account", "Account", null, "Sign-in and password"),
         KueSettings.Place("account", "Account", "Spotify", "Spotify Client ID"),
         KueSettings.Place("account", "Account", "AcoustID", "AcoustID key"),
+        KueSettings.Place("account", "Account", "AI key", "AI key for Sort with AI (Google or OpenRouter)"),
         KueSettings.Place("app", "KueSounds", "Fix your music files", "Match by name"),
         KueSettings.Place("app", "KueSounds", "Fix your music files", "Match by sound, like Shazam"),
         KueSettings.Place("app", "KueSounds", "Fix your music files", "Closest artist"),
@@ -3061,7 +3132,7 @@ object Ui {
 
             // 1. Account
             // Sign-ins and keys for outside services live here, apart from the everyday settings (Kevin, 26 November 2026).
-            KueSettings.Group(KueSettings.Icons.ACCOUNT, "Account", Google.email.ifBlank { "Signed in" } + " · Spotify · AcoustID", open == "account", look, { toggle("account") }) {
+            KueSettings.Group(KueSettings.Icons.ACCOUNT, "Account", Google.email.ifBlank { "Signed in" } + " · Spotify · AI key · AcoustID", open == "account", look, { toggle("account") }) {
                 KueSettings.Fact("Google account", Google.email.ifBlank { "Signed in" }, look)
                 KueSettings.Note("Your password and sign-in are kept by Google, not KueSounds.", look)
                 KueSettings.Section("Spotify", sectionOpen("account|Spotify"), look, { flip("account|Spotify") }) {
@@ -3073,6 +3144,18 @@ object Ui {
                             ", Android package art.kquinn.kuesounds, SHA1 17:05:AF:FC:99:35:B9:25:31:9E:4C:10:54:85:A8:99:C9:69:29:2B. " +
                             "Spotify allows 5 people per key, added under User Management. Anyone can use Find in Spotify with no key.",
                         look,
+                    )
+                }
+                KueSettings.Section("AI key", sectionOpen("account|AI key"), look, { flip("account|AI key") }) {
+                    var key by remember { mutableStateOf(AiSort.key) }
+                    Words("A Google or OpenRouter key, for Sort with AI in Fix your music files. Free. Optional.", 13, K.Soft)
+                    EditField(key) { key = it.trim(); AiSort.key = key }
+                    Words(
+                        when {
+                            key.isBlank() -> "No key."
+                            AiSort.whose(key).isEmpty() -> "That isn't a Google or OpenRouter key."
+                            else -> AiSort.whose(key) + " key saved, on this phone only."
+                        }, 13, K.Soft,
                     )
                 }
                 KueSettings.Section("AcoustID", sectionOpen("account|AcoustID"), look, { flip("account|AcoustID") }) {

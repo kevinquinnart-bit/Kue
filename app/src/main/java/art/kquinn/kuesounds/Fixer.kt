@@ -663,7 +663,8 @@ class WorkService : Service() {
                         if (Offline.hasWork) Offline.run(show)
                         if (Fixer.hasWork) Fixer.run(this@WorkService, show)
                         if (Kinds.hasWork) Kinds.run(this@WorkService, show)
-                    } while (Scanner.running || Offline.hasWork || Fixer.hasWork || Kinds.hasWork)
+                        if (AiSort.hasWork) AiSort.run(this@WorkService, show)
+                    } while (Scanner.running || Offline.hasWork || Fixer.hasWork || Kinds.hasWork || AiSort.hasWork)
                 } finally {
                     if (awake.isHeld) awake.release()
                     runCatching { if (wifi?.isHeld == true) wifi.release() }

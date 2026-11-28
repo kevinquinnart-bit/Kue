@@ -39,8 +39,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -112,19 +112,38 @@ object KueSettings {
      */
     @Composable
     fun PanelHeader(title: String, look: Look, scrolled: Boolean = false, onClose: () -> Unit) {
+        // The header follows a pull down and always springs back when the finger lifts or the pull is cut off (Kevin,
+        // 28 November 2026: the header was left stuck half way down the page, faded). The pull is read on a part that
+        // doesn't move; only what is drawn moves.
         var pulled by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-        val textSize by animateFloatAsState(if (scrolled) 16f else 20f, tween(220), label = "headerText")
-        val gap by animateFloatAsState(if (scrolled) 2f else 10f, tween(220), label = "headerGap")
-        val closeSize by animateFloatAsState(if (scrolled) 36f else 44f, tween(220), label = "headerClose")
+        var holding by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+        val shown by animateFloatAsState(if (holding) pulled else 0f, if (holding) androidx.compose.animation.core.snap() else tween(180), label = "headerPull")
+        val close = androidx.compose.runtime.rememberUpdatedState(onClose)
         Column(
             Modifier.fillMaxWidth()
-                .graphicsLayer { translationY = pulled.coerceAtLeast(0f); alpha = 1f - (pulled / 900f).coerceIn(0f, 0.5f) }
                 .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onDragEnd = { if (pulled > 110f) onClose(); pulled = 0f },
-                        onDragCancel = { pulled = 0f },
-                    ) { change, dy -> change.consume(); pulled = (pulled + dy).coerceAtLeast(0f) }
-                },
+                    androidx.compose.foundation.gestures.awaitEachGesture {
+                        val down = androidx.compose.foundation.gestures.awaitFirstDown(requireUnconsumed = false)
+                        var total = 0f
+                        try {
+                            val drag = androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation(down.id) { change, over -> change.consume(); total += over }
+                            if (drag != null) {
+                                holding = true
+                                pulled = total.coerceAtLeast(0f)
+                                androidx.compose.foundation.gestures.verticalDrag(drag.id) { change ->
+                                    total += change.positionChange().y
+                                    pulled = total.coerceAtLeast(0f)
+                                    change.consume()
+                                }
+                                if (total > 110f) close.value()
+                            }
+                        } finally {
+                            holding = false
+                            pulled = 0f
+                        }
+                    }
+                }
+                .graphicsLayer { translationY = shown.coerceAtLeast(0f); alpha = 1f - (shown / 900f).coerceIn(0f, 0.5f) },
         ) {
             Box(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(width = 44.dp, height = 5.dp).clip(RoundedCornerShape(3.dp)).background(look.soft().copy(alpha = 0.6f)))
