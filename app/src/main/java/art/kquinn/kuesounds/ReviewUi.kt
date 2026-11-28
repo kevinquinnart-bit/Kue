@@ -356,7 +356,7 @@ object ReviewUi {
 
     /** A list in a pop-up: what a step did (Kevin, 27 November 2026: "lists of match sound, closest artist"). Tap a song for its info. */
     @Composable
-    fun SongList(title: String, songs: List<Track>, empty: String, onClose: () -> Unit) {
+    fun SongList(title: String, songs: List<Track>, empty: String, ticks: Boolean = false, onClose: () -> Unit) {
         var open by remember { mutableStateOf<Track?>(null) }
         open?.let { t -> Ui.SongInfo(t) { open = null } }
         Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
@@ -376,7 +376,13 @@ object ReviewUi {
                                 Ui.Words(t.artist + (if (t.album.isNotBlank()) " · " + t.album else ""), 13, K.Soft)
                             }
                             Spacer(Modifier.width(8.dp))
-                            KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
+                            if (ticks) {
+                                // The reviewed tick, as in Song info: tap the box to tick, the row to open the song.
+                                val on = t.id in Scanner.data.reviewed
+                                Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = if (on) "Untick reviewed" else "Tick as reviewed") { Scanner.markReviewed(t.id, !on) }, contentAlignment = Alignment.Center) {
+                                    KueSettings.Icon(if (on) KueSettings.Icons.BOX_TICK else KueSettings.Icons.BOX, 26.dp, if (on) K.Accent else K.Soft, 2f)
+                                }
+                            } else KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
                         }
                     }
                 }

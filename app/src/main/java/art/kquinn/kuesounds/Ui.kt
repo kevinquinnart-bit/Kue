@@ -566,14 +566,12 @@ object Ui {
         // goes straight to checking them one at a time.
         val left = remember(data, view, Scanner.running) { Scanner.left(view, data) }
         val stuck = left.total
-        var checking by remember { mutableStateOf(false) }
-        if (checking) ReviewUi.Review(ReviewUi.items(left)) { checking = false }
         if (status.isEmpty() && Scanner.problem.isEmpty() && (view.leftToFix > 0 || stuck > 0)) {
             Row(
                 // A soft edge round it (Kevin, 27 November 2026: "give subtle border").
                 Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).border(1.dp, K.Edge, RoundedCornerShape(12.dp)).clickable(onClickLabel = "Check them") {
-                    if (stuck > 0 && view.leftToFix == 0 && !Scanner.running && !Fixer.running) checking = true
-                    else { settingsAt = "app|Fix your music files"; go(Screen.Settings) }
+                    // To the whole of Fix your music files, every way to fix them (Kevin, 28 November 2026).
+                    settingsAt = "app|Fix your music files"; go(Screen.Settings)
                 }.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -583,7 +581,7 @@ object Ui {
                     listOfNotNull(
                         if (view.leftToFix > 0) count(view.leftToFix, "album") + " ready to write to the files" else null,
                         if (stuck > 0) "$stuck to check" else null,
-                    ).joinToString(" · ") + (if (stuck > 0 && view.leftToFix == 0) ". Tap to check them one at a time." else ". Tap to see."),
+                    ).joinToString(" · ") + ". Tap to fix them.",
                     14, K.Soft, modifier = Modifier.weight(1f),
                 )
                 KueSettings.Icon(KueSettings.Icons.CHEVRON, 16.dp, K.Soft, 2.2f)
@@ -1128,6 +1126,7 @@ object Ui {
                     Cover(Scanner.artForTrack(t) ?: Scanner.singleArtFor(t), Modifier.fillMaxWidth().aspectRatio(1f), corner = 16.dp, glyphSize = 72.dp)
                 }
                 Button("Choose the cover", main = false, icon = KueSettings.Icons.DISC, modifier = Modifier.fillMaxWidth()) { choosing = true }
+                ReviewTick(t)
 
                 // 1. What is written in the file, each line tapped to change.
                 Words("In the file", 17, bold = true)
@@ -1626,6 +1625,28 @@ object Ui {
                     Words("The key stays on this phone. When the day's free allowance is used up it stops and says so; tap Sort again the next day and it carries on.", 13, K.Soft)
                 }
             }
+        }
+    }
+
+    /**
+     * The reviewed tick on a song KueSounds or the AI changed, not Kevin by hand (Kevin, 28 November 2026: "enable a
+     * reviewed tick ... on each non manual edit"). Nothing shows for a song he put right himself.
+     */
+    @Composable
+    internal fun ReviewTick(t: Track) {
+        val d = Scanner.data
+        if (!Scanner.changedForMe(t, d)) return
+        val on = t.id in d.reviewed
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(K.Raised).border(1.dp, if (on) K.Accent else K.Edge, RoundedCornerShape(14.dp))
+                .clickable(onClickLabel = if (on) "Untick reviewed" else "Tick as reviewed") { Scanner.markReviewed(t.id, !on) }.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Words(if (on) "Reviewed" else "Not reviewed yet", 16, if (on) K.Accent else K.Ink, bold = true)
+                Words(if (t.id in d.aiWritten) "Put right by the AI." else "Put right by KueSounds.", 13, K.Soft)
+            }
+            KueSettings.Icon(if (on) KueSettings.Icons.BOX_TICK else KueSettings.Icons.BOX, 28.dp, if (on) K.Accent else K.Soft, 2f)
         }
     }
 
@@ -2930,6 +2951,13 @@ object Ui {
                             // Said only when it is true: albums settled by hand without a picture are counted, not hidden.
                             val bare = remember(data, view) { view.albums.count { Scanner.artFor(it) == null && it.tracks.all { t -> t.settled } } }
                             Words(if (bare == 0) "Every song has its right name and cover." else "Every song has its right name. " + count(bare, "album") + " kept as they are, with no picture.", 14)
+                        }
+                        // KueSounds' and the AI's changes, to tick as reviewed one by one (Kevin, 28 November 2026).
+                        val toReview = remember(data) { Scanner.toReview(data) }
+                        if (toReview.isNotEmpty()) {
+                            var reviewing by remember { mutableStateOf(false) }
+                            if (reviewing) ReviewUi.SongList("Changes to review", toReview, "All reviewed.", ticks = true) { reviewing = false }
+                            Button("Review the changes: " + n(toReview.size) + " to tick", main = false, icon = KueSettings.Icons.BOX_TICK, modifier = Modifier.fillMaxWidth()) { reviewing = true }
                         }
                     }
                 }

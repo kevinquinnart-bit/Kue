@@ -173,12 +173,13 @@ object FixByHandUi {
         val use: (Covers.Lookup) -> Unit = { f ->
             if (!f.coverOnly) {
                 if (!isAlbum) {
-                    if (f.title.isNotBlank()) now[FieldKey.TITLE] = f.title
+                    // Never "(Remastered)" in a name (Kevin, 28 November 2026).
+                    if (f.title.isNotBlank()) now[FieldKey.TITLE] = Library.withoutRemaster(f.title)
                     if (f.artist.isNotBlank()) now[FieldKey.ARTIST] = f.artist
                     if (f.trackNo > 0) now[FieldKey.TRACK] = f.trackNo.toString()
                     if (f.discNo > 0) now[FieldKey.DISC_NO] = f.discNo.toString()
                 }
-                if (f.album.isNotBlank()) now[FieldKey.ALBUM] = f.album
+                if (f.album.isNotBlank()) now[FieldKey.ALBUM] = Library.withoutRemaster(f.album)
                 if (f.albumArtist.isNotBlank()) now[FieldKey.ALBUM_ARTIST] = f.albumArtist
                 if (f.year.isNotBlank()) now[FieldKey.YEAR] = f.year
                 if (f.genre.isNotBlank()) now[FieldKey.GENRE] = f.genre

@@ -136,6 +136,10 @@ data class LibraryData(
     val kindWritten: Set<String> = emptySet(),
     /** Songs whose genre was looked for online for the genre check, found or not, so each is asked once. */
     val kindTried: Set<String> = emptySet(),
+    /** Songs Kevin has ticked as reviewed after KueSounds or the AI changed them (28 November 2026). */
+    val reviewed: Set<String> = emptySet(),
+    /** Songs Sort with AI wrote into (not by hand). */
+    val aiWritten: Set<String> = emptySet(),
 )
 
 object Library {
@@ -347,6 +351,15 @@ object Library {
     }
 
     /** A song name without anything in brackets: "Take My Breath Away (Love Theme From Top Gun)" is "Take My Breath Away". */
+    /**
+     * A name without its "remastered" part (Kevin, 28 November 2026: "Shakedown (Remastered)"): "(Remastered)",
+     * "[2011 Remaster]", "(Remastered Version)", " - Remastered 2009", " - 2015 Remaster". The rest is kept as it is.
+     */
+    fun withoutRemaster(name: String): String =
+        name.replace(Regex("\\s*[\\[(][^\\])]*remaster[^\\])]*[\\])]", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+[-–]\\s+[^-–]*remaster[^-–]*$", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("\\s+"), " ").trim().ifBlank { name }
+
     fun withoutBrackets(title: String): String =
         title.replace(Regex("""\s*[\[(][^\])]*[\])]"""), " ").replace(Regex("\\s+"), " ").trim().ifBlank { title }
 
@@ -511,6 +524,7 @@ object Library {
             soundChecked = d.soundChecked ?: emptySet(), facts = d.facts ?: emptyMap(), soundMatched = d.soundMatched ?: emptySet(),
             artistPictures = d.artistPictures ?: emptyMap(), fixFailedAt = d.fixFailedAt ?: emptyMap(), artistSwept = d.artistSwept ?: emptySet(), coverTried = d.coverTried ?: emptySet(),
             kindFromWeb = d.kindFromWeb ?: emptySet(), kindWritten = d.kindWritten ?: emptySet(), kindTried = d.kindTried ?: emptySet(),
+            reviewed = d.reviewed ?: emptySet(), aiWritten = d.aiWritten ?: emptySet(),
         )
     }
 

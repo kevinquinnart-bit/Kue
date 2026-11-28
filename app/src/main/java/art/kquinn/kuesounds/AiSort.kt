@@ -103,17 +103,27 @@ object AiSort {
                 answers[k] = Answer(a.getAsJsonObject("look")?.let { lookFrom(it) }, sure, written)
             }
             if (old) saveAnswers()
+            // Songs written by earlier runs, recorded so they can be ticked as reviewed.
+            val wroteIds = answers.filter { it.value.written }.keys.map { it.substringBefore('|') }
+            if (wroteIds.isNotEmpty() && !prefs().getBoolean("aiMarked", false)) {
+                prefs().edit().putBoolean("aiMarked", true).apply()
+                Scanner.markAiWritten(writtenSongsLocked().map { it.id }.ifEmpty { wroteIds }, on = true)
+            }
         }
     }
 
     /** The songs Sort with AI wrote into, for checking them (Kevin, 28 November 2026). */
     fun writtenSongs(): List<Track> = synchronized(answers) {
         load()
+        writtenSongsLocked()
+    }
+
+    private fun writtenSongsLocked(): List<Track> {
         val ids = answers.filter { it.value.written }.keys.map { it.substringBefore('|') }.toHashSet()
         val byAlbum = answers.filter { it.value.written && it.key.endsWith("|album") }.keys.map { it.substringBefore('|') }
         val tracks = Scanner.data.tracks
         val albumSongs = byAlbum.flatMap { id -> tracks.firstOrNull { it.id == id }?.let { first -> tracks.filter { t -> t.album == first.album && Library.albumArtistOf(t) == Library.albumArtistOf(first) } }.orEmpty() }
-        (tracks.filter { it.id in ids } + albumSongs).distinctBy { it.id }.sortedWith(compareBy({ Library.sortName(it.artist) }, { Library.sortName(it.album) }, { it.trackNo }))
+        return (tracks.filter { it.id in ids } + albumSongs).distinctBy { it.id }.sortedWith(compareBy({ Library.sortName(it.artist) }, { Library.sortName(it.album) }, { it.trackNo }))
     }
 
     private fun saveAnswers() {
@@ -205,7 +215,7 @@ object AiSort {
             if (found.any { it.from == "Wikipedia" }) appendLine("Wikipedia records name the original release and its track list: prefer a Wikipedia record marked (studio album) or (album) that has the song.")
             appendLine(if (found.isEmpty()) "Nothing was found for it in Wikipedia, Apple Music, Deezer or Discogs: answer from what you know, with \"pick\" 0." else "Records found for it (choose by number in \"pick\", or 0 if none is it):")
             found.forEachIndexed { i, f ->
-                appendLine("${i + 1}. " + listOf(f.title, f.artist, f.album, f.year, if (f.trackNo > 0) "track " + f.trackNo else "", f.genre, f.from,
+                appendLine("${i + 1}. " + listOf(Library.withoutRemaster(f.title), f.artist, Library.withoutRemaster(f.album), f.year, if (f.trackNo > 0) "track " + f.trackNo else "", f.genre, f.from,
                     if (f.credits.isNotBlank()) f.credits + " is named on its page, as a member" else "").filter { it.isNotBlank() }.joinToString(" | ") +
                     when { isCompilation(f) -> " (compilation)"; f.kind.isNotBlank() -> " (" + f.kind + ")"; else -> "" })
             }
@@ -222,6 +232,7 @@ object AiSort {
         } else {
             appendLine("- title: leave empty. album, albumArtist and artist: the album's real name and the artist's real name, spelt as they are, with accents.")
         }
+        appendLine("- Leave out \"Remastered\", \"Remaster\" and the like from names: \"Shakedown\", not \"Shakedown (Remastered)\".")
         appendLine("- year: four figures, the year that release came out. genre: one or two words (Folk, Country, Pop, Rock...).")
         appendLine("- cover: a direct address of a picture of that release's cover, if you saw one. discogs: its discogs.com release address. wikipedia: its en.wikipedia.org page address. Empty if not known.")
         appendLine("- sure: \"high\" only when what you found plainly matches this file's artist and name; \"medium\" when it probably does; \"low\" when you are guessing.")
@@ -262,7 +273,7 @@ object AiSort {
         fun s(k: String) = o.get(k)?.takeIf { !it.isJsonNull && it.isJsonPrimitive }?.asString?.trim().orEmpty()
         fun n(k: String) = s(k).substringBefore('/').toIntOrNull() ?: 0
         val look = Covers.Lookup(
-            title = if (album) "" else s("title"), artist = s("artist"), album = s("album"), albumArtist = s("albumArtist").ifBlank { s("artist") },
+            title = if (album) "" else Library.withoutRemaster(s("title")), artist = s("artist"), album = Library.withoutRemaster(s("album")), albumArtist = s("albumArtist").ifBlank { s("artist") },
             year = Regex("\\d{4}").find(s("year"))?.value.orEmpty(), trackNo = if (album) 0 else n("track"), discNo = if (album) 0 else n("disc"),
             genre = s("genre"), small = "", big = "", from = from,
         )
@@ -504,7 +515,7 @@ object AiSort {
         put(FieldKey.ALBUM, look.album); put(FieldKey.ALBUM_ARTIST, look.albumArtist); put(FieldKey.YEAR, look.year); put(FieldKey.GENRE, look.genre)
         val jpeg = cover?.let { FixByHandUi.asJpeg(it) }
         val t = item.songs.first()
-        val result = runCatching { Fixer.saveByHand(context, item.songs, set, emptySet(), jpeg) }.getOrDefault("")
+        val result = runCatching { Fixer.saveByHand(context, item.songs, set, emptySet(), jpeg, byHand = false) }.getOrDefault("")
         val ok = result.startsWith("Saved into the file") || result.startsWith("Saved into all")
         Scanner.note(
             if (ok) "AI sort wrote: " + (item.album ?: t.fileName) + " → " + look.artist + " / " + (look.title.ifBlank { look.album }) + (if (jpeg == null) " (no cover found)" else "")
@@ -521,7 +532,8 @@ object AiSort {
     /** [items] with the AI's answer for each (null when it had none), not yet written. */
     fun answersFor(items: List<ReviewUi.Item>): List<Pair<ReviewUi.Item, Covers.Lookup?>> = synchronized(answers) {
         load()
-        val out = items.map { it to kept(it)?.takeIf { a -> !a.written }?.look?.takeIf { l -> l.artist.isNotBlank() || l.album.isNotBlank() } }
+        val out = items.map { it to kept(it)?.takeIf { a -> !a.written }?.look?.takeIf { l -> l.artist.isNotBlank() || l.album.isNotBlank() }
+            ?.let { l -> l.copy(title = Library.withoutRemaster(l.title), album = Library.withoutRemaster(l.album)) } }
         // Once a session, in the report: how many answers are kept and how many match the list (Kevin, 28 November
         // 2026: the list of answers didn't show).
         if (!counted) {

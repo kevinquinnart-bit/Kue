@@ -352,7 +352,7 @@ object Fixer {
      * leaving everything else in the files as it is; [cover] (when given) becomes each file's one picture and its album's
      * cover in KueSounds. A file whose song name or artist changed is named after the song. The answer is what to say.
      */
-    suspend fun saveByHand(context: Context, tracks: List<Track>, set: Map<org.jaudiotagger.tag.FieldKey, String>, remove: Set<String>, cover: ByteArray?): String {
+    suspend fun saveByHand(context: Context, tracks: List<Track>, set: Map<org.jaudiotagger.tag.FieldKey, String>, remove: Set<String>, cover: ByteArray?, byHand: Boolean = true): String {
         val work = File(context.cacheDir, "fix").apply { mkdirs() }
         val coverFile = cover?.let { b -> File(work, "hand-cover.jpg").apply { writeBytes(b) } }
         var done = 0
@@ -406,6 +406,8 @@ object Fixer {
                         )
                     }
                     Scanner.fixTried(t.id, null)
+                    // By hand it is Kevin's own (nothing to review); by Sort with AI it waits for his review tick.
+                    Scanner.markAiWritten(listOf(t.id), on = !byHand)
                     if (!set[org.jaudiotagger.tag.FieldKey.GENRE].isNullOrBlank()) Scanner.markKind(t.id, written = true)
                     Scanner.note("fixed by hand: " + t.fileName + " → " + artist + " / " + title)
                     done++

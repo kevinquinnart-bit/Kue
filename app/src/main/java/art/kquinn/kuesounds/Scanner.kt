@@ -762,8 +762,8 @@ object Scanner {
             val f = best[t.id] ?: return@map t
             val move = moves[t.id]
             t.copy(
-                title = f.title, artist = f.artist,
-                album = move?.first ?: t.album, albumArtist = move?.second ?: t.albumArtist,
+                title = Library.withoutRemaster(f.title), artist = f.artist,
+                album = move?.first?.let { Library.withoutRemaster(it) } ?: t.album, albumArtist = move?.second ?: t.albumArtist,
                 checked = move == null && t.checked, ownLook = false, fixed = false,
             )
         })
@@ -820,7 +820,7 @@ object Scanner {
                     val hit = runCatching { Covers.song(t.artist, t.title) }.getOrNull()
                     Thread.sleep(250)
                     if (hit == null) continue
-                    val moved = t.copy(album = hit.album, albumArtist = hit.artist, checked = true, ownLook = true, fixed = false)
+                    val moved = t.copy(album = Library.withoutRemaster(hit.album), albumArtist = hit.artist, checked = true, ownLook = true, fixed = false)
                     val key = keyOf(moved)
                     if (key !in data.catalogueCovers) {
                         val path = Covers.download(hit.cover)?.let { keepPicture(it, key + "\u0002" + hit.from) } ?: continue
@@ -1188,6 +1188,25 @@ object Scanner {
         leftValue?.let { v -> leftCache?.let { c -> if (c.first === view && c.second === d && c.third == running) return v } }
         return Left(notFixed(view, d), noCover(d)).also { leftCache = key; leftValue = it }
     }
+
+    /** Ticks (or unticks) a song as reviewed by Kevin after KueSounds or the AI changed it. */
+    fun markReviewed(id: String, on: Boolean) = synchronized(this) {
+        data = data.copy(reviewed = if (on) data.reviewed + id else data.reviewed - id)
+        save()
+    }
+
+    /** Songs Sort with AI wrote into ([on]), or that Kevin then changed by hand (not). */
+    fun markAiWritten(ids: Collection<String>, on: Boolean) = synchronized(this) {
+        val now = if (on) data.aiWritten + ids else data.aiWritten - ids.toSet()
+        if (now != data.aiWritten) { data = data.copy(aiWritten = now); save() }
+    }
+
+    /** Whether a song was changed by KueSounds or the AI, not by Kevin's own hand (so it can be ticked as reviewed). */
+    fun changedForMe(t: Track, d: LibraryData = data): Boolean = (t.fixed && !t.settled) || t.id in d.aiWritten
+
+    /** Songs KueSounds or the AI changed that Kevin hasn't ticked as reviewed, in album order. */
+    fun toReview(d: LibraryData = data): List<Track> = d.tracks.filter { changedForMe(it, d) && it.id !in d.reviewed }
+        .sortedWith(compareBy({ Library.sortName(Library.albumArtistOf(it)) }, { Library.sortName(it.album) }, { it.discNo }, { it.trackNo }))
 
     /** Notes that a song's kind of music came from online, or that it is now written in its file. */
     fun markKind(id: String, fromWeb: Boolean = false, written: Boolean = false, tried: Boolean = false) = synchronized(this) {
