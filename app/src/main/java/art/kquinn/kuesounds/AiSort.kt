@@ -70,8 +70,18 @@ object AiSort {
     class Answer(val look: Covers.Lookup?, val sure: Boolean, val written: Boolean = false)
 
     private fun keyOf(item: ReviewUi.Item) = item.songs.first().id + if (item.album != null) "|album" else ""
+
+    /**
+     * The kept answer for [item], under any of its songs: an album's songs can come in another order once one of them
+     * changes, so its first song isn't always the one the answer was kept under.
+     */
+    private fun kept(item: ReviewUi.Item): Answer? {
+        val end = if (item.album != null) "|album" else ""
+        return item.songs.firstNotNullOfOrNull { answers[it.id + end] }
+    }
     private val answers = HashMap<String, Answer>()
     private var loaded = false
+    private var counted = false
     private fun file() = File(app.filesDir, "ai-answers.json")
 
     private fun load() {
@@ -125,15 +135,15 @@ object AiSort {
     }
 
     /** The answer kept for [item], for Check one at a time. */
-    fun answerFor(item: ReviewUi.Item): Covers.Lookup? = synchronized(answers) { load(); answers[keyOf(item)]?.look }
+    fun answerFor(item: ReviewUi.Item): Covers.Lookup? = synchronized(answers) { load(); kept(item)?.look }
 
     /** How many of [items] haven't been asked yet. */
-    fun notAsked(items: List<ReviewUi.Item>): Int = synchronized(answers) { load(); items.count { keyOf(it) !in answers } }
+    fun notAsked(items: List<ReviewUi.Item>): Int = synchronized(answers) { load(); items.count { kept(it) == null } }
 
     /** Starts sorting [items] (those not asked before). Needs the edit permission, for writing the sure ones. */
     fun queue(context: Context, items: List<ReviewUi.Item>) {
         init(context)
-        val fresh = synchronized(answers) { load(); items.filter { keyOf(it) !in answers } }
+        val fresh = synchronized(answers) { load(); items.filter { kept(it) == null } }
         if (fresh.isEmpty()) { lastResult = "Every one has been asked already. Their answers are in Check one at a time."; return }
         val go = {
             stopWanted = false
@@ -500,7 +510,7 @@ object AiSort {
             if (ok) "AI sort wrote: " + (item.album ?: t.fileName) + " → " + look.artist + " / " + (look.title.ifBlank { look.album }) + (if (jpeg == null) " (no cover found)" else "")
             else "AI sort: not written: " + (item.album ?: t.fileName) + ": " + result,
         )
-        if (ok) synchronized(answers) { answers[keyOf(item)] = Answer(look, answers[keyOf(item)]?.sure ?: false, true); saveAnswers() }
+        if (ok) synchronized(answers) { answers[keyOf(item)] = Answer(look, kept(item)?.sure ?: false, true); saveAnswers() }
         return ok
     }
 
@@ -511,7 +521,15 @@ object AiSort {
     /** [items] with the AI's answer for each (null when it had none), not yet written. */
     fun answersFor(items: List<ReviewUi.Item>): List<Pair<ReviewUi.Item, Covers.Lookup?>> = synchronized(answers) {
         load()
-        items.map { it to answers[keyOf(it)]?.takeIf { a -> !a.written }?.look?.takeIf { l -> l.artist.isNotBlank() || l.album.isNotBlank() } }
+        val out = items.map { it to kept(it)?.takeIf { a -> !a.written }?.look?.takeIf { l -> l.artist.isNotBlank() || l.album.isNotBlank() } }
+        // Once a session, in the report: how many answers are kept and how many match the list (Kevin, 28 November
+        // 2026: the list of answers didn't show).
+        if (!counted) {
+            counted = true
+            Scanner.note("AI answers kept: " + answers.size + " (" + answers.count { it.value.written } + " written); of the " + items.size + " to check, " +
+                items.count { kept(it) != null } + " have one, " + out.count { it.second != null } + " to look over")
+        }
+        out
     }
 
     /** Whether an answer is ticked to start with: it has names, and isn't a compilation or a mix of songs. */

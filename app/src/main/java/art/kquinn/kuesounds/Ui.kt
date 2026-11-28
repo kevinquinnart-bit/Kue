@@ -2905,6 +2905,13 @@ object Ui {
                             // one off search of a large batch like mine").
                             var sorting by remember { mutableStateOf(false) }
                             if (sorting) AiSortPanel(ReviewUi.items(leftNow)) { sorting = false }
+                            // The AI's answers, to tick and save together: here, beside Check, as well as in Sort with AI.
+                            val answersWaiting = remember(leftNow, AiSort.lastResult, AiSort.running) { AiSort.answersFor(ReviewUi.items(leftNow)).count { it.second != null } }
+                            if (answersWaiting > 0) {
+                                var looking by remember { mutableStateOf(false) }
+                                if (looking) ReviewUi.AiAnswers(ReviewUi.items(leftNow)) { looking = false }
+                                Button("Look over the AI's $answersWaiting answers", main = false, icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) { looking = true }
+                            }
                             Button("Sort them with AI", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { sorting = true }
                             when {
                                 AiSort.running -> Words(AiSort.status, 14, K.Accent)
