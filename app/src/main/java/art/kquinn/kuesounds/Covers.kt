@@ -157,6 +157,8 @@ object Covers {
         val trackNo: Int, val discNo: Int, val genre: String, val small: String, val big: String, val from: String,
         /** True for a find that only gives a picture (Wikipedia): using it changes the cover, not the names. */
         val coverOnly: Boolean = false,
+        /** What kind of record it is, when the source says: "studio album", "compilation", "live album", "single". */
+        val kind: String = "",
     )
 
     fun parseItunesLookups(json: String?): List<Lookup> = runCatching {
@@ -289,6 +291,8 @@ object Covers {
             year = o.get("year")?.asInt?.takeIf { it > 0 }?.toString().orEmpty(), trackNo = if (at >= 0) at + 1 else 0, discNo = 0,
             genre = styles.firstOrNull() ?: genres.firstOrNull().orEmpty(),
             small = img.get("uri150")?.asString ?: big, big = big, from = "Discogs",
+            kind = o.getAsJsonArray("formats")?.flatMap { f -> f.asJsonObject.getAsJsonArray("descriptions")?.map { it.asString }.orEmpty() }.orEmpty()
+                .let { d -> when { d.any { it.equals("Compilation", true) } -> "compilation"; d.any { it.equals("Single", true) } -> "single"; d.any { it.equals("Album", true) || it.equals("LP", true) } -> "album"; else -> "" } },
         )
     }.getOrNull()
 
@@ -328,6 +332,77 @@ object Covers {
         }
         return out
     }
+
+    /**
+     * Wikipedia's album and song pages for [words] (Kevin, 28 November 2026: Wikipedia gives the original album, its
+     * year, label and track list, as for "My Little Son" on The Dubliners' Drinkin' and Courtin', 1968). Each page's
+     * infobox gives the record's name, artist, year, genre and kind (studio, compilation, live, single); its cover is the
+     * page's picture. With [song], only pages whose track list has the song are kept, with the track's name and number.
+     */
+    fun parseWikiRecords(json: String?, song: String? = null): List<Lookup> = runCatching {
+        val pages = JsonParser.parseString(json ?: return emptyList()).asJsonObject.getAsJsonObject("query")?.getAsJsonArray("pages") ?: return emptyList()
+        pages.map { it.asJsonObject }.sortedBy { it.get("index")?.asInt ?: 99 }.mapNotNull { o ->
+            val text = o.getAsJsonArray("revisions")?.firstOrNull()?.asJsonObject?.getAsJsonObject("slots")?.getAsJsonObject("main")?.get("content")?.asString ?: return@mapNotNull null
+            val at = Regex("\\{\\{\\s*Infobox (album|song|single)", RegexOption.IGNORE_CASE).find(text) ?: return@mapNotNull null
+            val box = text.substring(at.range.first, minOf(text.length, at.range.first + 4000))
+            fun field(k: String) = Regex("\\n\\s*\\|\\s*$k\\s*=\\s*([^\\n]*)", RegexOption.IGNORE_CASE).find(box)?.groupValues?.get(1)?.trim().orEmpty()
+            val isAlbum = at.groupValues[1].equals("album", true)
+            val type = wikiPlain(field("type")).lowercase()
+            val kind = when {
+                !isAlbum -> "single"
+                Regex("compil|greatest|best|hits").containsMatchIn(type) -> "compilation"
+                "live" in type -> "live album"
+                "studio" in type -> "studio album"
+                type.isNotBlank() -> type
+                else -> "album"
+            }
+            val name = wikiPlain(field("name")).ifBlank { o.get("title")?.asString.orEmpty().replace(Regex("\\s*\\((album|song|single)[^)]*\\)$", RegexOption.IGNORE_CASE), "") }
+            val artist = wikiPlain(field("artist"))
+            val year = Regex("(1[89]|20)\\d\\d").find(field("released"))?.value.orEmpty()
+            val genreRaw = field("genre")
+            val genre = Regex("\\[\\[(?:[^|\\]]*\\|)?([^\\]]+)]]").find(genreRaw)?.groupValues?.get(1)?.trim()
+                ?: wikiPlain(genreRaw).split(',', '*', '•').map { it.trim() }.firstOrNull { it.isNotBlank() }.orEmpty()
+            val picture = o.getAsJsonObject("original")?.get("source")?.asString?.substringBefore("?").orEmpty()
+            var title = ""
+            var number = 0
+            var album = if (isAlbum) name else wikiPlain(field("album"))
+            if (!song.isNullOrBlank()) {
+                val tracks = wikiTracks(text)
+                val want = Library.withoutBrackets(song)
+                val hit = tracks.withIndex().firstOrNull { (_, t) -> same(t.second, want) }
+                    ?: tracks.withIndex().firstOrNull { (_, t) -> t.second.length >= 6 && (Library.sortName(want).contains(Library.sortName(t.second)) || Library.sortName(t.second).contains(Library.sortName(want))) }
+                if (hit != null) { title = hit.value.second; number = hit.value.first.takeIf { it > 0 } ?: (hit.index + 1) }
+                else if (!isAlbum && same(name, want)) title = name
+                else return@mapNotNull null
+            }
+            if (album.isBlank() && isAlbum) album = name
+            Lookup(title, artist, album, artist, year, if (isAlbum) number else 0, 0, genre, picture, picture, "Wikipedia", kind = kind)
+        }
+    }.getOrDefault(emptyList())
+
+    /** Wikipedia markup made plain: links to their words, templates and notes out. */
+    fun wikiPlain(s: String): String = s
+        .replace(Regex("<ref[^>]*/>|<ref[^>]*>.*?</ref>", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("\\[\\[(?:[^|\\]]*\\|)?([^\\]]+)]]"), "$1")
+        .replace(Regex("\\{\\{[^{}]*}}"), "")
+        .replace(Regex("<[^>]+>"), " ").replace("'''", "").replace("''", "")
+        .replace(Regex("\\s+"), " ").trim()
+
+    /** A page's track list: (number on the record if it says, else 0, name), from "titleN = Name" or "# "Name"" lines. */
+    fun wikiTracks(text: String): List<Pair<Int, String>> {
+        val numbered = Regex("\\|\\s*title(\\d+)\\s*=\\s*([^\\n|]+)").findAll(text).map { it.groupValues[1].toInt() to wikiPlain(it.groupValues[2]).trim('"', ' ') }.toList()
+        if (numbered.isNotEmpty()) return numbered
+        return Regex("(?m)^#\\s*\"?(\\[\\[[^\\]]+]]|[^\"\\n(]+)").findAll(text).map { 0 to wikiPlain(it.groupValues[1]).trim('"', ' ') }.filter { it.second.isNotBlank() }.toList()
+    }
+
+    /** Wikipedia's records for [words] (see parseWikiRecords). Off the main thread. */
+    fun wikiRecords(words: String, song: String? = null): List<Lookup> = parseWikiRecords(
+        get("https://en.wikipedia.org/w/api.php".toHttpUrl().newBuilder().addQueryParameter("action", "query").addQueryParameter("format", "json")
+            .addQueryParameter("formatversion", "2").addQueryParameter("generator", "search").addQueryParameter("gsrsearch", words).addQueryParameter("gsrlimit", "6")
+            .addQueryParameter("prop", "pageimages|revisions").addQueryParameter("piprop", "original").addQueryParameter("pilicense", "any")
+            .addQueryParameter("rvprop", "content").addQueryParameter("rvslots", "main").build()),
+        song,
+    )
 
     /** A cover's picture. Off the main thread. */
     fun download(url: String): ByteArray? = Smart.download(url)

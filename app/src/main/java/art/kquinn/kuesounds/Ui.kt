@@ -1605,6 +1605,13 @@ object Ui {
                         } else {
                             val n = remember(items, AiSort.lastResult) { AiSort.notAsked(items) }
                             if (AiSort.lastResult.isNotEmpty()) Words(AiSort.lastResult, 15)
+                            // What Sort with AI wrote into the files, to check (Kevin, 28 November 2026).
+                            val wrote = remember(AiSort.lastResult, AiSort.done) { AiSort.writtenSongs() }
+                            if (wrote.isNotEmpty()) {
+                                var seeing by remember { mutableStateOf(false) }
+                                if (seeing) ReviewUi.SongList("Written by AI", wrote, "None yet.") { seeing = false }
+                                Button("See the " + count(wrote.size, "song") + " it wrote", main = false, icon = KueSettings.Icons.CHEVRON, modifier = Modifier.fillMaxWidth()) { seeing = true }
+                            }
                             if (n > 0) Button("Sort the $n", icon = KueSettings.Icons.FIX, modifier = Modifier.fillMaxWidth()) { AiSort.queue(ctx, items) }
                             else Words("Every one has been sorted. The rest are in Check one at a time, with the AI's answer filled in.", 14, K.Soft)
                         }

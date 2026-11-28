@@ -40,7 +40,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
@@ -116,41 +115,45 @@ object KueSettings {
      */
     @Composable
     fun PanelHeader(title: String, look: Look, scrolled: Boolean = false, onClose: () -> Unit) {
-        // The header follows a pull down and always springs back when the finger lifts or the pull is cut off (Kevin,
-        // 28 November 2026: the header was left stuck half way down the page, faded). The pull is read on a part that
-        // doesn't move; only what is drawn moves.
-        var pulled by androidx.compose.runtime.remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
-        var holding by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-        val shown by animateFloatAsState(if (holding) pulled else 0f, if (holding) androidx.compose.animation.core.snap() else tween(180), label = "headerPull")
+        // Pulling the header down moves the whole pop-up with the finger, not the header on its own (Kevin, 28 November
+        // 2026: "header still coming down", the header left the page behind); far enough and it closes, else it springs
+        // back. The pop-up's own window is moved, so what is under the finger stays under it.
+        val view = androidx.compose.ui.platform.LocalView.current
+        val window = androidx.compose.runtime.remember(view) {
+            ((view as? androidx.compose.ui.window.DialogWindowProvider) ?: (view.parent as? androidx.compose.ui.window.DialogWindowProvider))?.window
+        }
         val close = androidx.compose.runtime.rememberUpdatedState(onClose)
         val textSize by animateFloatAsState(if (scrolled) 16f else 20f, tween(220), label = "headerText")
         val gap by animateFloatAsState(if (scrolled) 2f else 10f, tween(220), label = "headerGap")
         val closeSize by animateFloatAsState(if (scrolled) 36f else 44f, tween(220), label = "headerClose")
+        androidx.compose.runtime.DisposableEffect(window) { onDispose { window?.decorView?.animate()?.cancel(); window?.decorView?.translationY = 0f } }
         Column(
             Modifier.fillMaxWidth()
-                .pointerInput(Unit) {
+                .pointerInput(window) {
+                    val page = window?.decorView
+                    val closeAt = 120.dp.toPx()
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
-                        var total = 0f
+                        page?.animate()?.cancel()
+                        // Where the finger is on the screen: its place in the header plus how far the page has moved.
+                        fun onScreen(y: Float) = y + (page?.translationY ?: 0f)
+                        val start = onScreen(down.position.y)
+                        var pulled = 0f
                         try {
-                            val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, over -> change.consume(); total += over }
+                            val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, _ -> change.consume() }
                             if (drag != null) {
-                                holding = true
-                                pulled = total.coerceAtLeast(0f)
                                 verticalDrag(drag.id) { change ->
-                                    total += change.positionChange().y
-                                    pulled = total.coerceAtLeast(0f)
+                                    pulled = (onScreen(change.position.y) - start).coerceAtLeast(0f)
+                                    page?.translationY = pulled
                                     change.consume()
                                 }
-                                if (total > 110f) close.value()
+                                if (pulled > closeAt) { close.value(); return@awaitEachGesture }
                             }
                         } finally {
-                            holding = false
-                            pulled = 0f
+                            page?.animate()?.translationY(0f)?.setDuration(180)?.start()
                         }
                     }
-                }
-                .graphicsLayer { translationY = shown.coerceAtLeast(0f); alpha = 1f - (shown / 900f).coerceIn(0f, 0.5f) },
+                },
         ) {
             Box(Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 2.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(width = 44.dp, height = 5.dp).clip(RoundedCornerShape(3.dp)).background(look.soft().copy(alpha = 0.6f)))

@@ -75,4 +75,19 @@ class AiSortTest {
         assertTrue(AiSort.mixOfSongs("80s Megamix (Non-Stop)"))
         assertTrue(!AiSort.mixOfSongs("Clare To Here"))
     }
+
+    /** Wikipedia's real answer (saved 28 November 2026) for "My Little Son" Luke Kelly: The Dubliners' Drinkin' and Courtin'. */
+    @Test fun findsTheOriginalAlbumOnWikipedia() {
+        val found = Covers.parseWikiRecords(text("wikipedia_my_little_son.json"), "Come My Little Son")
+        val f = found.first()
+        assertEquals("Drinkin' and Courtin'", f.album)
+        assertEquals("The Dubliners", f.artist)
+        assertEquals("1968", f.year)
+        assertEquals("studio album", f.kind)
+        assertEquals("My Little Son", f.title)
+        assertEquals(15, f.trackNo)
+        assertEquals("Irish folk", f.genre)
+        assertTrue(f.big.startsWith("https://upload.wikimedia.org/"))
+        assertTrue(!AiSort.isCompilation(f))
+    }
 }
