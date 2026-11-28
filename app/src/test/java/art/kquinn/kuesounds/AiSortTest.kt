@@ -50,4 +50,18 @@ class AiSortTest {
         val reply = """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}"""
         assertEquals("API key not valid. Please pass a valid API key.", AiSort.saidWhy(reply))
     }
+
+    @Test fun picksGooglesNewestFlashLite() {
+        val list = """{"models":[
+          {"name":"models/gemini-2.5-flash-lite","supportedGenerationMethods":["generateContent"]},
+          {"name":"models/gemini-3.5-flash-lite","supportedGenerationMethods":["generateContent","countTokens"]},
+          {"name":"models/gemini-3.5-flash","supportedGenerationMethods":["generateContent"]},
+          {"name":"models/gemini-3.6-flash-lite-preview-11-2026","supportedGenerationMethods":["generateContent"]},
+          {"name":"models/gemini-embedding-2","supportedGenerationMethods":["embedContent"]}]}"""
+        assertEquals("gemini-3.5-flash-lite", AiSort.pickGoogle(list))
+    }
+
+    @Test fun fileNameAsWords() {
+        assertEquals("Paddy Reilly - Clare To Here", AiSort.nameWords("03 - Paddy_Reilly - Clare To Here (Live).mp3").replace(" Live", ""))
+    }
 }

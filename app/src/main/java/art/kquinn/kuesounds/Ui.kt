@@ -1560,13 +1560,13 @@ object Ui {
             Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 18.dp)) {
                 KueSettings.PanelHeader("Sort with AI", look, onClose = onClose)
                 Column(Modifier.weight(1f).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Words("AI looks each one up on Google, Wikipedia and Discogs. The ones it is sure of are written into the files. The rest wait in Check one at a time, with its answer filled in.", 15)
+                    Words("KueSounds looks each one up in Discogs, Apple Music and Deezer, and AI picks the right one and puts the names right. The ones it is sure of are written into the files. The rest wait in Check one at a time, with its answer filled in.", 15)
                     if (changing) {
                         Words("1. Get a free key", 17, bold = true)
                         Button("Get a free Google key", icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://aistudio.google.com/apikey") }
-                        Words("Sign in with your Google account, tap Create API key, then copy it. Free, no card needed. Google's AI searches Google for each one.", 13, K.Soft)
+                        Words("Sign in with your Google account, tap Create API key, then copy it. Free, no card needed.", 13, K.Soft)
                         Button("Or an OpenRouter key", main = false, icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://openrouter.ai/keys") }
-                        Words("OpenRouter: only its free models are used, so it costs nothing. KueSounds does the searching.", 13, K.Soft)
+                        Words("OpenRouter: only its free models are used, so it costs nothing.", 13, K.Soft)
                         Words("2. Paste it here", 17, bold = true)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Box(Modifier.weight(1f)) { EditField(typed) { typed = it.trim() } }

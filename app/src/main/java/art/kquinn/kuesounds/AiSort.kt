@@ -19,11 +19,13 @@ import java.util.concurrent.TimeUnit
  * have an API key for an ai search and sort"; his sources are Wikipedia, Discogs and Google's AI overview). The person
  * pastes their own key, once:
  *
- *  - A Google key (free, from aistudio.google.com): Gemini looks each one up on Google Search itself. Google's free tier
- *    includes searching (Gemini 2.5 Flash, checked on Google's pricing page 28 November 2026), so it costs nothing.
- *  - An OpenRouter key: KueSounds searches Apple, Deezer and Discogs itself (free) and a free model (":free", costs
- *    nothing) picks the right one and puts the names right. OpenRouter's own web search is never used: it charges even
- *    on free models.
+ *  - A Google key (free, from aistudio.google.com): Google's newest free Flash-Lite model. Searching Google from it is
+ *    not free for new keys (Gemini 3 models: "Not available" on the free tier, Google's pricing page, 28 November 2026;
+ *    Gemini 2.5, which had it, is closed to new users), so it is never asked to.
+ *  - An OpenRouter key: a free model (":free"). OpenRouter's own web search is never used: it charges even on free models.
+ *
+ * Either way KueSounds searches Apple, Deezer and Discogs itself (free, no key) and the AI picks the right record and
+ * puts the names right, with accents.
  *
  * The answers it is sure of, and that agree with the file, are written into the files; the rest wait in Check one at a
  * time with its answer filled in. Each one is asked once; a stop (the day's free allowance used, no Wi-Fi) carries on
@@ -165,12 +167,11 @@ object AiSort {
     /** The question for [item]; [found] is the list KueSounds found itself (for a model that can't search). */
     fun question(item: ReviewUi.Item, facts: String, found: List<Covers.Lookup>?): String = buildString {
         appendLine("You put music files right for a music library. " + if (item.album == null) "Work out which recording this song file is." else "Work out which album these files are.")
-        if (found == null) appendLine("Search Google for it (Wikipedia, Discogs, AllMusic and the like) before answering.")
         appendLine()
         append(facts)
         if (found != null) {
             appendLine()
-            appendLine("Records found for it in Apple Music, Deezer and Discogs (choose by number in \"pick\", or 0 if none is it):")
+            appendLine(if (found.isEmpty()) "Nothing was found for it in Apple Music, Deezer or Discogs: answer from what you know, with \"pick\" 0." else "Records found for it in Apple Music, Deezer and Discogs (choose by number in \"pick\", or 0 if none is it):")
             found.forEachIndexed { i, f ->
                 appendLine("${i + 1}. " + listOf(f.title, f.artist, f.album, f.year, f.genre, f.from).filter { it.isNotBlank() }.joinToString(" | "))
             }
@@ -238,22 +239,49 @@ object AiSort {
         return http.newCall(req).execute().use { r -> r.code to r.body.string() }
     }
 
-    private var googleModel = "gemini-2.5-flash"
+    private var googleModel: String? = null
+    private var freeModel: String? = null
 
     /**
-     * One ask to Google: the key in the header, else (if that is turned away) in the address, which some new "AQ." keys
-     * need; the lighter model if the usual one isn't offered.
+     * Google's newest free Flash-Lite model, from its own list for this key (Kevin, 28 November 2026: Google answered
+     * "gemini-2.5-flash-lite is no longer available to new users ... use gemini-3.5-flash-lite"). Flash-Lite for its
+     * larger free daily allowance; plain Flash if there is no Lite.
      */
-    private fun google(body: String, k: String): Pair<Int, String> {
+    fun pickGoogle(list: String): String? = runCatching {
+        val names = JsonParser.parseString(list).asJsonObject.getAsJsonArray("models").map { it.asJsonObject }
+            .filter { m -> m.getAsJsonArray("supportedGenerationMethods")?.any { it.asString == "generateContent" } == true }
+            .map { it.get("name").asString.removePrefix("models/") }
+            .filter { n -> n.startsWith("gemini-") && "flash" in n && listOf("preview", "exp", "tts", "live", "image", "audio", "embedding", "thinking").none { it in n } && !n.endsWith("-latest") }
+        fun version(n: String) = Regex("gemini-(\\d+(?:\\.\\d+)?)").find(n)?.groupValues?.get(1)?.toDoubleOrNull() ?: 0.0
+        val lite = names.filter { "flash-lite" in it }.maxByOrNull { version(it) * 1000 - it.length }
+        lite ?: names.filter { "flash-lite" !in it }.maxByOrNull { version(it) * 1000 - it.length }
+    }.getOrNull()
+
+    private fun googleModelFor(k: String): String = googleModel ?: run {
+        val list = runCatching {
+            http.newCall(Request.Builder().url("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200").header("x-goog-api-key", k).header("User-Agent", Catalogue.WHO).build())
+                .execute().use { if (it.isSuccessful) it.body.string() else null }
+        }.getOrNull()
+        (list?.let { pickGoogle(it) } ?: "gemini-3.5-flash-lite").also { googleModel = it }
+    }
+
+    /** One ask to Google: the key in the header, else (if that is turned away) in the address, which some "AQ." keys need. */
+    private fun google(text: String, k: String): Pair<Int, String> {
+        val body = JsonObject().apply {
+            add("contents", com.google.gson.JsonArray().apply {
+                add(JsonObject().apply { add("parts", com.google.gson.JsonArray().apply { add(JsonObject().apply { addProperty("text", text) }) }) })
+            })
+        }.toString()
         fun once(): Pair<Int, String> {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/$googleModel:generateContent"
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/" + googleModelFor(k) + ":generateContent"
             val first = post(url, body, "x-goog-api-key" to k)
             if (first.first != 401 && first.first != 403) return first
             val second = post(url + "?key=" + java.net.URLEncoder.encode(k, "UTF-8"), body, "X-Kue" to "1")
             return if (second.first in 200..299 || second.first == 429) second else first
         }
         var r = once()
-        if (r.first == 404 && googleModel == "gemini-2.5-flash") { googleModel = "gemini-2.5-flash-lite"; r = once() }
+        // The model taken away since it was chosen: choose again from Google's list, once.
+        if (r.first == 404 || r.first == 400 && "no longer available" in r.second) { googleModel = null; r = once() }
         return r
     }
 
@@ -261,7 +289,7 @@ object AiSort {
     fun saidWhy(reply: String): String = runCatching {
         val o = JsonParser.parseString(reply)
         val e = if (o.isJsonArray) o.asJsonArray.first().asJsonObject.getAsJsonObject("error") else o.asJsonObject.getAsJsonObject("error")
-        e.get("message").asString.lineSequence().first().take(200)
+        e.get("message").asString.lineSequence().first().take(300)
     }.getOrDefault("")
 
     /**
@@ -271,12 +299,8 @@ object AiSort {
     fun test(k: String): String? = runCatching {
         when (whose(k)) {
             "Google" -> {
-                val body = JsonObject().apply {
-                    add("contents", com.google.gson.JsonArray().apply {
-                        add(JsonObject().apply { add("parts", com.google.gson.JsonArray().apply { add(JsonObject().apply { addProperty("text", "Reply with the word OK.") }) }) })
-                    })
-                }.toString()
-                val (code, reply) = google(body, k)
+                googleModel = null
+                val (code, reply) = google("Reply with the word OK.", k)
                 if (code in 200..299) null else "Google said: " + saidWhy(reply).ifBlank { "error $code" }
             }
             "OpenRouter" -> {
@@ -287,54 +311,61 @@ object AiSort {
             else -> "That isn't a Google or OpenRouter key."
         }
     }.getOrElse { "Couldn't reach it: " + (it.message ?: it.javaClass.simpleName) }
-    private var freeModel: String? = null
+
+    /** The file name as words to search with: no ending, no track number, no signs. */
+    fun nameWords(fileName: String): String =
+        fileName.substringBeforeLast('.').replace(Regex("[_]+"), " ").replace(Regex("^\\s*\\d{1,3}\\s*[-.)]*\\s*"), "")
+            .replace(Regex("[\\[\\](){}]"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /**
+     * Records for [item] from Apple Music, Deezer and Discogs (free, no key), by its names, else by its file name. The
+     * free AI models can't search the web for nothing, so KueSounds searches and the AI chooses and tidies.
+     */
+    private fun candidates(item: ReviewUi.Item, now: Map<FieldKey, String>?): List<Covers.Lookup> {
+        val t = item.songs.first()
+        val artist = (now?.get(FieldKey.ARTIST) ?: if (item.album != null) t.albumArtist.ifBlank { t.artist } else t.artist).takeIf { it != Library.UNKNOWN_ARTIST }.orEmpty()
+        val title = Library.withoutBrackets(now?.get(FieldKey.TITLE) ?: t.title)
+        val song = item.album == null
+        val words = (if (song) "$artist $title" else artist + " " + item.album).trim()
+        var found = runCatching { Covers.lookUp(words, song, if (song) title else null) }.getOrDefault(emptyList()).filter { !it.coverOnly }
+        if (found.isEmpty() && song) {
+            val byName = nameWords(Library.realName(t))
+            if (byName.isNotBlank() && !Covers.same(byName, words)) found = runCatching { Covers.lookUp(byName, true, null) }.getOrDefault(emptyList()).filter { !it.coverOnly }
+        }
+        return found.take(8)
+    }
 
     /** Asks the AI about [item]. Throws Stop when it should not carry on (key refused, the day's allowance used). Off the main thread. */
     fun ask(item: ReviewUi.Item, now: Map<FieldKey, String>? = null, trying: (String) -> Unit = {}): Said? {
         val k = key
-        val facts = facts(item, now)
-        when (whose(k)) {
-            "Google" -> {
-                trying("Asking Google")
-                val body = JsonObject().apply {
-                    add("contents", com.google.gson.JsonArray().apply {
-                        add(JsonObject().apply { add("parts", com.google.gson.JsonArray().apply { add(JsonObject().apply { addProperty("text", question(item, facts, null)) }) }) })
-                    })
-                    add("tools", com.google.gson.JsonArray().apply { add(JsonObject().apply { add("google_search", JsonObject()) }) })
-                }.toString()
-                val (code, reply) = google(body, k)
-                checkReply(code, reply, "Google")
-                val o = jsonIn(geminiText(reply)) ?: return null
-                return said(o, item.album != null, "AI, Google search")
-            }
-            "OpenRouter" -> {
-                // KueSounds searches (free); the free model only chooses and tidies.
-                trying("Looking it up")
-                val t = item.songs.first()
-                val artist = (now?.get(FieldKey.ARTIST) ?: t.artist).takeIf { it != Library.UNKNOWN_ARTIST }.orEmpty()
-                val title = Library.withoutBrackets(now?.get(FieldKey.TITLE) ?: t.title)
-                val words = (if (item.album == null) "$artist $title" else artist + " " + item.album).trim()
-                val found = runCatching { Covers.lookUp(words, item.album == null, if (item.album == null) title else null) }.getOrDefault(emptyList()).filter { !it.coverOnly }.take(8)
-                trying("Asking the AI")
-                val model = freeModel ?: run {
-                    val list = runCatching { http.newCall(Request.Builder().url("https://openrouter.ai/api/v1/models").header("User-Agent", Catalogue.WHO).build()).execute().use { it.body.string() } }.getOrNull()
-                    pickFree(list ?: "") ?: throw Stop("OpenRouter lists no free models just now.")
-                }.also { freeModel = it }
-                val body = JsonObject().apply {
-                    addProperty("model", model)
-                    add("messages", com.google.gson.JsonArray().apply { add(JsonObject().apply { addProperty("role", "user"); addProperty("content", question(item, facts, found)) }) })
-                }.toString()
-                val (code, reply) = post("https://openrouter.ai/api/v1/chat/completions", body, "Authorization" to "Bearer $k")
-                if (code == 404 || code == 400 && "model" in reply.lowercase()) freeModel = null
-                checkReply(code, reply, "OpenRouter")
-                val o = jsonIn(openRouterText(reply)) ?: return null
-                val s = said(o, item.album != null, "AI")
-                val chosen = found.getOrNull(s.pick - 1)
-                return if (chosen != null) Said(s.look.copy(small = chosen.small, big = chosen.big, from = "AI, from " + chosen.from), s.sure, s.links, s.pick)
-                else Said(s.look.copy(from = "AI"), s.sure, s.links, s.pick)
-            }
-            else -> return null
+        val who = whose(k).ifEmpty { return null }
+        trying("Looking it up")
+        val found = candidates(item, now)
+        val q = question(item, facts(item, now), found)
+        trying("Asking the AI")
+        val text = if (who == "Google") {
+            val (code, reply) = google(q, k)
+            checkReply(code, reply, "Google")
+            geminiText(reply)
+        } else {
+            val model = freeModel ?: run {
+                val list = runCatching { http.newCall(Request.Builder().url("https://openrouter.ai/api/v1/models").header("User-Agent", Catalogue.WHO).build()).execute().use { it.body.string() } }.getOrNull()
+                pickFree(list ?: "") ?: throw Stop("OpenRouter lists no free models just now.")
+            }.also { freeModel = it }
+            val body = JsonObject().apply {
+                addProperty("model", model)
+                add("messages", com.google.gson.JsonArray().apply { add(JsonObject().apply { addProperty("role", "user"); addProperty("content", q) }) })
+            }.toString()
+            val (code, reply) = post("https://openrouter.ai/api/v1/chat/completions", body, "Authorization" to "Bearer $k")
+            if (code == 404 || code == 400 && "model" in reply.lowercase()) freeModel = null
+            checkReply(code, reply, "OpenRouter")
+            openRouterText(reply)
         }
+        val o = jsonIn(text) ?: return null
+        val s = said(o, item.album != null, "AI")
+        val chosen = found.getOrNull(s.pick - 1)
+        return if (chosen != null) Said(s.look.copy(small = chosen.small, big = chosen.big, from = "AI, from " + chosen.from), s.sure, s.links, s.pick)
+        else Said(s.look.copy(from = "AI"), s.sure, s.links, s.pick)
     }
 
     private fun checkReply(code: Int, reply: String, who: String) {
