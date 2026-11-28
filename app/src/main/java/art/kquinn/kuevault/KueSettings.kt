@@ -41,6 +41,10 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
+import androidx.compose.foundation.gestures.verticalDrag
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -119,18 +123,21 @@ object KueSettings {
         var holding by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
         val shown by animateFloatAsState(if (holding) pulled else 0f, if (holding) androidx.compose.animation.core.snap() else tween(180), label = "headerPull")
         val close = androidx.compose.runtime.rememberUpdatedState(onClose)
+        val textSize by animateFloatAsState(if (scrolled) 16f else 20f, tween(220), label = "headerText")
+        val gap by animateFloatAsState(if (scrolled) 2f else 10f, tween(220), label = "headerGap")
+        val closeSize by animateFloatAsState(if (scrolled) 36f else 44f, tween(220), label = "headerClose")
         Column(
             Modifier.fillMaxWidth()
                 .pointerInput(Unit) {
-                    androidx.compose.foundation.gestures.awaitEachGesture {
-                        val down = androidx.compose.foundation.gestures.awaitFirstDown(requireUnconsumed = false)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
                         var total = 0f
                         try {
-                            val drag = androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation(down.id) { change, over -> change.consume(); total += over }
+                            val drag = awaitVerticalTouchSlopOrCancellation(down.id) { change, over -> change.consume(); total += over }
                             if (drag != null) {
                                 holding = true
                                 pulled = total.coerceAtLeast(0f)
-                                androidx.compose.foundation.gestures.verticalDrag(drag.id) { change ->
+                                verticalDrag(drag.id) { change ->
                                     total += change.positionChange().y
                                     pulled = total.coerceAtLeast(0f)
                                     change.consume()
