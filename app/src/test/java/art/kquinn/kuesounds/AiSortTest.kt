@@ -64,4 +64,15 @@ class AiSortTest {
     @Test fun fileNameAsWords() {
         assertEquals("Paddy Reilly - Clare To Here", AiSort.nameWords("03 - Paddy_Reilly - Clare To Here (Live).mp3").replace(" Live", ""))
     }
+
+    @Test fun knowsCompilationsAndMixes() {
+        assertTrue(AiSort.compilation("The Very Best Of Foster & Allen"))
+        assertTrue(AiSort.compilation("Greatest Hits Vol. 2"))
+        assertTrue(AiSort.compilation("The Collection"))
+        assertTrue(!AiSort.compilation("A Drop Of Irish"))
+        assertTrue(!AiSort.compilation("The Town I Loved So Well"))
+        assertTrue(AiSort.mixOfSongs("Irish Party Medley"))
+        assertTrue(AiSort.mixOfSongs("80s Megamix (Non-Stop)"))
+        assertTrue(!AiSort.mixOfSongs("Clare To Here"))
+    }
 }

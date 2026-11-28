@@ -171,9 +171,11 @@ object AiSort {
         append(facts)
         if (found != null) {
             appendLine()
+            if (found.any { compilation(it.album) || it.albumArtist.equals("Various Artists", true) }) appendLine("Records marked (compilation) are not the original album: don't pick one; answer the original album from what you know, with \"pick\" 0.")
             appendLine(if (found.isEmpty()) "Nothing was found for it in Apple Music, Deezer or Discogs: answer from what you know, with \"pick\" 0." else "Records found for it in Apple Music, Deezer and Discogs (choose by number in \"pick\", or 0 if none is it):")
             found.forEachIndexed { i, f ->
-                appendLine("${i + 1}. " + listOf(f.title, f.artist, f.album, f.year, f.genre, f.from).filter { it.isNotBlank() }.joinToString(" | "))
+                appendLine("${i + 1}. " + listOf(f.title, f.artist, f.album, f.year, f.genre, f.from).filter { it.isNotBlank() }.joinToString(" | ") +
+                    if (compilation(f.album) || f.albumArtist.equals("Various Artists", true)) " (compilation)" else "")
             }
         }
         appendLine()
@@ -182,7 +184,8 @@ object AiSort {
         appendLine("Rules:")
         if (item.album == null) {
             appendLine("- title and artist: the song's real name and the artist's real name, spelt as the artist does, with accents (Sinéad, not Sinead).")
-            appendLine("- album: the album or single the song first came out on, not a compilation, unless the file name says otherwise. track and disc: its place on that album, 0 if not known.")
+            appendLine("- album: the original album the song first came out on. Never a compilation: no greatest hits, best of, collection, anthology, very best, hits or various artists album, even if that is all that was found. If it was never on an original album, give the single: album is the single's name and track is 1. track and disc: its place on that album, 0 if not known.")
+            appendLine("- If the file is a mix, medley, megamix or mash-up of several songs, sure is \"low\".")
         } else {
             appendLine("- title: leave empty. album, albumArtist and artist: the album's real name and the artist's real name, spelt as they are, with accents.")
         }
@@ -332,8 +335,19 @@ object AiSort {
             val byName = nameWords(Library.realName(t))
             if (byName.isNotBlank() && !Covers.same(byName, words)) found = runCatching { Covers.lookUp(byName, true, null) }.getOrDefault(emptyList()).filter { !it.coverOnly }
         }
-        return found.take(8)
+        // Original albums first (Kevin, 28 November 2026: "the original album song if possible and not compilation and
+        // greatest hits albums"; the single if there was no album).
+        return found.sortedBy { if (compilation(it.album) || it.albumArtist.equals("Various Artists", true)) 1 else 0 }.take(8)
     }
+
+    /** Whether an album's name is a compilation's: greatest hits, best of, collection and the like. */
+    fun compilation(album: String): Boolean =
+        Regex("greatest hits|best of|very best|\\bcollection\\b|anthology|\\bessential|\\bhits\\b|\\bgold\\b|platinum|ultimate|definitive|complete|now that'?s what|various artists|golden|favou?rites|compilation|the singles|box ?set|\\bvol(ume)?\\.? ?\\d|\\bthe best\\b", RegexOption.IGNORE_CASE)
+            .containsMatchIn(album)
+
+    /** Whether a song is a mix of several songs (medley, megamix, mash-up), which Kevin puts right himself. */
+    fun mixOfSongs(text: String): Boolean =
+        Regex("medley|megamix|mega mix|mash-? ?up|non-? ?stop|mixtape|party mix|dj mix|continuous mix", RegexOption.IGNORE_CASE).containsMatchIn(text)
 
     /** Asks the AI about [item]. Throws Stop when it should not carry on (key refused, the day's allowance used). Off the main thread. */
     fun ask(item: ReviewUi.Item, now: Map<FieldKey, String>? = null, trying: (String) -> Unit = {}): Said? {
@@ -363,7 +377,8 @@ object AiSort {
         }
         val o = jsonIn(text) ?: return null
         val s = said(o, item.album != null, "AI")
-        val chosen = found.getOrNull(s.pick - 1)
+        // A find's cover only when it is the album the AI settled on (not a compilation's cover on the original album).
+        val chosen = found.getOrNull(s.pick - 1)?.takeIf { Covers.same(it.album, s.look.album) && !compilation(it.album) }
         return if (chosen != null) Said(s.look.copy(small = chosen.small, big = chosen.big, from = "AI, from " + chosen.from), s.sure, s.links, s.pick)
         else Said(s.look.copy(from = "AI"), s.sure, s.links, s.pick)
     }
@@ -426,6 +441,13 @@ object AiSort {
                 val t = item.songs.first()
                 status = "Sorting " + (done + 1) + " of " + total + ": " + (item.album ?: t.title)
                 show(status)
+                // A mix of several songs: not asked about, left for Kevin to put right himself (28 November 2026).
+                if (item.songs.any { mixOfSongs(it.title + " " + Library.realName(it)) }) {
+                    toCheck++
+                    synchronized(answers) { answers[keyOf(item)] = Answer(null, false); saveAnswers() }
+                    done++
+                    continue
+                }
                 var said: Said? = null
                 try {
                     said = try { ask(item) } catch (x: RuntimeException) {
@@ -446,7 +468,9 @@ object AiSort {
                 if (s != null && (s.look.artist.isNotBlank() || s.look.album.isNotBlank())) {
                     val (cover, address) = runCatching { coverFor(s, item.album != null) }.getOrDefault(null to "")
                     look = s.look.copy(small = address.ifBlank { s.look.small }, big = address.ifBlank { s.look.big })
-                    if (s.sure == "high" && agrees(item, s.look) && Google.canEdit) {
+                    // Never written without asking: a compilation, or a mix of several songs (Kevin puts those right himself).
+                    val mix = item.songs.any { mixOfSongs(it.title + " " + Library.realName(it)) }
+                    if (s.sure == "high" && agrees(item, s.look) && !compilation(s.look.album) && !mix && Google.canEdit) {
                         val set = LinkedHashMap<FieldKey, String>()
                         fun put(k: FieldKey, v: String) { if (v.isNotBlank()) set[k] = v }
                         if (item.album == null) {
