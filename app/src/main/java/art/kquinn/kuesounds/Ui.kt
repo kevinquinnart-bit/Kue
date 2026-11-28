@@ -1605,6 +1605,13 @@ object Ui {
                         } else {
                             val n = remember(items, AiSort.lastResult) { AiSort.notAsked(items) }
                             if (AiSort.lastResult.isNotEmpty()) Words(AiSort.lastResult, 15)
+                            // The answers left to look over, in one list to tick and save (Kevin, 28 November 2026).
+                            val waitingAnswers = remember(items, AiSort.lastResult) { AiSort.answersFor(items).count { it.second != null } }
+                            if (waitingAnswers > 0) {
+                                var looking by remember { mutableStateOf(false) }
+                                if (looking) ReviewUi.AiAnswers(items) { looking = false }
+                                Button("Look over the AI's $waitingAnswers answers", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) { looking = true }
+                            }
                             // What Sort with AI wrote into the files, to check (Kevin, 28 November 2026).
                             val wrote = remember(AiSort.lastResult, AiSort.done) { AiSort.writtenSongs() }
                             if (wrote.isNotEmpty()) {

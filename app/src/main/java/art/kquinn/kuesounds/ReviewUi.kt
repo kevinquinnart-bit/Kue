@@ -383,4 +383,64 @@ object ReviewUi {
             }
         }
     }
+
+    /**
+     * The AI's answers in one list, to look over and save together (Kevin, 28 November 2026: 135 sorted, only 10
+     * written, the rest to save one at a time). Each shows the cover found, what it will be, and what the file says
+     * now; a tick to keep it. Untick the wrong ones, Save the rest; a tap on one opens it to change by hand.
+     */
+    @Composable
+    fun AiAnswers(items: List<Item>, onClose: () -> Unit) {
+        val context = LocalContext.current
+        val list = remember(items) { AiSort.answersFor(items).filter { it.second != null }.map { it.first to it.second!! } }
+        val ticked = remember(list) { androidx.compose.runtime.mutableStateMapOf<String, Boolean>().apply { list.forEach { (i, l) -> put(i.songs.first().id, AiSort.tickedAtFirst(i, l)) } } }
+        var open by remember { mutableStateOf<Item?>(null) }
+        open?.let { i -> FixByHandUi.Page(i.songs, if (i.songs.size == 1) null else i.album, i.why) { open = null } }
+        Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                KueSettings.PanelHeader("The AI's answers", Ui.look, onClose = onClose)
+                Ui.Words("Untick any that are wrong, then save the rest. Tap one to change it by hand.", 14, K.Soft)
+                androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(list.size, key = { list[it].first.songs.first().id }) { n ->
+                        val (item, l) = list[n]
+                        val t = item.songs.first()
+                        val id = t.id
+                        val on = ticked[id] == true
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(K.Raised)
+                                .border(1.dp, if (on) K.Accent else K.Edge, RoundedCornerShape(12.dp)).clickable { open = item }.padding(10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Box(Modifier.size(60.dp).clip(RoundedCornerShape(8.dp)).background(K.Panel), contentAlignment = Alignment.Center) {
+                                if (l.small.isNotBlank() || l.big.isNotBlank()) AsyncImage(model = l.small.ifBlank { l.big }, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                                else KueSettings.Icon(KueSettings.Icons.MUSIC, 22.dp, K.Soft, 2f)
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column(Modifier.weight(1f)) {
+                                Ui.Words(if (item.album == null) l.title else l.album, 15, bold = true)
+                                Ui.Words(listOf(l.artist, if (item.album == null) l.album else "", l.year).filter { it.isNotBlank() }.joinToString(" · "), 13, K.Accent)
+                                Ui.Words("Now: " + (item.album ?: t.title) + " · " + t.artist, 12, K.Soft)
+                            }
+                            Spacer(Modifier.width(6.dp))
+                            Box(Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = if (on) "Untick" else "Tick") { ticked[id] = !on }, contentAlignment = Alignment.Center) {
+                                KueSettings.Icon(if (on) KueSettings.Icons.BOX_TICK else KueSettings.Icons.BOX, 26.dp, if (on) K.Accent else K.Soft, 2f)
+                            }
+                        }
+                    }
+                }
+                val count = ticked.count { it.value }
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Ui.Button(if (count == 0) "None ticked" else "Save the $count ticked", icon = KueSettings.Icons.TICK, modifier = Modifier.weight(1.6f)) {
+                        if (count == 0) return@Button
+                        AiSort.saveTicked(context, list.filter { ticked[it.first.songs.first().id] == true })
+                        onClose()
+                    }
+                    Ui.Button(if (count == list.size) "Untick all" else "Tick all", main = false, modifier = Modifier.weight(1f)) {
+                        val all = count != list.size
+                        list.forEach { ticked[it.first.songs.first().id] = all }
+                    }
+                }
+            }
+        }
+    }
 }

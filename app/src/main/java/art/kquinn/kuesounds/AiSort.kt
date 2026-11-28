@@ -63,7 +63,7 @@ object AiSort {
     @Volatile private var stopWanted = false
 
     private val waiting = ArrayList<ReviewUi.Item>()
-    val hasWork: Boolean get() = synchronized(waiting) { waiting.isNotEmpty() }
+    val hasWork: Boolean get() = synchronized(waiting) { waiting.isNotEmpty() || approved.isNotEmpty() }
     val running: Boolean get() = status.isNotEmpty()
 
     /** An answer kept for Check one at a time: what was found, and whether it was sure. */
@@ -479,11 +479,94 @@ object AiSort {
     // ------------------------------------------------------------------------------------------------------------------
     // The run, in the work service, screen off or on.
 
+    /**
+     * Writes [look] into [item]'s files with [cover] (a picture, any kind) as its one picture. True when every file took
+     * it. Off the main thread.
+     */
+    private suspend fun write(context: Context, item: ReviewUi.Item, look: Covers.Lookup, cover: ByteArray?): Boolean {
+        val set = LinkedHashMap<FieldKey, String>()
+        fun put(k: FieldKey, v: String) { if (v.isNotBlank()) set[k] = v }
+        if (item.album == null) {
+            put(FieldKey.TITLE, look.title); put(FieldKey.ARTIST, look.artist)
+            if (look.trackNo > 0) put(FieldKey.TRACK, look.trackNo.toString())
+            if (look.discNo > 0) put(FieldKey.DISC_NO, look.discNo.toString())
+        }
+        put(FieldKey.ALBUM, look.album); put(FieldKey.ALBUM_ARTIST, look.albumArtist); put(FieldKey.YEAR, look.year); put(FieldKey.GENRE, look.genre)
+        val jpeg = cover?.let { FixByHandUi.asJpeg(it) }
+        val t = item.songs.first()
+        val result = runCatching { Fixer.saveByHand(context, item.songs, set, emptySet(), jpeg) }.getOrDefault("")
+        val ok = result.startsWith("Saved into the file") || result.startsWith("Saved into all")
+        Scanner.note(
+            if (ok) "AI sort wrote: " + (item.album ?: t.fileName) + " → " + look.artist + " / " + (look.title.ifBlank { look.album }) + (if (jpeg == null) " (no cover found)" else "")
+            else "AI sort: not written: " + (item.album ?: t.fileName) + ": " + result,
+        )
+        if (ok) synchronized(answers) { answers[keyOf(item)] = Answer(look, answers[keyOf(item)]?.sure ?: false, true); saveAnswers() }
+        return ok
+    }
+
+    // ------------------------------------------------------------------------------------------------------------------
+    // The AI's answers, ticked by Kevin in one list and saved together (28 November 2026: 135 sorted, only 10 written,
+    // "all done, didn't update"; the rest had to be saved one at a time).
+
+    /** [items] with the AI's answer for each (null when it had none), not yet written. */
+    fun answersFor(items: List<ReviewUi.Item>): List<Pair<ReviewUi.Item, Covers.Lookup?>> = synchronized(answers) {
+        load()
+        items.map { it to answers[keyOf(it)]?.takeIf { a -> !a.written }?.look?.takeIf { l -> l.artist.isNotBlank() || l.album.isNotBlank() } }
+    }
+
+    /** Whether an answer is ticked to start with: it has names, and isn't a compilation or a mix of songs. */
+    fun tickedAtFirst(item: ReviewUi.Item, l: Covers.Lookup?): Boolean =
+        l != null && (if (item.album == null) l.title.isNotBlank() && l.artist.isNotBlank() else l.album.isNotBlank()) &&
+            !isCompilation(l) && item.songs.none { mixOfSongs(it.title + " " + Library.realName(it)) }
+
+    private val approved = ArrayList<Pair<ReviewUi.Item, Covers.Lookup>>()
+
+    /** Saves the answers Kevin ticked into their files, in the work service. Needs the edit permission. */
+    fun saveTicked(context: Context, list: List<Pair<ReviewUi.Item, Covers.Lookup>>) {
+        init(context)
+        if (list.isEmpty()) return
+        val go = {
+            stopWanted = false
+            synchronized(waiting) { approved.clear(); approved += list }
+            total = list.size
+            done = 0
+            status = "Saving"
+            WorkService.start(context.applicationContext)
+        }
+        if (Google.canEdit) go() else Fixer.askPermission { go() }
+    }
+
+    private suspend fun runSaves(context: Context, show: (String) -> Unit) {
+        var written = 0
+        var failed = 0
+        var stopped = ""
+        try {
+            while (true) {
+                if (stopWanted) { synchronized(waiting) { approved.clear() }; stopped = "Stopped."; break }
+                if (!Net.unmetered(context)) { synchronized(waiting) { approved.clear() }; stopped = "Stopped: not on Wi-Fi."; break }
+                val (item, look) = synchronized(waiting) { if (approved.isEmpty()) null else approved.removeAt(0) } ?: break
+                status = "Saving " + (done + 1) + " of " + total + ": " + (look.title.ifBlank { look.album })
+                show(status)
+                val cover = look.big.takeIf { it.isNotBlank() }?.let { runCatching { Covers.download(it) }.getOrNull() }
+                if (write(context, item, look, cover)) written++ else failed++
+                done++
+            }
+        } finally {
+            lastResult = "Saved $written into the files" + (if (failed > 0) ", $failed couldn't be saved (in the report)" else "") + "." + if (stopped.isNotBlank()) " $stopped" else ""
+            status = ""
+        }
+    }
+
     suspend fun run(context: Context, show: (String) -> Unit) {
         init(context)
         load()
+        if (synchronized(waiting) { approved.isNotEmpty() }) runSaves(context, show)
+        if (synchronized(waiting) { waiting.isEmpty() }) return
         var written = 0
         var toCheck = 0
+        var notSure = 0
+        var notMatching = 0
+        var noAnswer = 0
         var stopped = ""
         val gap = if (whose(key) == "Google") 6500L else 3500L
         try {
@@ -517,47 +600,37 @@ object AiSort {
                     continue
                 }
                 val s = said
-                var look = s?.look
                 if (s != null && (s.look.artist.isNotBlank() || s.look.album.isNotBlank())) {
                     val (cover, address) = runCatching { coverFor(s, item.album != null) }.getOrDefault(null to "")
-                    look = s.look.copy(small = address.ifBlank { s.look.small }, big = address.ifBlank { s.look.big })
+                    val answer = s.look.copy(small = address.ifBlank { s.look.small }, big = address.ifBlank { s.look.big })
                     // Never written without asking: a compilation, or a mix of several songs (Kevin puts those right himself).
                     val mix = item.songs.any { mixOfSongs(it.title + " " + Library.realName(it)) }
-                    var wrote = false
-                    if (s.sure == "high" && agrees(item, s.look) && !isCompilation(s.look) && !mix && Google.canEdit) {
-                        val set = LinkedHashMap<FieldKey, String>()
-                        fun put(k: FieldKey, v: String) { if (v.isNotBlank()) set[k] = v }
-                        if (item.album == null) {
-                            put(FieldKey.TITLE, s.look.title); put(FieldKey.ARTIST, s.look.artist)
-                            if (s.look.trackNo > 0) put(FieldKey.TRACK, s.look.trackNo.toString())
-                            if (s.look.discNo > 0) put(FieldKey.DISC_NO, s.look.discNo.toString())
-                        }
-                        put(FieldKey.ALBUM, s.look.album); put(FieldKey.ALBUM_ARTIST, s.look.albumArtist); put(FieldKey.YEAR, s.look.year); put(FieldKey.GENRE, s.look.genre)
-                        val jpeg = cover?.let { FixByHandUi.asJpeg(it) }
-                        val result = runCatching { Fixer.saveByHand(context, item.songs, set, emptySet(), jpeg) }.getOrDefault("")
-                        if (result.startsWith("Saved into the file") || result.startsWith("Saved into all")) {
-                            written++
-                            wrote = true
-                            Scanner.note("AI sort wrote: " + (item.album ?: t.fileName) + " → " + s.look.artist + " / " + (s.look.title.ifBlank { s.look.album }) + (if (jpeg == null) " (no cover found)" else ""))
-                        } else {
-                            toCheck++
-                            Scanner.note("AI sort: not written: " + (item.album ?: t.fileName) + ": " + result)
-                        }
-                    } else toCheck++
-                    synchronized(answers) { answers[keyOf(item)] = Answer(look, s.sure == "high", wrote); saveAnswers() }
+                    synchronized(answers) { answers[keyOf(item)] = Answer(answer, s.sure == "high"); saveAnswers() }
+                    val agreed = agrees(item, s.look) && !isCompilation(s.look) && !mix
+                    if (s.sure == "high" && agreed && Google.canEdit && write(context, item, answer, cover)) written++
+                    else {
+                        toCheck++
+                        if (s.sure != "high") notSure++ else notMatching++
+                    }
                 } else {
                     toCheck++
-                    synchronized(answers) { answers[keyOf(item)] = Answer(look, false); saveAnswers() }
+                    noAnswer++
+                    synchronized(answers) { answers[keyOf(item)] = Answer(s?.look, false); saveAnswers() }
                 }
                 done++
                 kotlinx.coroutines.delay(gap)
             }
         } finally {
             lastResult = listOfNotNull(
-                if (written > 0 || toCheck > 0) "Sorted $done of $total: $written written into the files, $toCheck left for Check one at a time, with the AI's answer filled in." else null,
+                if (written > 0 || toCheck > 0) "Sorted $done of $total: $written written into the files. $toCheck for you to look over" +
+                    listOfNotNull(
+                        if (notSure > 0) "$notSure the AI wasn't sure of" else null,
+                        if (notMatching > 0) "$notMatching with names unlike the file's" else null,
+                        if (noAnswer > 0) "$noAnswer with no answer" else null,
+                    ).joinToString(", ").let { if (it.isEmpty()) "." else ": $it." } else null,
                 stopped.ifBlank { null },
             ).joinToString(" ").ifBlank { "Nothing was sorted." }
-            Scanner.note("AI sort: $written written, $toCheck to check" + if (stopped.isNotBlank()) " · $stopped" else "")
+            Scanner.note("AI sort: $written written, $toCheck to check ($notSure not sure, $notMatching unlike the file, $noAnswer no answer)" + if (stopped.isNotBlank()) " · $stopped" else "")
             status = ""
         }
     }
