@@ -41,7 +41,13 @@ class AiSortTest {
 
     @Test fun knowsWhoseKey() {
         assertEquals("Google", AiSort.whose("AIzaSyExample"))
+        assertEquals("Google", AiSort.whose("AQ.Ab8RN6Example"))
         assertEquals("OpenRouter", AiSort.whose("sk-or-v1-abc"))
         assertEquals("", AiSort.whose("hello"))
+    }
+
+    @Test fun readsGooglesReason() {
+        val reply = """{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}"""
+        assertEquals("API key not valid. Please pass a valid API key.", AiSort.saidWhy(reply))
     }
 }

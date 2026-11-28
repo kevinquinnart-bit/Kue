@@ -1549,6 +1549,9 @@ object Ui {
         val k = remember(AiSort.keyChanges) { AiSort.key }
         var typed by remember { mutableStateOf("") }
         var changing by remember { mutableStateOf(AiSort.whose(k).isEmpty()) }
+        var checkingKey by remember { mutableStateOf(false) }
+        var keySaid by remember { mutableStateOf("") }
+        val scope = rememberCoroutineScope()
         val open = { url: String ->
             runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
             Unit
@@ -1572,11 +1575,23 @@ object Ui {
                                     ?.primaryClip?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.coerceToText(ctx)?.toString().orEmpty().trim()
                             }
                         }
-                        if (typed.isNotBlank() && AiSort.whose(typed).isEmpty()) Words("That isn't a Google or OpenRouter key. A Google key starts AIza, an OpenRouter key sk-or-.", 13, K.Accent)
-                        if (AiSort.whose(typed).isNotEmpty()) Button("Use this key", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) { AiSort.key = typed; changing = false }
+                        if (typed.isNotBlank() && AiSort.whose(typed).isEmpty()) Words("That isn't a Google or OpenRouter key. A Google key starts AQ. or AIza, an OpenRouter key sk-or-.", 13, K.Accent)
+                        // Tried before it is kept, so a key that won't work says why at once, in Google's own words.
+                        if (checkingKey) Words("Checking the key…", 14, K.Accent)
+                        else if (AiSort.whose(typed).isNotEmpty()) Button("Use this key", icon = KueSettings.Icons.TICK, modifier = Modifier.fillMaxWidth()) {
+                            checkingKey = true
+                            keySaid = ""
+                            val tried = typed
+                            scope.launch {
+                                val why = withContext(Dispatchers.IO) { AiSort.test(tried) }
+                                checkingKey = false
+                                if (why == null) { AiSort.key = tried; changing = false; keySaid = "The key works." } else keySaid = why
+                            }
+                        }
+                        if (keySaid.isNotEmpty()) Words(keySaid, 14, K.Accent)
                     } else {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Words(AiSort.whose(k) + " key, ending " + k.takeLast(4), 14, K.Soft, modifier = Modifier.weight(1f))
+                            Words(AiSort.whose(k) + " key, ending " + k.takeLast(4) + if (keySaid == "The key works.") ". It works." else "", 14, K.Soft, modifier = Modifier.weight(1f))
                             Words("Change", 14, K.Accent, bold = true, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { typed = ""; changing = true }.padding(8.dp))
                         }
                         if (AiSort.running) {

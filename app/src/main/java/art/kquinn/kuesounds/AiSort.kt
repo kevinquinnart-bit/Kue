@@ -43,7 +43,9 @@ object AiSort {
 
     /** Whose key it is, from how it starts: "Google", "OpenRouter", or "" for neither. */
     fun whose(k: String): String = when {
-        k.startsWith("AIza") -> "Google"
+        // Google's keys made in AI Studio now start "AQ." (the older ones "AIza"): both are Google's (Kevin, 28 November
+        // 2026: his new key was turned away as "not a Google key").
+        k.startsWith("AIza") || k.startsWith("AQ.") -> "Google"
         k.startsWith("sk-or-") -> "OpenRouter"
         else -> ""
     }
@@ -237,6 +239,54 @@ object AiSort {
     }
 
     private var googleModel = "gemini-2.5-flash"
+
+    /**
+     * One ask to Google: the key in the header, else (if that is turned away) in the address, which some new "AQ." keys
+     * need; the lighter model if the usual one isn't offered.
+     */
+    private fun google(body: String, k: String): Pair<Int, String> {
+        fun once(): Pair<Int, String> {
+            val url = "https://generativelanguage.googleapis.com/v1beta/models/$googleModel:generateContent"
+            val first = post(url, body, "x-goog-api-key" to k)
+            if (first.first != 401 && first.first != 403) return first
+            val second = post(url + "?key=" + java.net.URLEncoder.encode(k, "UTF-8"), body, "X-Kue" to "1")
+            return if (second.first in 200..299 || second.first == 429) second else first
+        }
+        var r = once()
+        if (r.first == 404 && googleModel == "gemini-2.5-flash") { googleModel = "gemini-2.5-flash-lite"; r = once() }
+        return r
+    }
+
+    /** Google's (or OpenRouter's) own words for what went wrong, from its reply. */
+    fun saidWhy(reply: String): String = runCatching {
+        val o = JsonParser.parseString(reply)
+        val e = if (o.isJsonArray) o.asJsonArray.first().asJsonObject.getAsJsonObject("error") else o.asJsonObject.getAsJsonObject("error")
+        e.get("message").asString.lineSequence().first().take(200)
+    }.getOrDefault("")
+
+    /**
+     * Tries a key with one small ask, before it is kept: null when it works, else why not, in the service's own words.
+     * Off the main thread.
+     */
+    fun test(k: String): String? = runCatching {
+        when (whose(k)) {
+            "Google" -> {
+                val body = JsonObject().apply {
+                    add("contents", com.google.gson.JsonArray().apply {
+                        add(JsonObject().apply { add("parts", com.google.gson.JsonArray().apply { add(JsonObject().apply { addProperty("text", "Reply with the word OK.") }) }) })
+                    })
+                }.toString()
+                val (code, reply) = google(body, k)
+                if (code in 200..299) null else "Google said: " + saidWhy(reply).ifBlank { "error $code" }
+            }
+            "OpenRouter" -> {
+                val (code, reply) = http.newCall(Request.Builder().url("https://openrouter.ai/api/v1/key").header("Authorization", "Bearer $k").header("User-Agent", Catalogue.WHO).build())
+                    .execute().use { it.code to it.body.string() }
+                if (code in 200..299) null else "OpenRouter said: " + saidWhy(reply).ifBlank { "error $code" }
+            }
+            else -> "That isn't a Google or OpenRouter key."
+        }
+    }.getOrElse { "Couldn't reach it: " + (it.message ?: it.javaClass.simpleName) }
     private var freeModel: String? = null
 
     /** Asks the AI about [item]. Throws Stop when it should not carry on (key refused, the day's allowance used). Off the main thread. */
@@ -252,12 +302,7 @@ object AiSort {
                     })
                     add("tools", com.google.gson.JsonArray().apply { add(JsonObject().apply { add("google_search", JsonObject()) }) })
                 }.toString()
-                var (code, reply) = post("https://generativelanguage.googleapis.com/v1beta/models/$googleModel:generateContent", body, "x-goog-api-key" to k)
-                if (code == 404 && googleModel == "gemini-2.5-flash") {
-                    googleModel = "gemini-2.5-flash-lite"
-                    val again = post("https://generativelanguage.googleapis.com/v1beta/models/$googleModel:generateContent", body, "x-goog-api-key" to k)
-                    code = again.first; reply = again.second
-                }
+                val (code, reply) = google(body, k)
                 checkReply(code, reply, "Google")
                 val o = jsonIn(geminiText(reply)) ?: return null
                 return said(o, item.album != null, "AI, Google search")
@@ -296,11 +341,11 @@ object AiSort {
         if (code in 200..299) return
         val low = reply.lowercase()
         when {
-            code == 400 && ("api key" in low || "api_key" in low) || code == 401 || code == 403 -> throw Stop("$who didn't accept the key. Check it and paste it again.")
+            code == 400 && ("api key" in low || "api_key" in low) || code == 401 || code == 403 -> throw Stop("$who turned the key away: " + saidWhy(reply).ifBlank { "error $code" })
             code == 402 -> throw Stop("OpenRouter says the account needs credit for this. Free models need none: try again later.")
             code == 429 && ("day" in low || "daily" in low || "perday" in low || "quota" in low) -> throw Stop("$who's free allowance for today is used up. Tap Sort again tomorrow: it carries on from here.")
             code == 429 -> throw RuntimeException("busy")
-            else -> throw RuntimeException("$who said $code")
+            else -> throw RuntimeException("$who said $code " + saidWhy(reply))
         }
     }
 
