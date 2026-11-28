@@ -1560,7 +1560,7 @@ object Ui {
             Column(Modifier.fillMaxSize().background(K.Page).safeDrawingPadding().padding(start = 18.dp, end = 18.dp, bottom = 18.dp)) {
                 KueSettings.PanelHeader("Sort with AI", look, onClose = onClose)
                 Column(Modifier.weight(1f).verticalScroll(androidx.compose.foundation.rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Words("KueSounds looks each one up in Discogs, Apple Music and Deezer, and AI picks the right one and puts the names right. The ones it is sure of are written into the files. The rest wait in Check one at a time, with its answer filled in.", 15)
+                    Words("KueSounds looks each one up in Wikipedia, Discogs, Apple Music and Deezer, and AI picks the right one and puts the names right. The ones it is sure of are written into the files. The rest wait in Check one at a time, with its answer filled in.", 15)
                     if (changing) {
                         Words("1. Get a free key", 17, bold = true)
                         Button("Get a free Google key", icon = KueSettings.Icons.WEB, modifier = Modifier.fillMaxWidth()) { open("https://aistudio.google.com/apikey") }

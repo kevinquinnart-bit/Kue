@@ -90,4 +90,10 @@ class AiSortTest {
         assertTrue(f.big.startsWith("https://upload.wikimedia.org/"))
         assertTrue(!AiSort.isCompilation(f))
     }
+
+    @Test fun knowsTheLeadSingerIsInTheBand() {
+        val f = Covers.parseWikiRecords(text("wikipedia_my_little_son.json"), "Come My Little Son", "Luke Kelly").first()
+        assertEquals("The Dubliners", f.artist)
+        assertEquals("Luke Kelly", f.credits)
+    }
 }

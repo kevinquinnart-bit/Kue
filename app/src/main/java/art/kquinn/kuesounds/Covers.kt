@@ -159,6 +159,11 @@ object Covers {
         val coverOnly: Boolean = false,
         /** What kind of record it is, when the source says: "studio album", "compilation", "live album", "single". */
         val kind: String = "",
+        /**
+         * The file's own artist, when the record's page names them though the record is credited to another (Kevin, 28
+         * November 2026: old songs credited to a band's lead singer, as Luke Kelly for The Dubliners).
+         */
+        val credits: String = "",
     )
 
     fun parseItunesLookups(json: String?): List<Lookup> = runCatching {
@@ -339,7 +344,7 @@ object Covers {
      * infobox gives the record's name, artist, year, genre and kind (studio, compilation, live, single); its cover is the
      * page's picture. With [song], only pages whose track list has the song are kept, with the track's name and number.
      */
-    fun parseWikiRecords(json: String?, song: String? = null): List<Lookup> = runCatching {
+    fun parseWikiRecords(json: String?, song: String? = null, person: String? = null): List<Lookup> = runCatching {
         val pages = JsonParser.parseString(json ?: return emptyList()).asJsonObject.getAsJsonObject("query")?.getAsJsonArray("pages") ?: return emptyList()
         pages.map { it.asJsonObject }.sortedBy { it.get("index")?.asInt ?: 99 }.mapNotNull { o ->
             val text = o.getAsJsonArray("revisions")?.firstOrNull()?.asJsonObject?.getAsJsonObject("slots")?.getAsJsonObject("main")?.get("content")?.asString ?: return@mapNotNull null
@@ -376,7 +381,9 @@ object Covers {
                 else return@mapNotNull null
             }
             if (album.isBlank() && isAlbum) album = name
-            Lookup(title, artist, album, artist, year, if (isAlbum) number else 0, 0, genre, picture, picture, "Wikipedia", kind = kind)
+            // The file's artist named on a page credited to someone else: a band's member (the lead singer).
+            val named = person?.takeIf { p -> p.isNotBlank() && !sameArtist(artist, p) && text.contains(p, ignoreCase = true) }.orEmpty()
+            Lookup(title, artist, album, artist, year, if (isAlbum) number else 0, 0, genre, picture, picture, "Wikipedia", kind = kind, credits = named)
         }
     }.getOrDefault(emptyList())
 
@@ -396,12 +403,12 @@ object Covers {
     }
 
     /** Wikipedia's records for [words] (see parseWikiRecords). Off the main thread. */
-    fun wikiRecords(words: String, song: String? = null): List<Lookup> = parseWikiRecords(
+    fun wikiRecords(words: String, song: String? = null, person: String? = null): List<Lookup> = parseWikiRecords(
         get("https://en.wikipedia.org/w/api.php".toHttpUrl().newBuilder().addQueryParameter("action", "query").addQueryParameter("format", "json")
             .addQueryParameter("formatversion", "2").addQueryParameter("generator", "search").addQueryParameter("gsrsearch", words).addQueryParameter("gsrlimit", "6")
             .addQueryParameter("prop", "pageimages|revisions").addQueryParameter("piprop", "original").addQueryParameter("pilicense", "any")
             .addQueryParameter("rvprop", "content").addQueryParameter("rvslots", "main").build()),
-        song,
+        song, person,
     )
 
     /** A cover's picture. Off the main thread. */

@@ -114,13 +114,13 @@ object AiSort {
     private fun lookTo(l: Covers.Lookup) = JsonObject().apply {
         addProperty("title", l.title); addProperty("artist", l.artist); addProperty("album", l.album); addProperty("albumArtist", l.albumArtist)
         addProperty("year", l.year); addProperty("track", l.trackNo); addProperty("disc", l.discNo); addProperty("genre", l.genre)
-        addProperty("small", l.small); addProperty("big", l.big); addProperty("from", l.from); addProperty("kind", l.kind)
+        addProperty("small", l.small); addProperty("big", l.big); addProperty("from", l.from); addProperty("kind", l.kind); addProperty("credits", l.credits)
     }
 
     private fun lookFrom(o: JsonObject): Covers.Lookup {
         fun s(k: String) = o.get(k)?.takeIf { !it.isJsonNull }?.asString.orEmpty()
         return Covers.Lookup(s("title"), s("artist"), s("album"), s("albumArtist"), s("year"), s("track").toIntOrNull() ?: 0, s("disc").toIntOrNull() ?: 0,
-            s("genre"), s("small"), s("big"), s("from"), kind = s("kind"))
+            s("genre"), s("small"), s("big"), s("from"), kind = s("kind"), credits = s("credits"))
     }
 
     /** The answer kept for [item], for Check one at a time. */
@@ -194,7 +194,8 @@ object AiSort {
             if (found.any { it.from == "Wikipedia" }) appendLine("Wikipedia records name the original release and its track list: prefer a Wikipedia record marked (studio album) or (album) that has the song.")
             appendLine(if (found.isEmpty()) "Nothing was found for it in Wikipedia, Apple Music, Deezer or Discogs: answer from what you know, with \"pick\" 0." else "Records found for it (choose by number in \"pick\", or 0 if none is it):")
             found.forEachIndexed { i, f ->
-                appendLine("${i + 1}. " + listOf(f.title, f.artist, f.album, f.year, if (f.trackNo > 0) "track " + f.trackNo else "", f.genre, f.from).filter { it.isNotBlank() }.joinToString(" | ") +
+                appendLine("${i + 1}. " + listOf(f.title, f.artist, f.album, f.year, if (f.trackNo > 0) "track " + f.trackNo else "", f.genre, f.from,
+                    if (f.credits.isNotBlank()) f.credits + " is named on its page, as a member" else "").filter { it.isNotBlank() }.joinToString(" | ") +
                     when { isCompilation(f) -> " (compilation)"; f.kind.isNotBlank() -> " (" + f.kind + ")"; else -> "" })
             }
         }
@@ -203,7 +204,7 @@ object AiSort {
         appendLine(SHAPE)
         appendLine("Rules:")
         if (item.album == null) {
-            appendLine("- title: the song's name as it is on the original album's track list. artist and albumArtist: the artist that release is credited to (a band's album: the band, even if the file names its singer), spelt as they spell it, with accents (Sinéad, not Sinead).")
+            appendLine("- title: the song's name as it is on the original album's track list. artist and albumArtist: the artist that release is credited to (a band's album: the band, even if the file names its lead singer: old files often credit the singer by mistake), spelt as they spell it, with accents (Sinéad, not Sinead).")
             appendLine("- album: the original album the song first came out on. Never a compilation: no greatest hits, best of, collection, anthology, very best, hits or various artists album, even if that is all that was found. If it was never on an original album, give the single: album is the single's name and track is 1. track and disc: its place on that album, 0 if not known.")
             appendLine("- If the file is a mix, medley, megamix or mash-up of several songs, sure is \"low\".")
         } else {
@@ -352,8 +353,8 @@ object AiSort {
         val words = (if (song) "$artist $title" else artist + " " + item.album).trim()
         // Wikipedia first: it names the original release, its kind and its track list (Kevin, 28 November 2026).
         val wiki = runCatching {
-            if (song) Covers.wikiRecords("\"" + title + "\" " + artist, title).ifEmpty { Covers.wikiRecords("$title $artist song", title) }
-            else Covers.wikiRecords(item.album + " " + artist + " album").filter { Covers.same(it.album, item.album) || Library.sortName(it.album).contains(Library.sortName(item.album)) }
+            if (song) Covers.wikiRecords("\"" + title + "\" " + artist, title, artist).ifEmpty { Covers.wikiRecords("$title $artist song", title, artist) }
+            else Covers.wikiRecords(item.album + " " + artist + " album", null, artist).filter { Covers.same(it.album, item.album) || Library.sortName(it.album).contains(Library.sortName(item.album)) }
         }.getOrDefault(emptyList()).take(3)
         var found = wiki + runCatching { Covers.lookUp(words, song, if (song) title else null) }.getOrDefault(emptyList()).filter { !it.coverOnly }
         if (found.size == wiki.size && song) {
@@ -409,7 +410,7 @@ object AiSort {
         val picked = found.getOrNull(s.pick - 1)?.takeIf { Covers.same(it.album, s.look.album) }
         val chosen = picked?.takeIf { !isCompilation(it) }
         val kind = picked?.let { if (isCompilation(it)) "compilation" else it.kind }.orEmpty()
-        return if (chosen != null) Said(s.look.copy(small = chosen.small, big = chosen.big, from = "AI, from " + chosen.from, kind = kind), s.sure, s.links, s.pick)
+        return if (chosen != null) Said(s.look.copy(small = chosen.small, big = chosen.big, from = "AI, from " + chosen.from, kind = kind, credits = chosen.credits), s.sure, s.links, s.pick)
         else Said(s.look.copy(from = "AI", kind = kind), s.sure, s.links, s.pick)
     }
 
@@ -447,9 +448,13 @@ object AiSort {
             if (l.title.isBlank()) return false
             val name = Library.withoutBrackets(t.title)
             val sameName = Covers.same(Library.withoutBrackets(l.title), name) || Library.sortName(Library.realName(t)).contains(Library.sortName(Library.withoutBrackets(l.title)))
-            sameName && (artist == null || Covers.sameArtist(who, artist) || Library.sortName(Library.realName(t)).contains(Library.sortName(who)))
+            // The band's record, when the file names its lead singer and the band's page names them too (Kevin, 28
+            // November 2026: "the lead singer of a band listed as the artist. It's an error").
+            val member = artist != null && l.credits.isNotBlank() && Covers.sameArtist(l.credits, artist)
+            sameName && (artist == null || member || Covers.sameArtist(who, artist) || Library.sortName(Library.realName(t)).contains(Library.sortName(who)))
         } else {
-            l.album.isNotBlank() && (Covers.same(l.album, item.album) || artist != null && Covers.sameArtist(who, artist)) && (artist == null || Covers.sameArtist(who, artist))
+            val member = artist != null && l.credits.isNotBlank() && Covers.sameArtist(l.credits, artist)
+            l.album.isNotBlank() && (Covers.same(l.album, item.album) || artist != null && Covers.sameArtist(who, artist)) && (artist == null || member || Covers.sameArtist(who, artist))
         }
     }
 
